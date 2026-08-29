@@ -1,21 +1,26 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
 import ReportDetail from "@/src/web/ReportDetail";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { useCategories, useFeed, useNowSeconds } from "@/src/web/hooks";
-import { DEFAULT_CENTER, leafletBoundsToBounds, type Coordinates } from "@/src/web/region";
+import { DEFAULT_CENTER, distanceMetres, leafletBoundsToBounds, type Coordinates } from "@/src/web/region";
 
 const SosoMap = dynamic(() => import("@/src/web/SosoMap"), {
   ssr: false,
   loading: () => <div className="map-loading">Loading map…</div>,
 });
 
-const initialLocation: Coordinates = { latitude: DEFAULT_CENTER[0], longitude: DEFAULT_CENTER[1] };
+// Fallback only — used until real geolocation resolves, or forever if the
+// user declines it. Not "the" default location anymore.
+const fallbackLocation: Coordinates = { latitude: DEFAULT_CENTER[0], longitude: DEFAULT_CENTER[1] };
+
+/** How close the map's centre has to be to "you" for the locate button to light up. */
+const AT_LOCATION_THRESHOLD_M = 60;
 
 export default function Home() {
   const [resolved, setResolved] = useState<{ gateway: SosoGateway; mode: GatewayMode } | null>(null);
@@ -35,6 +40,71 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const { categories } = useCategories(gateway);
   const nowSeconds = useNowSeconds();
 
+  const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [isAtMyLocation, setIsAtMyLocation] = useState(false);
+  const [flyToSignal, setFlyToSignal] = useState<{ at: Coordinates; id: number } | null>(null);
+  const flyIdRef = useRef(0);
+
+  const flyTo = useCallback((at: Coordinates) => {
+    flyIdRef.current += 1;
+    setFlyToSignal({ at, id: flyIdRef.current });
+  }, []);
+
+  // A quiet attempt on load: centres the map on the user's real position if
+  // permission is already granted (or granted promptly), but never shows an
+  // error if it isn't — this is a nice-to-have first impression, not
+  // something the person explicitly asked for yet. Deliberately low accuracy:
+  // this is for a rough "which neighbourhood" centring, not the proximity
+  // gate on individual reports (a separate, high-accuracy request inside
+  // ReportForm, because getting that one wrong silently rejects a true
+  // "I am here" report).
+  useEffect(() => {
+    if (!("geolocation" in navigator)) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const loc = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+        setUserLocation(loc);
+        flyTo(loc);
+      },
+      () => {},
+      { enableHighAccuracy: false, timeout: 8000 },
+    );
+  }, [flyTo]);
+
+  /**
+   * The explicit "jump to current location" button. Unlike the quiet attempt
+   * above, a press here is a direct request, so a failure gets a visible
+   * notice instead of silently doing nothing — and accuracy is high, since
+   * the person is asking specifically to be shown exactly where they are.
+   * Always requests a fresh fix rather than reusing `userLocation`, in case
+   * they've moved since the last one.
+   */
+  function locateMe() {
+    if (!("geolocation" in navigator)) {
+      setNotice("Your browser can't share a location.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const loc = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+        setUserLocation(loc);
+        flyTo(loc);
+        setLocating(false);
+      },
+      (err) => {
+        setLocating(false);
+        setNotice(
+          err.code === err.PERMISSION_DENIED
+            ? "Location is blocked — allow it in your browser settings."
+            : "Couldn't get your location. Try again.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    );
+  }
+
   // Empty array (not null) until the user actually toggles a filter, matching
   // useFeed's own convention: null means "every category", same as no filter.
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -49,19 +119,42 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
   const [focusAt, setFocusAt] = useState<Coordinates | null>(null);
 
+  // Wherever the map is actually looking right now — derived from the
+  // viewport bounds on every pan/zoom, not just set once. This is what "Drop
+  // a pin" and "Click map or start here" target: the user's current view, not
+  // a fixed constant. A ref, not state, because updating it must never cause
+  // a re-render on every pan.
+  const mapCenter = useRef<Coordinates>(fallbackLocation);
+
   const [notice, setNotice] = useState(
     mode === "supabase" ? "Click anywhere to drop a pin ✨" : "Demo mode — pins stay on this device ✨",
   );
 
   const handleViewportChange = useCallback(
-    (bounds: ReturnType<typeof leafletBoundsToBounds>, zoom: number) => setViewport(bounds, zoom),
-    [setViewport],
+    (bounds: ReturnType<typeof leafletBoundsToBounds>, zoom: number) => {
+      const center: Coordinates = {
+        latitude: (bounds.north + bounds.south) / 2,
+        longitude: (bounds.west + bounds.east) / 2,
+      };
+      mapCenter.current = center;
+      setViewport(bounds, zoom);
+      // Only recomputed on moveend (once per pan/zoom gesture, not per
+      // frame), which is what makes a state update here fine — it's the same
+      // frequency setViewport itself already runs at.
+      setIsAtMyLocation(userLocation !== null && distanceMetres(center, userLocation) < AT_LOCATION_THRESHOLD_M);
+    },
+    [setViewport, userLocation],
   );
 
   function beginPin(at: Coordinates) {
     setDraftAt(at);
     setShowComposer(true);
     setNotice("Pin placed — now give it a type!");
+  }
+
+  /** "Drop a pin" / "Click map or start here": wherever the map is looking right now. */
+  function beginPinAtCurrentView() {
+    beginPin(mapCenter.current);
   }
 
   function selectPin(pin: Pin) {
@@ -117,6 +210,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         nowSeconds={nowSeconds}
         placing={showComposer ? draftAt : null}
         focusAt={focusAt}
+        flyToSignal={flyToSignal}
         onViewportChange={handleViewportChange}
         onMapClick={beginPin}
         onPinClick={selectPin}
@@ -136,7 +230,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         >
           {mode === "supabase" ? "● shared live" : "✦ demo · this device"}
         </button>
-        <button className="drop-pin-button" onClick={() => beginPin(initialLocation)} type="button">
+        <button className="drop-pin-button" onClick={beginPinAtCurrentView} type="button">
           <span>+</span> Drop a pin
         </button>
       </header>
@@ -146,8 +240,22 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       </p>
 
       {!showComposer && (
-        <button className="map-tap-hint" onClick={() => beginPin(initialLocation)} type="button">
+        <button className="map-tap-hint" onClick={beginPinAtCurrentView} type="button">
           <span>＋</span> Click map or start here
+        </button>
+      )}
+
+      {!showComposer && !showFeedDrawer && (
+        <button
+          className={`locate-button ${isAtMyLocation ? "active" : ""} ${locating ? "locating" : ""}`}
+          onClick={locateMe}
+          type="button"
+          aria-label="Jump to current location"
+          aria-pressed={isAtMyLocation}
+        >
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M12 2.5 3.5 20.5l8.5-4 8.5 4z" fill="currentColor" />
+          </svg>
         </button>
       )}
 

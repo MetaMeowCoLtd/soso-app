@@ -36,7 +36,7 @@ interface ReportFormProps {
   onSubmit: (input: NewPost) => Promise<Pin>;
 }
 
-type GeoState = "unknown" | "locating" | "granted" | "denied" | "unsupported";
+type GeoState = "unknown" | "locating" | "denied" | "timeout" | "unavailable" | "granted" | "unsupported";
 
 export default function ReportForm({ categories, location, onCancel, onSubmit }: ReportFormProps) {
   const [categoryKey, setCategoryKey] = useState<string | null>(null);
@@ -61,6 +61,13 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
   // Only ask for the browser's location when a selected category actually
   // needs it. Asking upfront for every visit is the kind of permission prompt
   // that gets a reflexive "block" before the user has any reason to trust it.
+  //
+  // enableHighAccuracy is deliberately true here, unlike the map's own
+  // startup geolocation. This value is what gets compared against a 150-500m
+  // radius, so a coarse cell-tower fix (often 1km+ off on mobile) can reject
+  // a report from someone standing exactly on the spot. A slower, real GPS
+  // fix is the right trade for a check that exists specifically to verify
+  // presence.
   useEffect(() => {
     if (!category?.requiresProximity || geoState !== "unknown") return;
     if (!("geolocation" in navigator)) {
@@ -73,8 +80,12 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
         setDevice({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
         setGeoState("granted");
       },
-      () => setGeoState("denied"),
-      { enableHighAccuracy: false, timeout: 8000 },
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) setGeoState("denied");
+        else if (err.code === err.TIMEOUT) setGeoState("timeout");
+        else setGeoState("unavailable");
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
   }, [category, geoState]);
 
@@ -83,10 +94,17 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
     if (category.requiresProximity) {
       if (geoState === "locating" || geoState === "unknown") return "Finding your location…";
       if (geoState === "denied") return "This needs your location. Allow it in the browser and try again.";
+      if (geoState === "timeout") return "Getting a location fix is taking a while — try again, ideally outdoors.";
+      if (geoState === "unavailable") return "Couldn't get a location fix. Try again.";
       if (geoState === "unsupported") return "Your browser can't share a location, so this type isn't available here.";
     }
     return null;
   })();
+
+  // Anything other than an outright "no geolocation API at all" is worth
+  // retrying — a timeout especially, since a second GPS attempt often
+  // succeeds where the first one was still warming up.
+  const canRetryLocation = geoState === "denied" || geoState === "timeout" || geoState === "unavailable";
 
   const canSubmit = Boolean(category && !blockedReason && !busy);
 
@@ -196,6 +214,11 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
       {(error ?? blockedReason) && (
         <div className="form-errors" role="alert">
           <p>{error ?? blockedReason}</p>
+          {!error && canRetryLocation && (
+            <button type="button" onClick={() => setGeoState("unknown")} className="composer-retry">
+              Try again
+            </button>
+          )}
         </div>
       )}
 

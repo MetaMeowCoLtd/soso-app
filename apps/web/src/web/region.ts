@@ -32,6 +32,25 @@ export function toLngLat(c: Coordinates): { lng: number; lat: number } {
   return { lng: c.longitude, lat: c.latitude };
 }
 
+/**
+ * Great-circle distance in metres. Used to decide whether the map is
+ * currently centred on the user's own location — see the "jump to current
+ * location" button in `page.tsx`, which lights up when this is small.
+ * Not precise enough for anything server-side (that's `haversineMetres` in
+ * `demo-gateway.ts`, a separate small copy for a separate purpose); this one
+ * only has to be good enough to answer "is the map roughly here right now."
+ */
+export function distanceMetres(a: Coordinates, b: Coordinates): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLng = toRad(b.longitude - a.longitude);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
 export function leafletBoundsToBounds(b: LatLngBounds): Bounds {
   return {
     west: b.getWest(),

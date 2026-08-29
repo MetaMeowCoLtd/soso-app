@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { cellCentre, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
@@ -40,6 +40,12 @@ interface SosoMapProps {
    * marker for a report that already exists.
    */
   focusAt: Coordinates | null;
+  /**
+   * Fires a fly-to whenever `id` changes. Covers both the quiet auto-centre
+   * on first location fix and the explicit "jump to current location"
+   * button — see `FlyToSignal`.
+   */
+  flyToSignal: { at: Coordinates; id: number } | null;
   onViewportChange: (bounds: ReturnType<typeof leafletBoundsToBounds>, zoom: number) => void;
   onMapClick: (at: Coordinates) => void;
   onPinClick: (pin: Pin) => void;
@@ -83,6 +89,25 @@ function FlyToDraft({ at }: { at: Coordinates | null }) {
   return null;
 }
 
+/**
+ * Flies to a location whenever `signal` changes to a new `id` — not just the
+ * first time, unlike a plain "fly once" guard would. This single mechanism
+ * drives both the quiet auto-centre on first location fix and the explicit
+ * "jump to current location" button: the caller just increments `id` each
+ * time it wants a fly to happen, whether that's once automatically or
+ * repeatedly on button presses.
+ */
+function FlyToSignal({ signal }: { signal: { at: Coordinates; id: number } | null }) {
+  const map = useMap();
+  const lastId = useRef<number | null>(null);
+  useEffect(() => {
+    if (!signal || signal.id === lastId.current) return;
+    lastId.current = signal.id;
+    map.flyTo([signal.at.latitude, signal.at.longitude], Math.max(map.getZoom(), 16), { duration: 0.6 });
+  }, [map, signal]);
+  return null;
+}
+
 const draftIcon = L.divIcon({
   className: "soso-pin-shell",
   html: '<span class="draft-pin"><span>+</span></span>',
@@ -122,6 +147,7 @@ export default function SosoMap({
   nowSeconds,
   placing,
   focusAt,
+  flyToSignal,
   onViewportChange,
   onMapClick,
   onPinClick,
@@ -169,6 +195,7 @@ export default function SosoMap({
       <ViewportWatcher onViewportChange={onViewportChange} />
       {!placing && <ClickHandler onMapClick={onMapClick} />}
       <FlyToDraft at={placing ?? focusAt} />
+      <FlyToSignal signal={flyToSignal} />
       {pinMarkers}
       {countMarkers}
       {placing && (

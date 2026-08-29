@@ -130,24 +130,59 @@ interaction loop in under a minute.
 
 ### Run against a real Supabase backend
 
-1. Create a Supabase project (or run one locally with `supabase start`, from
-   the repo root — `supabase/` there is already configured).
-2. Apply the schema:
+There are two separate paths here, and they use different commands —
+`supabase db reset` only ever touches a **local** Docker-based stack; it has
+no way to reach a hosted project at all.
+
+**Local, via `supabase start`:**
+
+1. `supabase start` (requires Docker running).
+2. `npm run db:reset` — applies every file in `supabase/migrations/` in
+   order, then `supabase/seed.sql`, against the local instance.
+3. Point `apps/web/.env.local` at the local URL/anon key `supabase start`
+   prints out.
+
+**Hosted, which is what GitHub Pages needs:**
+
+1. Create a project at supabase.com if you don't have one yet. You'll need
+   its **project ref** (the subdomain in its URL — `abcdefgh` in
+   `https://abcdefgh.supabase.co`) and its **database password** (set at
+   creation, resettable under Settings → Database).
+2. Install the Supabase CLI if it isn't already (`brew install
+   supabase/tap/supabase` on macOS), then:
 
    ```bash
-   npm run db:reset
+   supabase login
+   supabase link --project-ref <your-project-ref>
+   supabase db push --include-seed
    ```
 
-   This runs every file in `supabase/migrations/` in order, then
-   `supabase/seed.sql`, which is the actual product configuration — every
-   category's TTL, proximity rule, and body limit is a row there, not a line
-   of application code.
-3. Copy `apps/web/.env.local.example` to `apps/web/.env.local` and fill in
-   your project's URL and anon key (Supabase dashboard → Settings → API).
-4. In the Supabase dashboard, enable **Authentication → Providers →
+   `link` connects this local checkout to that specific hosted project.
+   `db push --include-seed` applies every file in `supabase/migrations/` in
+   order — including the RLS policies (see [The architecture,
+   briefly](#the-architecture-briefly) for why those aren't a separate step)
+   — then `supabase/seed.sql`, which is the actual product configuration:
+   every category's TTL, proximity rule, and body limit is a row there, not
+   a line of application code. This is the same schema, run against the
+   hosted database instead of a local one.
+
+   One thing worth knowing about `--include-seed`: it only runs the seed file
+   alongside a migration it's actually applying. If you edit `seed.sql` later
+   with no new migration to go with it, `db push --include-seed` reports
+   "up to date" and skips the seed step — running the seed SQL again at that
+   point means pasting it into the Supabase dashboard's SQL Editor directly,
+   or adding a trivial new migration to give `push` something to apply.
+
+3. If the `postgis` extension fails to enable during the push, enable it
+   manually first under Database → Extensions in the dashboard, then push
+   again.
+4. Copy `apps/web/.env.local.example` to `apps/web/.env.local` and fill in
+   that project's URL and anon key (Supabase dashboard → Settings → API).
+5. In the Supabase dashboard, enable **Authentication → Providers →
    Anonymous** — the app signs users in anonymously so posting doesn't need a
    signup flow yet (see [Known gaps](#known-gaps) for why that's temporary).
-5. `npm run dev` again.
+6. `npm run dev` again, or push to trigger the GitHub Pages workflow if
+   you're deploying rather than running locally.
 
 If any of that is misconfigured or unreachable, you'll silently get demo mode
 back rather than a broken page — see the next section.
@@ -234,6 +269,18 @@ actually branch on. A client cannot write a post directly — that's
 deliberate, and it's what "server-side validation" concretely means here: the
 web form doesn't duplicate these rules, it just submits and displays whatever
 the server decides. See `supabase/migrations/20260828000005_api.sql`.
+
+**RLS policies are ordinary migration SQL, not a separate artifact.** They
+live in `supabase/migrations/20260828000004_rls.sql`, alongside the tables
+and functions in the other five files, and `supabase db push` applies all six
+in one sequence — there's no separate command or Dashboard step to "push
+policies." The Dashboard's Authentication → Policies tab is a *view* onto
+what's already in Postgres, not an alternate way to manage them. Changing a
+policy means writing a new migration (`drop policy ...; create policy ...`,
+since Postgres has no `create policy if not exists`) and pushing again —
+editing a policy directly in the Dashboard changes the live database without
+updating the migration file, which immediately puts the repo and the hosted
+project out of sync.
 
 **The feed is polled incrementally, not refetched.** `feed_delta` takes a
 cursor and returns only what changed since it, plus a tombstone list for
