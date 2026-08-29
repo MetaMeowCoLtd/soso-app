@@ -151,8 +151,16 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       setNotice("Add Soso to your Home Screen from Safari's share menu first, then try again.");
       return;
     }
-    if (pushAvailability !== "available" || !VAPID_PUBLIC_KEY) {
+    if (pushAvailability !== "available") {
       setNotice("This browser can't receive notifications.");
+      return;
+    }
+    if (!VAPID_PUBLIC_KEY) {
+      // Distinct from the message above on purpose: this is a deployment
+      // configuration gap, not a browser or platform limitation, and the
+      // two are not distinguishable from one shared generic message.
+      // See the README's "Push notifications" setup section, step 5.
+      setNotice("Notifications aren't configured for this deployment yet.");
       return;
     }
 
