@@ -24,6 +24,9 @@ const nextConfig: NextConfig = {
   output: "export",
   basePath,
   assetPrefix: basePath ? `${basePath}/` : undefined,
+  // Browser code needs the same base path to register `/repo/sw.js` on a
+  // GitHub project page instead of accidentally registering `/sw.js`.
+  env: { NEXT_PUBLIC_BASE_PATH: basePath },
   // The image optimizer needs a running server; static export has none.
   // Irrelevant today (nothing uses next/image yet) but left in place so
   // adding an image later doesn't silently break the Pages build.

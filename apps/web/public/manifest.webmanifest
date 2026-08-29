@@ -1,0 +1,11 @@
+{
+  "name": "Soso — local buzz",
+  "short_name": "Soso",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#bddbd3",
+  "theme_color": "#00a78f",
+  "icons": [
+    { "src": "./soso-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

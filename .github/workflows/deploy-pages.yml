@@ -40,6 +40,7 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
           # Only needed for a project page (username.github.io/<repo>). Leave
           # this repo variable unset entirely if this repo IS your
           # username.github.io user page, which is served at the domain root.

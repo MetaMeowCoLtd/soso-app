@@ -45,7 +45,7 @@ This repository is the web MVP: a Next.js + Leaflet map backed by Supabase.
 | Topic groups | Not built |
 | Harassment reporting | Modelled, **shipped disabled** — needs legal review before it can go live; see the comment in `supabase/seed.sql` |
 | Photo uploads | Not built (`post_media` table exists, nothing writes to it) |
-| Push notifications | Not built (`cell_subscriptions` table exists as the intended hook) |
+| Push notifications for new pins | Implemented — standards-based Web Push; opt-in per browser installation, excludes the author |
 | Early resolution (e.g. "seats just filled up," before the TTL expires) | Not built — everything currently expires only via TTL |
 | Native iOS/Android app | Not currently in this repo — see [About the mobile app](#about-the-mobile-app) |
 
@@ -186,6 +186,129 @@ no way to reach a hosted project at all.
 
 If any of that is misconfigured or unreachable, you'll silently get demo mode
 back rather than a broken page — see the next section.
+
+## Enable push notifications
+
+Soso uses **standards-based Web Push**, not a native mobile SDK. A person taps
+**Enable alerts** in the Soso header; only then does the browser show its own
+permission prompt. If they approve, the browser gives Soso an encrypted push
+subscription. When someone else adds a pin, Supabase sends a generic, privacy-
+preserving notification to that subscription even if the app is closed.
+
+The notification intentionally says only that a category of pin was added. It
+does not contain the post body, author, address, or precise location because
+notifications can be visible on a locked screen. The person who posted a pin
+is always excluded from delivery for that pin.
+
+### Platform requirements for testers
+
+- **Desktop:** Current Chrome, Edge, Firefox, and Safari support browser
+  notifications. Open the deployed HTTPS site and select **Enable alerts**.
+- **Android:** In Chrome, install Soso using the browser’s **Install app** or
+  **Add to Home screen** action, open that installed app, and select **Enable
+  alerts**.
+- **iPhone/iPad:** Requires iOS/iPadOS 16.4 or later. Open the deployed site
+  in **Safari** (not an in-app browser), tap **Share → Add to Home Screen**,
+  open Soso from its new home-screen icon, then select **Enable alerts**. iOS
+  will not show the Web Push permission prompt from an ordinary Safari tab.
+
+`localhost` is useful for UI work but not for cross-device push tests. Use a
+real HTTPS deployment, such as GitHub Pages, before testing notifications.
+
+### One-time project setup
+
+Run these commands from the repository root after you have linked your hosted
+Supabase project as described above.
+
+1. Apply the included migration, which creates the private subscription table
+   and client-safe subscribe/unsubscribe RPCs:
+
+   ```bash
+   supabase db push
+   ```
+
+2. Generate one VAPID key pair. Keep the private key out of Git, browser
+   variables, and GitHub Actions variables:
+
+   ```bash
+   npx --yes web-push generate-vapid-keys --json
+   ```
+
+   Save the `publicKey` and `privateKey` values it prints. VAPID identifies
+   Soso to the browser push services; the same pair must remain in use while
+   subscriptions exist.
+
+3. Create a webhook secret and set the server-only Edge Function secrets. Use
+   your own email in the VAPID subject:
+
+   ```bash
+   openssl rand -hex 32
+   supabase secrets set \
+     VAPID_PUBLIC_KEY='<publicKey>' \
+     VAPID_PRIVATE_KEY='<privateKey>' \
+     VAPID_SUBJECT='mailto:you@example.com' \
+     WEBHOOK_SECRET='<random-value-from-openssl>'
+   ```
+
+4. Deploy the notification function. `--no-verify-jwt` is intentional: this
+   endpoint receives a database webhook rather than a user session, and it
+   authenticates every request using `X-Soso-Webhook-Secret` instead.
+
+   ```bash
+   supabase functions deploy notify-new-pin --no-verify-jwt
+   ```
+
+5. In the Supabase dashboard, go to **Database → Webhooks → Create a new
+   webhook** and enter:
+
+   | Field | Value |
+   | --- | --- |
+   | Name | `notify-new-pin` |
+   | Table | `public.posts` |
+   | Events | `Insert` only |
+   | HTTP method | `POST` |
+   | URL | `https://<project-ref>.supabase.co/functions/v1/notify-new-pin` |
+   | Header | `X-Soso-Webhook-Secret: <the-random-value-from-step-3>` |
+
+   Save the webhook. Never place the Supabase `service_role` key in the
+   browser, GitHub, or the webhook header; the Edge Function already receives
+   it as a server-side secret.
+
+6. Add the VAPID **public** key to your app configuration:
+
+   ```text
+   # apps/web/.env.local — local development only
+   NEXT_PUBLIC_VAPID_PUBLIC_KEY=<publicKey>
+   ```
+
+   For GitHub Pages, add `NEXT_PUBLIC_VAPID_PUBLIC_KEY` as a repository
+   **variable**, next to the existing `NEXT_PUBLIC_SUPABASE_URL` and
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY` variables, then trigger a new deployment.
+   The public key is safe to ship; only the private key must remain in
+   Supabase secrets.
+
+7. Open the deployed app on two different browser installations. In the first,
+   install it to the home screen if you are on mobile, then select **Enable
+   alerts** and approve permission. In the second, add a pin. The first should
+   receive a notification. The poster should not.
+
+### Troubleshooting push
+
+- **No Enable alerts button:** the app is in demo mode, the public VAPID key
+  is missing, or the browser does not support Web Push. Confirm the three
+  `NEXT_PUBLIC_SUPABASE_*`/`NEXT_PUBLIC_VAPID_PUBLIC_KEY` values are present
+  in the deployed build.
+- **iPhone does not prompt:** make sure the site was added to the Home Screen
+  from Safari, then open the home-screen app before tapping Enable alerts.
+- **Button says Alerts blocked:** change the notification permission in that
+  browser’s website settings, then reload Soso.
+- **Subscription works but no delivery:** inspect the `notify-new-pin` Edge
+  Function logs in Supabase. The usual causes are a missing Edge Function
+  secret, wrong webhook URL/header, or a webhook that is not limited to the
+  `INSERT` event.
+- **Works once then stops:** a browser may rotate or invalidate its push
+  endpoint. Soso deletes 404/410 endpoints automatically; the person can
+  simply enable alerts again.
 
 ### Tests and typechecking
 

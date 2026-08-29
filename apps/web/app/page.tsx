@@ -6,6 +6,7 @@ import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-c
 import ReportDetail from "@/src/web/ReportDetail";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
+import PushNotificationsButton from "@/src/web/PushNotificationsButton";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { useCategories, useFeed, useNowSeconds } from "@/src/web/hooks";
 import { DEFAULT_CENTER, distanceMetres, leafletBoundsToBounds, type Coordinates } from "@/src/web/region";
@@ -273,6 +274,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         >
           {mode === "supabase" ? "● shared live" : "✦ demo · this device"}
         </button>
+        {mode === "supabase" && <PushNotificationsButton onMessage={setNotice} />}
         <button className="drop-pin-button" onClick={beginPinAtCurrentView} type="button">
           <span>+</span> Drop a pin
         </button>
