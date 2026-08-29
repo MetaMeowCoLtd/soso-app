@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
+import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import { cellCentre, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
 import { lookOf } from "./theme";
+import { loadCuteMapStyle } from "./mapStyle";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, leafletBoundsToBounds, type Coordinates } from "./region";
 
 /**
@@ -73,8 +75,60 @@ function ViewportWatcher({
   return null;
 }
 
-function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {
-  useMapEvents({
+/**
+ * The base map. A MapLibre GL vector layer wrapped as a Leaflet layer via
+ * `@maplibre/maplibre-gl-leaflet`, rather than a plain Leaflet `<TileLayer>`
+ * of raster OSM tiles — see `mapStyle.ts` for why recolouring the map at all
+ * requires that. Every marker, click handler, and fly-to elsewhere in this
+ * file is untouched by this swap; MapLibre's layer sits in Leaflet's normal
+ * tile pane, below the marker pane, exactly where a `<TileLayer>` would.
+ */
+function CuteBaseLayer() {
+  const map = useMap();
+
+  useEffect(() => {
+    let layer: L.MaplibreGL | null = null;
+    let cancelled = false;
+    // Routed through Leaflet's own attribution control (the same mechanism
+    // `<TileLayer attribution="...">` used) rather than MapLibre's own
+    // attribution widget, so there's one attribution corner, not two
+    // differently-styled ones competing for the same spot.
+    const attribution =
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
+      '<a href="https://openfreemap.org">OpenFreeMap</a>';
+
+    void loadCuteMapStyle()
+      .then((style) => {
+        if (cancelled) return;
+        layer = maplibreGL({ style, attributionControl: false });
+        layer.addTo(map);
+        map.attributionControl.addAttribution(attribution);
+      })
+      .catch((err) => {
+        // A failed style fetch shouldn't leave a blank map — fall back to
+        // plain OSM raster tiles, which need no network round trip to a
+        // vector source at all.
+        console.warn("[soso] Falling back to plain map tiles:", err);
+        if (cancelled) return;
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          maxZoom: 19,
+        }).addTo(map);
+      });
+
+    return () => {
+      cancelled = true;
+      if (layer) {
+        map.removeLayer(layer);
+        map.attributionControl.removeAttribution(attribution);
+      }
+    };
+  }, [map]);
+
+  return null;
+}
+
+function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {  useMapEvents({
     click: (e) => onMapClick({ latitude: e.latlng.lat, longitude: e.latlng.lng }),
   });
   return null;
@@ -187,11 +241,7 @@ export default function SosoMap({
       scrollWheelZoom
       zoomControl={false}
     >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        maxZoom={19}
-      />
+      <CuteBaseLayer />
       <ViewportWatcher onViewportChange={onViewportChange} />
       {!placing && <ClickHandler onMapClick={onMapClick} />}
       <FlyToDraft at={placing ?? focusAt} />

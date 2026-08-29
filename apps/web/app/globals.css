@@ -61,4 +61,4 @@
 .map-loading { position:absolute; inset:0; display:grid; place-items:center; background:#bddbd3; color:#276153; font-size:.85rem; font-weight:800; }
 
 .soso-count-shell { background:transparent!important; border:0!important; }
-.soso-count-badge { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; border:2px solid white; background:#12302b; color:white; font-size:.78rem; font-weight:900; box-shadow:0 4px 12px rgba(15,45,38,.35); }
+.soso-count-badge { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; border:2px solid white; background:#c97b8f; color:white; font-size:.78rem; font-weight:900; box-shadow:0 4px 12px rgba(150,90,110,.35); }
