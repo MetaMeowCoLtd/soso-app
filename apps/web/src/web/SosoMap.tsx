@@ -2,12 +2,32 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
+import { setWorkerUrl } from "maplibre-gl";
 import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
 import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import { cellCentre, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
 import { lookOf } from "./theme";
 import { loadCuteMapStyle } from "./mapStyle";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, leafletBoundsToBounds, type Coordinates } from "./region";
+
+/**
+ * MapLibre GL JS v6 parses vector tiles in a Web Worker, and — unlike loading
+ * it straight from a CDN `<script type="module">` tag, where `import.meta.url`
+ * resolves correctly — it does not reliably auto-detect the worker's location
+ * when run through a bundler (webpack, Turbopack, Vite, esbuild all have this
+ * same documented limitation). Left unset, the worker silently fails to load
+ * its sibling `maplibre-gl-shared.mjs` file, and every vector tile request
+ * quietly goes nowhere: no error thrown, no data rendered, just a background
+ * colour and nothing else — which is exactly the failure this project hit.
+ *
+ * Rather than rely on webpack's asset bundling correctly co-locating the
+ * worker with that sibling file (the specific part the MapLibre docs call out
+ * as fragile even in a working setup), this points at unpkg's copy of the
+ * *exact* installed version — worker and main thread must match versions, so
+ * this string has to be kept in sync with the "maplibre-gl" version in
+ * package.json by hand. A mismatch here would reintroduce this exact bug.
+ */
+setWorkerUrl("https://unpkg.com/maplibre-gl@6.6.0/dist/maplibre-gl-worker.mjs");
 
 /**
  * The map.
