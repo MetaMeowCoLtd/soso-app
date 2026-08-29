@@ -83,8 +83,33 @@ polling strategy. See [Adding a native app later](#adding-a-native-app-later).
 
 ## Build and run
 
+If you're starting from a downloaded/unzipped copy of this project rather than
+an existing GitHub repo, do this first — skipping it is exactly what produces
+a repo with no `.github` folder and a CI run that fails looking for a lockfile
+that was never committed:
+
 ```bash
-git clone <this repo> soso && cd soso
+cd soso                 # the folder containing this README
+git init
+git branch -M main
+npm install              # generates package-lock.json — required for CI, see below
+git add -A                # -A, not a GUI drag-and-drop: dotfolders like .github/
+                           # are commonly hidden by OS file pickers and silently
+                           # left out if you drag a folder in instead
+git commit -m "Initial commit"
+git remote add origin https://github.com/<you>/<your-repo>.git
+git push -u origin main
+```
+
+`npm ci` in the GitHub Actions workflow (below) hard-requires
+`package-lock.json` to be committed — without it, CI fails immediately with a
+"Dependencies lock file is not found" error, before anything of yours even
+runs. It only needs regenerating (`npm install` again, then commit) when a
+dependency changes; ordinary code edits don't touch it.
+
+If you already have this in a git repo, skip straight to:
+
+```bash
 npm install
 ```
 
@@ -114,9 +139,9 @@ interaction loop in under a minute.
    ```
 
    This runs every file in `supabase/migrations/` in order, then
-   `supabase/seed.sql`, which is where the actual product configuration lives
-   — every category's TTL, proximity rule, and body limit is a row there, not
-   a line of application code. Worth reading on its own.
+   `supabase/seed.sql`, which is the actual product configuration — every
+   category's TTL, proximity rule, and body limit is a row there, not a line
+   of application code.
 3. Copy `apps/web/.env.local.example` to `apps/web/.env.local` and fill in
    your project's URL and anon key (Supabase dashboard → Settings → API).
 4. In the Supabase dashboard, enable **Authentication → Providers →
@@ -222,13 +247,13 @@ in the UI with no extra request: every pin already carries its own
 `packages/core` and `apps/web` share one npm workspace and one `node_modules`.
 A React Native app does not belong in that same install: React Native and
 Next.js need incompatible major versions of `react`/`react-dom`, and npm's
-hoisting will happily produce a broken tree if you ask it to satisfy both at
-once (this actually happened while building this repo — the fix was
-separating the installs, not pinning a version). If `apps/mobile` comes back,
-it should get its **own** `npm install`, consuming `packages/core` the same
-way it did before removal: plain relative filesystem imports into
-`packages/core/src`, which need no workspace symlink or module resolution at
-all.
+hoisting produces a broken tree when asked to satisfy both at once — a
+mismatched `react`/`react-dom` pair at the workspace root, which is a
+structural incompatibility between the two toolchains, not something a
+version pin fixes. If `apps/mobile` comes back, it should get its **own**
+`npm install`, consuming `packages/core` the same way it did before removal:
+plain relative filesystem imports into `packages/core/src`, which need no
+workspace symlink or module resolution at all.
 
 ## Adding a native app later
 
@@ -248,14 +273,13 @@ and worth re-deriving rather than guessing at from scratch.
 
 ## Deploying to GitHub Pages
 
-This works, and it works specifically *because* every Supabase call in this
-app already happens in the browser (`src/web/supabase.ts`, `demo-gateway.ts`)
-— there are no server components fetching data, no route handlers, no server
-actions. Next has nothing server-side to give up, which is what
-`output: "export"` in `next.config.ts` needs to be true. That setting makes
-`next build` emit a plain folder of HTML/JS/CSS (`apps/web/out`) instead of
-anything requiring a Node server — exactly what GitHub Pages, a static file
-host, can serve.
+Soso can deploy as a static export to GitHub Pages, because every Supabase
+call in the app happens in the browser (`src/web/supabase.ts`,
+`demo-gateway.ts`) — there are no server components fetching data, no route
+handlers, no server actions. `output: "export"` in `next.config.ts` turns
+`next build` into a plain folder of HTML/JS/CSS (`apps/web/out`) with no Node
+server required, which is exactly what a static file host like GitHub Pages
+serves.
 
 **One thing to decide first: user page or project page.**
 
@@ -279,7 +303,12 @@ default, so local dev is unaffected either way.
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`. If this is a project page, also add
    `NEXT_BASE_PATH` set to `/<repo-name>`. Skip all three and the site will
    simply build in demo mode, same as running it locally with no `.env.local`.
-3. Push to `main`. `.github/workflows/deploy-pages.yml` installs, runs the
+3. Make sure your code is actually pushed to GitHub, including
+   `package-lock.json` and the `.github/workflows/` folder — see [Build and
+   run](#build-and-run) above if you started from a downloaded copy rather
+   than an existing clone; that gap is the most common reason this doesn't
+   run at all. Then push to `main`. `.github/workflows/deploy-pages.yml`
+   installs, runs the
    `packages/core` test suite, builds the static export with those values
    baked in, and publishes it.
 
@@ -305,11 +334,10 @@ you've deleted it.
 are baked into the build, not read at runtime, so editing the repo variable
 alone doesn't change anything live until the next deploy.
 
-**Verified, not assumed:** both the root-page (`NEXT_BASE_PATH` unset) and
-project-page (`NEXT_BASE_PATH=/soso`) builds were run end-to-end as part of
-building this repo, and the exported HTML's asset references were checked
-byte-for-byte to confirm the `basePath` prefix landed on every one of them,
-not just asserted from documentation.
+**Both basePath configurations are verified against the actual build
+output**, not just Next's documentation: the root-page (`NEXT_BASE_PATH`
+unset) and project-page (`NEXT_BASE_PATH=/soso`) exports were built, and every
+asset reference in the exported HTML carries the correct prefix in each case.
 
 ## Known gaps
 
