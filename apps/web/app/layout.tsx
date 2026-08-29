@@ -3,14 +3,22 @@ import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 
-const basePath = process.env.NEXT_BASE_PATH ?? "";
-
 export const metadata: Metadata = {
   title: "Soso | Local reports, simply shared",
   description: "A local-first incident reporting MVP.",
-  manifest: `${basePath}/manifest.webmanifest`,
-  icons: { icon: `${basePath}/soso-icon.svg`, apple: `${basePath}/soso-icon.svg` },
-  appleWebApp: { capable: true, title: "Soso", statusBarStyle: "default" },
+  // A relative path, not "/manifest.json" — this deploys under a variable
+  // GitHub Pages subpath (see NEXT_BASE_PATH in next.config.ts), and a
+  // relative reference resolves correctly against the page's own URL either
+  // way, with no basePath templating needed.
+  manifest: "manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Soso",
+  },
+  icons: {
+    apple: "icons/apple-touch-icon.png",
+  },
 };
 
 export const viewport: Viewport = {

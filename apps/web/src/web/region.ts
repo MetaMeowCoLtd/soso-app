@@ -12,7 +12,7 @@
  */
 
 import type { LatLngBounds } from "leaflet";
-import type { Bounds } from "soso-core";
+import { cellOf, type Bounds } from "soso-core";
 
 /**
  * Web-local coordinate shape, matching Leaflet's `LatLng` field names.
@@ -49,6 +49,30 @@ export function distanceMetres(a: Coordinates, b: Coordinates): number {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/**
+ * The ~3km-by-3km block of cells around a point — one cell plus its
+ * immediate neighbours. Used for "notify me about this area": a single
+ * ~1km cell (see CELL_ZOOM in soso-core's grid.ts) reads as too narrow a
+ * radius for "near me" to feel right, so this samples a 3x3 grid of nearby
+ * points rather than exposing the grid's internal tile-packing to figure out
+ * neighbouring cells directly.
+ */
+export function nearbyCells(center: Coordinates): number[] {
+  // Roughly one cell-width in each direction at CELL_ZOOM=15. Longitude is
+  // widened by 1/cos(latitude) so the offsets stay close to square on the
+  // ground rather than compressing at higher latitudes.
+  const dLat = 0.01;
+  const dLng = 0.01 / Math.max(0.15, Math.cos((center.latitude * Math.PI) / 180));
+
+  const cells = new Set<number>();
+  for (const latOffset of [-dLat, 0, dLat]) {
+    for (const lngOffset of [-dLng, 0, dLng]) {
+      cells.add(cellOf(center.longitude + lngOffset, center.latitude + latOffset));
+    }
+  }
+  return [...cells];
 }
 
 export function leafletBoundsToBounds(b: LatLngBounds): Bounds {

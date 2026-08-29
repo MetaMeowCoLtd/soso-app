@@ -24,7 +24,7 @@ import {
   type WirePin,
   type WirePostDetail,
 } from '../domain/types';
-import type { FeedQuery, ReportReason, SosoGateway } from './gateway';
+import type { FeedQuery, PushEndpoint, ReportReason, SosoGateway } from './gateway';
 
 interface WireCategoryRow {
   key: string;
@@ -156,6 +156,21 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_reason: reason,
         p_detail: detail ?? null,
       });
+      if (error) throw toSosoError(error);
+    },
+
+    async subscribeToPush(endpoint: PushEndpoint, cellIds: readonly CellId[]): Promise<void> {
+      const { error } = await client.rpc('subscribe_to_push', {
+        p_endpoint: endpoint.endpoint,
+        p_p256dh: endpoint.p256dh,
+        p_auth: endpoint.auth,
+        p_cell_ids: [...cellIds],
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    async unsubscribeFromPush(endpoint: string): Promise<void> {
+      const { error } = await client.rpc('unsubscribe_from_push', { p_endpoint: endpoint });
       if (error) throw toSosoError(error);
     },
   };

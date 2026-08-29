@@ -6,10 +6,18 @@ import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-c
 import ReportDetail from "@/src/web/ReportDetail";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
-import PushNotificationsButton from "@/src/web/PushNotificationsButton";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { useCategories, useFeed, useNowSeconds } from "@/src/web/hooks";
-import { DEFAULT_CENTER, distanceMetres, leafletBoundsToBounds, type Coordinates } from "@/src/web/region";
+import { DEFAULT_CENTER, distanceMetres, leafletBoundsToBounds, nearbyCells, type Coordinates } from "@/src/web/region";
+import {
+  getExistingSubscription,
+  getPushAvailability,
+  subscribeToPush,
+  unsubscribeFromPush,
+  type PushAvailability,
+} from "@/src/web/push";
+
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "";
 
 const SosoMap = dynamic(() => import("@/src/web/SosoMap"), {
   ssr: false,
@@ -57,6 +65,13 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [isAtMyLocation, setIsAtMyLocation] = useState(false);
   const [flyToSignal, setFlyToSignal] = useState<{ at: Coordinates; id: number } | null>(null);
   const flyIdRef = useRef(0);
+
+  // Wherever the map is actually looking right now — derived from the
+  // viewport bounds on every pan/zoom, not just set once. This is what "Drop
+  // a pin", "Click map or start here", and the notification area target: the
+  // user's current view, not a fixed constant. A ref, not state, because
+  // updating it must never cause a re-render on every pan.
+  const mapCenter = useRef<Coordinates>(fallbackLocation);
 
   const flyTo = useCallback((at: Coordinates) => {
     flyIdRef.current += 1;
@@ -117,6 +132,50 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     );
   }
 
+  // Notifications. Availability is computed once — it can only change if the
+  // person installs the app mid-session (iOS: adds it to the Home Screen
+  // while this tab is still open), which isn't worth polling for.
+  const [pushAvailability] = useState<PushAvailability>(() =>
+    typeof window === "undefined" ? "unsupported" : getPushAvailability(),
+  );
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    if (mode !== "supabase" || pushAvailability !== "available") return;
+    void getExistingSubscription().then((sub) => setPushSubscribed(sub !== null));
+  }, [mode, pushAvailability]);
+
+  async function toggleNotifications() {
+    if (pushAvailability === "ios-needs-install") {
+      setNotice("Add Soso to your Home Screen from Safari's share menu first, then try again.");
+      return;
+    }
+    if (pushAvailability !== "available" || !VAPID_PUBLIC_KEY) {
+      setNotice("This browser can't receive notifications.");
+      return;
+    }
+
+    setPushBusy(true);
+    try {
+      if (pushSubscribed) {
+        const endpoint = await unsubscribeFromPush();
+        if (endpoint) await gateway.unsubscribeFromPush(endpoint);
+        setPushSubscribed(false);
+        setNotice("Notifications turned off.");
+      } else {
+        const sub = await subscribeToPush(VAPID_PUBLIC_KEY);
+        await gateway.subscribeToPush(sub, nearbyCells(mapCenter.current));
+        setPushSubscribed(true);
+        setNotice("You'll be notified about new pins near here! 🔔");
+      }
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Couldn't update notifications.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   // Empty array (not null) until the user actually toggles a filter, matching
   // useFeed's own convention: null means "every category", same as no filter.
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -134,13 +193,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
   const [focusAt, setFocusAt] = useState<Coordinates | null>(null);
-
-  // Wherever the map is actually looking right now — derived from the
-  // viewport bounds on every pan/zoom, not just set once. This is what "Drop
-  // a pin" and "Click map or start here" target: the user's current view, not
-  // a fixed constant. A ref, not state, because updating it must never cause
-  // a re-render on every pan.
-  const mapCenter = useRef<Coordinates>(fallbackLocation);
 
   const [notice, setNotice] = useState(
     mode === "supabase" ? "Click anywhere to drop a pin ✨" : "Demo mode — pins stay on this device ✨",
@@ -274,7 +326,19 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         >
           {mode === "supabase" ? "● shared live" : "✦ demo · this device"}
         </button>
-        {mode === "supabase" && <PushNotificationsButton onMessage={setNotice} />}
+        {mode === "supabase" && pushAvailability !== "unsupported" && (
+          <button
+            className={`notify-button ${pushSubscribed ? "active" : ""}`}
+            onClick={() => void toggleNotifications()}
+            type="button"
+            disabled={pushBusy}
+            aria-pressed={pushSubscribed}
+            aria-label={pushSubscribed ? "Turn off notifications" : "Get notified about pins near here"}
+            title={pushSubscribed ? "Notifications on" : "Get notified about pins near here"}
+          >
+            {pushSubscribed ? "🔔" : "🔕"}
+          </button>
+        )}
         <button className="drop-pin-button" onClick={beginPinAtCurrentView} type="button">
           <span>+</span> Drop a pin
         </button>

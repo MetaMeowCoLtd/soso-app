@@ -1,155 +1,157 @@
 # Soso
 
-Soso is a location-first social platform for practical local reporting: what's
-happening right now, at a specific place, until it isn't relevant anymore.
-Every post — an accident, a lane closure, a lost wallet, a table opening up —
-is modelled the same way: **something is true, at a place, until a time.** That
-one idea is what makes expiry, per-category lifetimes, and a small working set
-fall out of the schema instead of being bolted on.
+Soso is a location-based reporting platform. Reports are location- and
+time-bound: an accident, a lane closure, a lost item, or a table opening up
+at a cafe. Every report follows the same model: a claim, tied to a location,
+valid until a defined expiry. This model is what allows expiry, per-category
+lifetimes, and a bounded working data set to be schema properties rather than
+application-level logic.
 
-This repository is the web MVP: a Next.js + Leaflet map backed by Supabase.
+This repository contains the web client: a Next.js and Leaflet map backed by
+Supabase.
 
 > This is a development-stage application, not an emergency service. For
-> immediate danger, use local emergency services.
+> immediate danger, contact local emergency services.
 
-## What it is
+## Overview
 
-- A full-screen map. Click anywhere to drop a pin; click an existing pin (or a
-  row in the local-buzz drawer) to see its detail and confirm or dispute it.
-- Reports carry a server-assigned lifetime and disappear on their own —
-  nothing needs to be manually marked "resolved."
-- Every category's rules — how long a post lives, whether it needs a
-  description, whether the poster has to actually be there — are configured in
-  the database, not in application code. Enabling or retiring a category is a
-  data change, not a deploy.
-- Runs with **no Supabase project at all**: if the backend is unreachable or
-  unconfigured, the app falls back to a local demo mode automatically. See
-  [Demo mode](#demo-mode) below.
+- A full-screen map. Clicking anywhere opens the report composer. Clicking an
+  existing pin, or a row in the local updates panel, opens its detail view
+  with corroboration and reporting controls.
+- Reports have a server-assigned lifetime and expire automatically. There is
+  no manual "resolved" state.
+- Category behavior (lifetime, whether a description is required, whether the
+  reporter must be physically present) is defined in database configuration,
+  not application code. Enabling or disabling a category is a data change,
+  not a deployment.
+- The application runs without a Supabase project. If the backend is
+  unreachable or unconfigured, the client falls back to a local demo mode
+  automatically. See [Demo mode](#demo-mode).
 
-## Features and their status
+## Features and status
 
 | Feature | Status |
 | --- | --- |
 | Map with click-to-report | Implemented |
 | Incident reporting (accident, hazard, crowding, outage) | Implemented |
-| Construction / closures | Implemented |
-| Lost & found | Implemented |
-| Seat availability (restaurant/cafe) | Implemented |
-| Per-category expiry (TTL) | Implemented — server-assigned, client cannot extend it |
-| Server-side validation (proximity, rate limits, body length, subtype) | Implemented — enforced in Postgres, not just the form |
-| Corroboration ("still here" / "not true") and auto-hide on disputes | Implemented |
-| Reporting a post (flagging for review) | Implemented — accepted, no moderator workflow behind it yet |
+| Construction and closures | Implemented |
+| Lost and found | Implemented |
+| Seat availability (restaurant, cafe) | Implemented |
+| Per-category expiry (TTL) | Implemented. Server-assigned; the client cannot extend it. |
+| Server-side validation (proximity, rate limits, body length, subtype) | Implemented. Enforced in Postgres, not in the client. |
+| Corroboration ("still here" / "not true") with auto-hide on disputes | Implemented |
+| Post reporting (flagging for review) | Implemented. Reports are recorded; no moderator workflow exists yet. |
 | Local demo mode (no backend required) | Implemented |
-| Polls ("where should we eat tonight?") | Modelled, disabled — needs its own options/votes tables |
-| Local news / official notices | Modelled, disabled |
-| Topic groups | Not built |
-| Harassment reporting | Modelled, **shipped disabled** — needs legal review before it can go live; see the comment in `supabase/seed.sql` |
-| Photo uploads | Not built (`post_media` table exists, nothing writes to it) |
-| Push notifications for new pins | Implemented — standards-based Web Push; opt-in per browser installation, excludes the author |
-| Early resolution (e.g. "seats just filled up," before the TTL expires) | Not built — everything currently expires only via TTL |
-| Native iOS/Android app | Not currently in this repo — see [About the mobile app](#about-the-mobile-app) |
+| Polls | Modeled, disabled. Requires separate options/votes tables. |
+| Local news and official notices | Modeled, disabled |
+| Topic groups | Not implemented |
+| Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
+| Photo uploads | Not implemented. The `post_media` table exists; nothing writes to it. |
+| Push notifications | Implemented, not verified end-to-end. See [Push notifications](#push-notifications). |
+| Early resolution (for example, marking seats full before TTL expiry) | Not implemented. All reports currently expire only via TTL. |
+| Native iOS/Android application | Not present in this repository. See [Platforms](#platforms). |
 
 ## Platforms
 
-**Web (this repo, primary target).** Next.js 15 + React 19 + Leaflet, in
-`apps/web`. Runs in any modern desktop or mobile browser. This is the fast
-iteration surface: no build queue, no store review, no native toolchain.
+**Web (this repository).** Next.js 15, React 19, and Leaflet, in `apps/web`.
+Runs in any modern desktop or mobile browser. This is the primary
+development target: no build queue, no store review process, no native
+toolchain.
 
-**iOS / Android.** Not present in this repository right now. An earlier pass
-built a working Expo + `react-native-maps` app against the same backend, and
-it worked — typechecked, tested, built — but it's been removed rather than
-maintained alongside a web app that's still actively changing shape. The
-architecture that made that possible is still here and unchanged:
+**iOS and Android.** Not present in this repository. An earlier
+implementation used Expo and `react-native-maps` against the same backend. It
+passed type checking, its test suite, and a production build. It was removed
+to avoid maintaining two active clients while the web client's UI was still
+changing frequently. The architecture that supported it is unchanged:
 
-- `packages/core` (domain logic, the `SosoGateway` port, the Supabase adapter,
-  the polling feed controller) has zero React, zero DOM, and zero React Native
-  in it. It's plain TypeScript.
-- Every platform-specific thing — the map component, hooks, the demo-mode
-  fallback — lives under that platform's own `apps/*` folder and consumes
+- `packages/core` (domain logic, the `SosoGateway` interface, the Supabase
+  adapter, the incremental feed controller) contains no React, DOM, or React
+  Native dependencies. It is platform-independent TypeScript.
+- Platform-specific code (map rendering, framework bindings, fallback
+  behavior) lives under each platform's own `apps/*` directory and depends on
   `packages/core` as its only shared dependency.
 
-Rebuilding the mobile app later means creating `apps/mobile` and writing a
-map/composer/detail view against the same `SosoGateway` interface `apps/web`
-already uses — not re-deriving the schema, the validation rules, or the
-polling strategy. See [Adding a native app later](#adding-a-native-app-later).
+Reintroducing a mobile client means creating `apps/mobile` and implementing a
+map, composer, and detail view against the existing `SosoGateway` interface,
+the same interface `apps/web` uses. The schema, validation rules, and polling
+strategy do not need to be re-derived. See [Native application
+support](#native-application-support).
 
 ## Prerequisites
 
-- **Node.js 20 or later.** Check with `node --version`.
-- **A Supabase account** (free tier is enough) — optional. Without one, the
-  app runs in local demo mode; see below.
-- **The Supabase CLI**, only if you want to run the real backend locally
-  instead of a hosted project: [supabase.com/docs/guides/cli](https://supabase.com/docs/guides/cli).
+- Node.js 20 or later. Verify with `node --version`.
+- A Supabase account (the free tier is sufficient). Optional: without one,
+  the application runs in local demo mode.
+- The Supabase CLI, required only to run the backend locally instead of
+  against a hosted project: <https://supabase.com/docs/guides/cli>.
 
-## Build and run
+## Installation
 
-If you're starting from a downloaded/unzipped copy of this project rather than
-an existing GitHub repo, do this first — skipping it is exactly what produces
-a repo with no `.github` folder and a CI run that fails looking for a lockfile
-that was never committed:
+If this project was obtained as a downloaded archive rather than cloned from
+an existing Git repository, initialize one first. Skipping this step is the
+most common cause of a repository missing its `.github` directory, or a CI
+run failing because `package-lock.json` was never committed:
 
 ```bash
-cd soso                 # the folder containing this README
+cd soso                 # the directory containing this README
 git init
 git branch -M main
-npm install              # generates package-lock.json — required for CI, see below
-git add -A                # -A, not a GUI drag-and-drop: dotfolders like .github/
-                           # are commonly hidden by OS file pickers and silently
-                           # left out if you drag a folder in instead
+npm install              # generates package-lock.json, required for CI
+git add -A                # -A, not a file picker: dotfolders such as .github/
+                           # are commonly excluded by GUI drag-and-drop
 git commit -m "Initial commit"
 git remote add origin https://github.com/<you>/<your-repo>.git
 git push -u origin main
 ```
 
-`npm ci` in the GitHub Actions workflow (below) hard-requires
-`package-lock.json` to be committed — without it, CI fails immediately with a
-"Dependencies lock file is not found" error, before anything of yours even
-runs. It only needs regenerating (`npm install` again, then commit) when a
-dependency changes; ordinary code edits don't touch it.
+The GitHub Actions workflow runs `npm ci`, which requires
+`package-lock.json` to be committed. Without it, CI fails immediately with a
+"Dependencies lock file is not found" error. The lockfile only needs
+regenerating (`npm install`, then commit) when a dependency changes;
+ordinary code edits do not affect it.
 
-If you already have this in a git repo, skip straight to:
+If the repository is already set up, install dependencies directly:
 
 ```bash
 npm install
 ```
 
-That one `npm install` covers `packages/core` and `apps/web` together — they
-share a single npm workspace (see [Why the workspace only has two
-members](#why-the-workspace-only-has-two-members)).
+This single command installs dependencies for both `packages/core` and
+`apps/web`, which share one npm workspace. See [Monorepo
+structure](#monorepo-structure) for why `apps/mobile` is not part of the same
+workspace.
 
-### Run without a backend (fastest path)
+### Running without a backend
 
 ```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`. With no `.env.local`, the app drops straight
-into demo mode — a few seeded reports near Tokyo Station, fully interactive,
-persisted to your browser's `localStorage`. Good enough to look at the whole
-interaction loop in under a minute.
+Open `http://localhost:3000`. With no `.env.local` present, the application
+starts in demo mode: seeded reports near Tokyo Station, fully interactive,
+persisted to the browser's `localStorage`.
 
-### Run against a real Supabase backend
+### Running against a Supabase backend
 
-There are two separate paths here, and they use different commands —
-`supabase db reset` only ever touches a **local** Docker-based stack; it has
-no way to reach a hosted project at all.
+There are two configurations, using different commands. `supabase db reset`
+only affects a local Docker-based stack and cannot reach a hosted project.
 
-**Local, via `supabase start`:**
+**Local, using `supabase start`:**
 
-1. `supabase start` (requires Docker running).
-2. `npm run db:reset` — applies every file in `supabase/migrations/` in
-   order, then `supabase/seed.sql`, against the local instance.
-3. Point `apps/web/.env.local` at the local URL/anon key `supabase start`
-   prints out.
+1. Run `supabase start` (requires Docker).
+2. Run `npm run db:reset`. This applies every file in `supabase/migrations/`
+   in order, then `supabase/seed.sql`, against the local instance.
+3. Set `apps/web/.env.local` to the local URL and anon key printed by
+   `supabase start`.
 
-**Hosted, which is what GitHub Pages needs:**
+**Hosted (required for GitHub Pages deployment):**
 
-1. Create a project at supabase.com if you don't have one yet. You'll need
-   its **project ref** (the subdomain in its URL — `abcdefgh` in
-   `https://abcdefgh.supabase.co`) and its **database password** (set at
-   creation, resettable under Settings → Database).
-2. Install the Supabase CLI if it isn't already (`brew install
-   supabase/tap/supabase` on macOS), then:
+1. Create a project at supabase.com if one does not already exist. Note its
+   project reference (the subdomain in its URL, for example `abcdefgh` in
+   `https://abcdefgh.supabase.co`) and its database password (set at
+   creation; resettable under Settings > Database).
+2. Install the Supabase CLI if not already installed (`brew install
+   supabase/tap/supabase` on macOS), then run:
 
    ```bash
    supabase login
@@ -157,395 +159,411 @@ no way to reach a hosted project at all.
    supabase db push --include-seed
    ```
 
-   `link` connects this local checkout to that specific hosted project.
-   `db push --include-seed` applies every file in `supabase/migrations/` in
-   order — including the RLS policies (see [The architecture,
-   briefly](#the-architecture-briefly) for why those aren't a separate step)
-   — then `supabase/seed.sql`, which is the actual product configuration:
-   every category's TTL, proximity rule, and body limit is a row there, not
-   a line of application code. This is the same schema, run against the
-   hosted database instead of a local one.
+   `link` connects the local checkout to the hosted project. `db push
+   --include-seed` applies every file in `supabase/migrations/` in order,
+   including the RLS policies (see [Architecture](#architecture) for why
+   these are not a separate deployment step), then `supabase/seed.sql`,
+   which defines the product configuration: each category's TTL, proximity
+   requirement, and body length limit as data, not code.
 
-   One thing worth knowing about `--include-seed`: it only runs the seed file
-   alongside a migration it's actually applying. If you edit `seed.sql` later
-   with no new migration to go with it, `db push --include-seed` reports
-   "up to date" and skips the seed step — running the seed SQL again at that
-   point means pasting it into the Supabase dashboard's SQL Editor directly,
-   or adding a trivial new migration to give `push` something to apply.
+   Note on `--include-seed`: it runs the seed file only alongside a
+   migration it is actively applying. Editing `seed.sql` without an
+   accompanying new migration causes `db push --include-seed` to report "up
+   to date" and skip seeding. In that case, apply the seed SQL directly in
+   the Supabase dashboard's SQL Editor, or add a trivial new migration to
+   give `push` something to apply.
 
 3. If the `postgis` extension fails to enable during the push, enable it
-   manually first under Database → Extensions in the dashboard, then push
-   again.
-4. Copy `apps/web/.env.local.example` to `apps/web/.env.local` and fill in
-   that project's URL and anon key (Supabase dashboard → Settings → API).
-5. In the Supabase dashboard, enable **Authentication → Providers →
-   Anonymous** — the app signs users in anonymously so posting doesn't need a
-   signup flow yet (see [Known gaps](#known-gaps) for why that's temporary).
-6. `npm run dev` again, or push to trigger the GitHub Pages workflow if
-   you're deploying rather than running locally.
+   manually under Database > Extensions in the dashboard first, then retry.
+4. Copy `apps/web/.env.local.example` to `apps/web/.env.local` and set the
+   project's URL and anon key (Supabase dashboard > Settings > API).
+5. In the Supabase dashboard, enable Authentication > Providers > Anonymous.
+   The application signs users in anonymously to allow posting without a
+   signup flow. See [Known limitations](#known-limitations) regarding this
+   approach.
+6. Run `npm run dev`, or push to trigger the GitHub Pages workflow if
+   deploying rather than running locally.
 
-If any of that is misconfigured or unreachable, you'll silently get demo mode
-back rather than a broken page — see the next section.
+If the backend is misconfigured or unreachable, the application falls back
+to demo mode rather than failing. See [Demo mode](#demo-mode).
 
-## Enable push notifications
-
-Soso uses **standards-based Web Push**, not a native mobile SDK. A person taps
-**Enable alerts** in the Soso header; only then does the browser show its own
-permission prompt. If they approve, the browser gives Soso an encrypted push
-subscription. When someone else adds a pin, Supabase sends a generic, privacy-
-preserving notification to that subscription even if the app is closed.
-
-The notification intentionally says only that a category of pin was added. It
-does not contain the post body, author, address, or precise location because
-notifications can be visible on a locked screen. The person who posted a pin
-is always excluded from delivery for that pin.
-
-### Platform requirements for testers
-
-- **Desktop:** Current Chrome, Edge, Firefox, and Safari support browser
-  notifications. Open the deployed HTTPS site and select **Enable alerts**.
-- **Android:** In Chrome, install Soso using the browser’s **Install app** or
-  **Add to Home screen** action, open that installed app, and select **Enable
-  alerts**.
-- **iPhone/iPad:** Requires iOS/iPadOS 16.4 or later. Open the deployed site
-  in **Safari** (not an in-app browser), tap **Share → Add to Home Screen**,
-  open Soso from its new home-screen icon, then select **Enable alerts**. iOS
-  will not show the Web Push permission prompt from an ordinary Safari tab.
-
-`localhost` is useful for UI work but not for cross-device push tests. Use a
-real HTTPS deployment, such as GitHub Pages, before testing notifications.
-
-### One-time project setup
-
-Run these commands from the repository root after you have linked your hosted
-Supabase project as described above.
-
-1. Apply the included migration, which creates the private subscription table
-   and client-safe subscribe/unsubscribe RPCs:
-
-   ```bash
-   supabase db push
-   ```
-
-2. Generate one VAPID key pair. Keep the private key out of Git, browser
-   variables, and GitHub Actions variables:
-
-   ```bash
-   npx --yes web-push generate-vapid-keys --json
-   ```
-
-   Save the `publicKey` and `privateKey` values it prints. VAPID identifies
-   Soso to the browser push services; the same pair must remain in use while
-   subscriptions exist.
-
-3. Create a webhook secret and set the server-only Edge Function secrets. Use
-   your own email in the VAPID subject:
-
-   ```bash
-   openssl rand -hex 32
-   supabase secrets set \
-     VAPID_PUBLIC_KEY='<publicKey>' \
-     VAPID_PRIVATE_KEY='<privateKey>' \
-     VAPID_SUBJECT='mailto:you@example.com' \
-     WEBHOOK_SECRET='<random-value-from-openssl>'
-   ```
-
-4. Deploy the notification function. `--no-verify-jwt` is intentional: this
-   endpoint receives a database webhook rather than a user session, and it
-   authenticates every request using `X-Soso-Webhook-Secret` instead.
-
-   ```bash
-   supabase functions deploy notify-new-pin --no-verify-jwt
-   ```
-
-5. In the Supabase dashboard, go to **Database → Webhooks → Create a new
-   webhook** and enter:
-
-   | Field | Value |
-   | --- | --- |
-   | Name | `notify-new-pin` |
-   | Table | `public.posts` |
-   | Events | `Insert` only |
-   | HTTP method | `POST` |
-   | URL | `https://<project-ref>.supabase.co/functions/v1/notify-new-pin` |
-   | Header | `X-Soso-Webhook-Secret: <the-random-value-from-step-3>` |
-
-   Save the webhook. Never place the Supabase `service_role` key in the
-   browser, GitHub, or the webhook header; the Edge Function already receives
-   it as a server-side secret.
-
-6. Add the VAPID **public** key to your app configuration:
-
-   ```text
-   # apps/web/.env.local — local development only
-   NEXT_PUBLIC_VAPID_PUBLIC_KEY=<publicKey>
-   ```
-
-   For GitHub Pages, add `NEXT_PUBLIC_VAPID_PUBLIC_KEY` as a repository
-   **variable**, next to the existing `NEXT_PUBLIC_SUPABASE_URL` and
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY` variables, then trigger a new deployment.
-   The public key is safe to ship; only the private key must remain in
-   Supabase secrets.
-
-7. Open the deployed app on two different browser installations. In the first,
-   install it to the home screen if you are on mobile, then select **Enable
-   alerts** and approve permission. In the second, add a pin. The first should
-   receive a notification. The poster should not.
-
-### Troubleshooting push
-
-- **No Enable alerts button:** the app is in demo mode, the public VAPID key
-  is missing, or the browser does not support Web Push. Confirm the three
-  `NEXT_PUBLIC_SUPABASE_*`/`NEXT_PUBLIC_VAPID_PUBLIC_KEY` values are present
-  in the deployed build.
-- **iPhone does not prompt:** make sure the site was added to the Home Screen
-  from Safari, then open the home-screen app before tapping Enable alerts.
-- **Button says Alerts blocked:** change the notification permission in that
-  browser’s website settings, then reload Soso.
-- **Subscription works but no delivery:** inspect the `notify-new-pin` Edge
-  Function logs in Supabase. The usual causes are a missing Edge Function
-  secret, wrong webhook URL/header, or a webhook that is not limited to the
-  `INSERT` event.
-- **Works once then stops:** a browser may rotate or invalidate its push
-  endpoint. Soso deletes 404/410 endpoints automatically; the person can
-  simply enable alerts again.
-
-### Tests and typechecking
+### Tests and type checking
 
 ```bash
-npm test         # packages/core — 46 tests, pure logic, no database needed
-npm run typecheck # packages/core and apps/web together
-npm run build     # production build of apps/web
+npm test          # packages/core: 46 tests, pure logic, no database required
+npm run typecheck  # packages/core and apps/web
+npm run build      # production build of apps/web
 ```
 
-Nothing in `packages/core`'s test suite touches a network or a database. The
-SQL itself is validated for syntax with a real Postgres parser as part of
-development, but **has not been executed against a live instance** — running
-`npm run db:reset` against a real project is the first real test of it. Budget
-for fixing something on that first run.
+The `packages/core` test suite does not touch a network or a database. SQL
+migrations are validated for syntax using a Postgres parser during
+development but have not been executed against a live instance. Running
+`npm run db:reset` against a real project is the first execution of this
+schema; treat it as a validation step, not a formality.
 
 ## Demo mode
 
-`apps/web/src/web/bootstrap.ts` decides once, at startup, which backend to
-use. If `NEXT_PUBLIC_SUPABASE_URL` / `..._ANON_KEY` are missing, or a
-connection attempt to them fails or times out (6 seconds), it falls back to
-`apps/web/src/web/demo-gateway.ts` — a second, complete implementation of the
-exact same `SosoGateway` interface the real Supabase adapter implements,
-backed by `localStorage` instead of Postgres.
+`apps/web/src/web/bootstrap.ts` determines, once at startup, which backend
+implementation to use. If `NEXT_PUBLIC_SUPABASE_URL` or
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` are missing, or a connection attempt times
+out after six seconds, the application falls back to
+`apps/web/src/web/demo-gateway.ts`, a complete second implementation of the
+`SosoGateway` interface backed by `localStorage` instead of Postgres.
 
-Every screen in the app is written against that interface and has no idea
-which implementation answered it. That's the reason this was cheap to add:
-the port/adapter split wasn't done in anticipation of a demo mode
-specifically, but it's exactly the kind of thing that split is for.
+Every screen in the application depends on the `SosoGateway` interface and
+has no knowledge of which implementation is active. This is a direct
+consequence of the port/adapter separation used throughout the codebase, not
+a feature designed specifically for demo mode.
 
-What demo mode gets right:
+Behavior matched to the real backend:
 
-- The same five enabled categories, with the same TTLs, proximity radii, body
-  limits, and subtypes — hand-mirrored from `supabase/seed.sql` (see the
-  warning comment at the top of `demo-gateway.ts`: there's nothing keeping
-  these two in sync automatically).
-- The same corroboration/auto-hide rule (3+ disputes, outnumbering
-  confirmations more than 2:1, hides a post).
-- The same validation error codes, so the UI's error messages don't diverge
+- The same five enabled categories, with identical TTLs, proximity radii,
+  body limits, and subtypes, mirrored by hand from `supabase/seed.sql`. See
+  the comment at the top of `demo-gateway.ts`: there is no automated
+  mechanism keeping these two definitions synchronized.
+- The same corroboration and auto-hide rule (three or more disputes,
+  outnumbering confirmations more than 2:1, hides a post).
+- The same validation error codes, so UI error messages are identical
   between modes.
 
-What it deliberately doesn't get right:
+Behavior that differs by design:
 
-- **It is not a security boundary.** The real backend's rules are enforced in
-  Postgres, where the browser can't touch them. Demo mode's rules run in the
-  browser the user controls — anyone with devtools open can bypass every one
-  of them. That's fine, because demo mode only ever touches that one browser's
-  own local storage; there's no shared data to protect.
-- **No location fuzzing runs in practice.** The five enabled categories all
-  have `locationPrecisionM = 0`, so this never triggers today even though the
-  code path exists for parity with `create_post`.
-- **A backend that goes down mid-session isn't detected.** The gateway is
-  resolved once, at startup, and held for the life of the tab. If Supabase was
-  reachable when the page loaded and then goes away, the app doesn't notice or
-  fall back — that would need a circuit breaker re-testing connectivity and
-  swapping the gateway under a live feed controller, which is a real feature,
-  not a fallback.
+- **Not a security boundary.** The real backend enforces its rules in
+  Postgres, outside client control. Demo mode's rules run in the browser and
+  can be bypassed using developer tools. This is acceptable because demo
+  mode only affects that browser's own local storage; there is no shared
+  data to protect.
+- **Location fuzzing does not run in practice.** All five enabled categories
+  have `locationPrecisionM = 0`, so this code path exists for parity with
+  `create_post` but is not currently exercised.
+- **A backend outage mid-session is not detected.** The gateway is resolved
+  once at startup and held for the life of the tab. If Supabase becomes
+  unreachable after the page has loaded, the application does not detect
+  this or fall back. Implementing that would require a circuit breaker that
+  re-tests connectivity and swaps the active gateway under a live feed
+  controller, which is a distinct feature from the startup fallback
+  described here.
 
-## The architecture, briefly
+## Architecture
 
 ```
-packages/core/     Domain logic, the SosoGateway port, the Supabase adapter,
-                    the incremental-fetch feed controller. Pure TypeScript —
-                    no React, no DOM, no platform code. Tested in isolation.
-apps/web/           Next.js + Leaflet. Owns everything platform-specific:
-                    the map component, React hooks, the demo-mode fallback.
-supabase/           The schema. migrations/ is the mechanism; seed.sql is the
-                    product spec — read it to see what each category actually
-                    does.
+packages/core/     Domain logic, the SosoGateway interface, the Supabase
+                    adapter, and the incremental feed controller. Pure
+                    TypeScript with no React, DOM, or platform dependencies.
+                    Covered by an isolated test suite.
+apps/web/           Next.js and Leaflet. Contains all platform-specific
+                    code: the map component, React hooks, and the demo-mode
+                    fallback.
+supabase/           The schema. migrations/ defines structure; seed.sql
+                    defines product behavior and should be read as the
+                    specification for what each category does.
 ```
 
-**One `posts` table, configuration in a table, not branches in code.** An
-incident, a lost wallet, and a seat-availability note are the same underlying
-object with different rows in `post_categories`. Adding a category is an
-`INSERT`. Disabling one during a legal review is an `UPDATE`. See the extended
-comments in `supabase/migrations/20260828000003_core.sql` and `seed.sql`.
+**A single `posts` table, with configuration as data rather than code
+branches.** An incident report, a lost item, and a seat-availability note are
+the same underlying object, differing only by their row in
+`post_categories`. Adding a category is an `INSERT`. Disabling one during a
+legal review is an `UPDATE`. See the comments in
+`supabase/migrations/20260828000003_core.sql` and `seed.sql`.
 
-**Writes go through `SECURITY DEFINER` functions, not RLS insert policies.**
-`create_post` is where TTL clamping, proximity checks, rate limits, and body
-length all run together, in one place, with error codes the client can
-actually branch on. A client cannot write a post directly — that's
-deliberate, and it's what "server-side validation" concretely means here: the
-web form doesn't duplicate these rules, it just submits and displays whatever
-the server decides. See `supabase/migrations/20260828000005_api.sql`.
+**Writes are performed through `SECURITY DEFINER` functions, not RLS insert
+policies.** `create_post` centralizes TTL clamping, proximity checks, rate
+limiting, and body length validation, returning error codes the client can
+branch on. Clients cannot write a post directly. This is the mechanism
+behind "server-side validation" in this project: the web form does not
+duplicate these rules; it submits and displays whatever the server decides.
+See `supabase/migrations/20260828000005_api.sql`.
 
-**RLS policies are ordinary migration SQL, not a separate artifact.** They
-live in `supabase/migrations/20260828000004_rls.sql`, alongside the tables
-and functions in the other five files, and `supabase db push` applies all six
-in one sequence — there's no separate command or Dashboard step to "push
-policies." The Dashboard's Authentication → Policies tab is a *view* onto
-what's already in Postgres, not an alternate way to manage them. Changing a
-policy means writing a new migration (`drop policy ...; create policy ...`,
-since Postgres has no `create policy if not exists`) and pushing again —
-editing a policy directly in the Dashboard changes the live database without
-updating the migration file, which immediately puts the repo and the hosted
-project out of sync.
+**RLS policies are ordinary migration SQL, not a separate deployment
+artifact.** They are defined in
+`supabase/migrations/20260828000004_rls.sql`, alongside the tables and
+functions in the other migration files, and `supabase db push` applies all
+of them in one sequence. There is no separate command or dashboard action to
+"push policies." The dashboard's Authentication > Policies tab is a view
+onto what already exists in Postgres, not an alternate management path.
+Changing a policy requires a new migration (`drop policy ...; create policy
+...`, since Postgres has no `create policy if not exists`) followed by
+another push. Editing a policy directly in the dashboard changes the live
+database without updating the corresponding migration file, causing the
+repository and the hosted project to diverge.
 
-**The feed is polled incrementally, not refetched.** `feed_delta` takes a
-cursor and returns only what changed since it, plus a tombstone list for
-anything that stopped being live. A quiet viewport costs about 150 bytes per
-poll instead of tens of kilobytes. This is also why pins expire automatically
-in the UI with no extra request: every pin already carries its own
-`expiresAt`, and the client stops drawing it once that passes.
+**The feed is polled incrementally, not refetched in full.** `feed_delta`
+accepts a cursor and returns only what changed since that cursor, along with
+a tombstone list for anything that stopped being live. A quiet viewport
+costs approximately 150 bytes per poll rather than tens of kilobytes. This
+mechanism is also why pins expire in the UI without an additional request:
+every pin carries its own `expiresAt`, and the client stops rendering it
+once that time passes.
 
-## Why the workspace only has two members
+## Monorepo structure
 
-`packages/core` and `apps/web` share one npm workspace and one `node_modules`.
-A React Native app does not belong in that same install: React Native and
-Next.js need incompatible major versions of `react`/`react-dom`, and npm's
-hoisting produces a broken tree when asked to satisfy both at once — a
-mismatched `react`/`react-dom` pair at the workspace root, which is a
-structural incompatibility between the two toolchains, not something a
-version pin fixes. If `apps/mobile` comes back, it should get its **own**
-`npm install`, consuming `packages/core` the same way it did before removal:
-plain relative filesystem imports into `packages/core/src`, which need no
-workspace symlink or module resolution at all.
+`packages/core` and `apps/web` share a single npm workspace and
+`node_modules` tree. A React Native application does not belong in the same
+workspace: React Native and Next.js require incompatible major versions of
+`react` and `react-dom`, and npm's dependency hoisting produces a broken
+tree when required to satisfy both simultaneously. This is a structural
+incompatibility between the two toolchains, not something a version pin
+resolves. If `apps/mobile` is reintroduced, it should use its own `npm
+install`, consuming `packages/core` the same way the previous
+implementation did: through plain relative filesystem imports into
+`packages/core/src`, which require no workspace symlink or module
+resolution.
 
-## Adding a native app later
+## Native application support
 
-The interface to build against is `SosoGateway` in
-`packages/core/src/data/gateway.ts` — five methods: load categories, an
-incremental feed fetch, per-cell counts, post detail, and the four writes
-(create, vote, report). `apps/web`'s `SosoMap.tsx`, `hooks.ts`, and
-`ReportForm.tsx` are a complete worked example of a client built against that
-interface: the map rendering and the React bindings are the parts that would
-actually need rewriting for React Native, not the data layer underneath them.
+The interface to implement against is `SosoGateway`, defined in
+`packages/core/src/data/gateway.ts`: five methods covering category
+configuration, an incremental feed fetch, per-cell counts, post detail, and
+the four write operations (create, vote, report, and push subscription
+management). `apps/web`'s `SosoMap.tsx`, `hooks.ts`, and `ReportForm.tsx`
+serve as a complete reference implementation against that interface. Map
+rendering and framework bindings are the components that require
+reimplementation for React Native; the data layer does not.
 
-A prior version of this repo did exactly that with Expo + `react-native-maps`,
-including a discrete-freshness-state marker strategy (native `Marker` views
-can't afford a continuously animated fade the way an SVG can) and a Metro
-monorepo config. Neither survived into this version, but the pattern is real
-and worth re-deriving rather than guessing at from scratch.
+A previous implementation used Expo and `react-native-maps`, including a
+discrete freshness-state marker strategy (native `Marker` views cannot
+efficiently render a continuously animated fade, unlike an SVG-based
+renderer) and a Metro monorepo configuration. Neither is present in the
+current repository, but the pattern is documented here for reference rather
+than requiring re-derivation from scratch.
 
-## Deploying to GitHub Pages
+## Deployment (GitHub Pages)
 
-Soso can deploy as a static export to GitHub Pages, because every Supabase
-call in the app happens in the browser (`src/web/supabase.ts`,
-`demo-gateway.ts`) — there are no server components fetching data, no route
-handlers, no server actions. `output: "export"` in `next.config.ts` turns
-`next build` into a plain folder of HTML/JS/CSS (`apps/web/out`) with no Node
-server required, which is exactly what a static file host like GitHub Pages
-serves.
+This application can be deployed as a static export to GitHub Pages because
+every Supabase call originates in the browser (`src/web/supabase.ts`,
+`demo-gateway.ts`). There are no server components performing data fetching,
+no route handlers, and no server actions. Setting `output: "export"` in
+`next.config.ts` causes `next build` to produce a static directory of HTML,
+JavaScript, and CSS (`apps/web/out`) with no Node server dependency, which
+is what a static host such as GitHub Pages requires.
 
-**One thing to decide first: user page or project page.**
+### Repository type
 
-- A repo literally named `<your-github-username>.github.io` deploys to your
-  domain root (`https://<username>.github.io/`). No extra config.
-- Any other repo name deploys under a subpath
-  (`https://<username>.github.io/<repo-name>/`), and Next needs to know that
-  subpath at build time via `basePath` — get this wrong and the page loads
-  with every asset 404ing, because the HTML asks for `/​_next/...` when the
-  files actually live at `/<repo-name>/_next/...`.
+- A repository named `<your-github-username>.github.io` deploys to the
+  domain root (`https://<username>.github.io/`) with no additional
+  configuration.
+- Any other repository name deploys under a subpath
+  (`https://<username>.github.io/<repo-name>/`), and Next requires that
+  subpath at build time via `basePath`. An incorrect value causes every
+  asset to 404, since the HTML references `/_next/...` while the files are
+  served from `/<repo-name>/_next/...`.
 
-`next.config.ts` reads this from a `NEXT_BASE_PATH` env var, empty by
-default, so local dev is unaffected either way.
+`next.config.ts` reads this value from the `NEXT_BASE_PATH` environment
+variable, which defaults to empty and does not affect local development.
 
-**Setup, once:**
+### Setup
 
-1. Repo → Settings → Pages → **Build and deployment → Source: GitHub
-   Actions.**
-2. Repo → Settings → Secrets and variables → Actions → **Variables** tab (not
-   Secrets — see why below) → add `NEXT_PUBLIC_SUPABASE_URL` and
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`. If this is a project page, also add
-   `NEXT_BASE_PATH` set to `/<repo-name>`. Skip all three and the site will
-   simply build in demo mode, same as running it locally with no `.env.local`.
-3. Make sure your code is actually pushed to GitHub, including
-   `package-lock.json` and the `.github/workflows/` folder — see [Build and
-   run](#build-and-run) above if you started from a downloaded copy rather
-   than an existing clone; that gap is the most common reason this doesn't
-   run at all. Then push to `main`. `.github/workflows/deploy-pages.yml`
-   installs, runs the
-   `packages/core` test suite, builds the static export with those values
-   baked in, and publishes it.
+1. Repository Settings > Pages > Build and deployment > Source: GitHub
+   Actions.
+2. Repository Settings > Secrets and variables > Actions > Variables tab
+   (not Secrets; see rationale below). Add `NEXT_PUBLIC_SUPABASE_URL` and
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`. For a project-page deployment, also add
+   `NEXT_BASE_PATH` set to `/<repo-name>`. Without these three variables,
+   the site builds in demo mode, identical to local development without
+   `.env.local`.
+3. Confirm the repository includes `package-lock.json` and the
+   `.github/workflows/` directory (see [Installation](#installation) if the
+   project originated from a downloaded archive rather than a clone; a
+   missing lockfile or workflow directory is the most common cause of a
+   failed run). Push to `main`.
+   `.github/workflows/deploy-pages.yml` installs dependencies, runs the
+   `packages/core` test suite, builds the static export with the configured
+   values, and publishes it.
 
-**Why repository *variables* and not *secrets*:** a Supabase anon key is
-designed to be public — it's what's protecting the data that matters, Row
-Level Security, not keeping the key hidden. `NEXT_PUBLIC_*` values get
-compiled directly into the JavaScript bundle at build time (there's no server
-left at request time to read `process.env` from), so it would end up visible
-in the shipped files regardless of which GitHub Actions context supplied it.
-Putting it in **Secrets** would suggest a confidentiality guarantee that
-doesn't exist and isn't needed.
+**Repository variables, not secrets:** a Supabase anon key is designed to be
+public. Row Level Security is the actual protection mechanism, not
+concealment of the key. `NEXT_PUBLIC_*` values are compiled directly into
+the JavaScript bundle at build time, since no server remains at request
+time to read `process.env`, so the value is visible in the shipped files
+regardless of which GitHub Actions context supplies it. Storing it under
+Secrets would imply a confidentiality guarantee that does not apply and is
+not required.
 
-**The `.nojekyll` gotcha:** GitHub Pages runs the Jekyll static site generator
-over your files by default, and Jekyll ignores any folder starting with an
-underscore — which is exactly what Next names its asset folder,
-`_next/`. Without a `.nojekyll` file, Pages silently drops every JS and CSS
-file and you get a blank page with a wall of 404s in the console. This repo
-already has an empty `apps/web/public/.nojekyll`, which `next build` copies
-into `out/` automatically; you don't need to do anything about it unless
-you've deleted it.
+**The `.nojekyll` requirement:** GitHub Pages processes files through Jekyll
+by default, and Jekyll excludes any directory beginning with an underscore,
+which includes Next's asset directory, `_next/`. Without a `.nojekyll`
+file, Pages silently omits all JavaScript and CSS, producing a blank page
+with 404 errors in the console. This repository includes an empty
+`apps/web/public/.nojekyll`, which `next build` copies into `out/`
+automatically. No action is required unless this file has been removed.
 
-**Updating the Supabase URL or key later** means pushing again — these values
-are baked into the build, not read at runtime, so editing the repo variable
-alone doesn't change anything live until the next deploy.
+**Updating the Supabase URL or key** requires a new deployment. These
+values are compiled into the build rather than read at runtime, so editing
+the repository variable alone has no effect until the next push.
 
-**Both basePath configurations are verified against the actual build
-output**, not just Next's documentation: the root-page (`NEXT_BASE_PATH`
-unset) and project-page (`NEXT_BASE_PATH=/soso`) exports were built, and every
-asset reference in the exported HTML carries the correct prefix in each case.
+Both the root-page (`NEXT_BASE_PATH` unset) and project-page
+(`NEXT_BASE_PATH=/soso`) build configurations have been validated by
+inspecting the exported HTML output directly, confirming that every asset
+reference carries the correct prefix in each case.
 
-## Known gaps
+## Push notifications
 
+Subscribers receive a browser push notification when a report is posted in
+an area they have enabled notifications for. The bell icon in the header
+toggles this for approximately the 3 km block of cells surrounding the
+map's current center.
 
+**Status: implemented, not verified end-to-end.** Every other feature in
+this project was confirmed by execution: test suites, a production build,
+SQL syntax validation. This feature has not been executed in a deployed
+environment; no Supabase Edge Function has been deployed and no push
+notification has been received on a device during development. What has
+been confirmed is internal consistency: the SQL parses correctly, the
+TypeScript compiles, and the Web Push and VAPID APIs are called according
+to their documented usage. The most likely point of failure on first
+deployment is whether Deno's Node compatibility layer runs the
+`npm:web-push` import without modification. If notifications do not arrive
+after completing the setup steps below, investigate this first, using
+`supabase functions logs notify-new-post`.
 
-- **The SQL has never run against a live Postgres instance.** Every migration
-  and `seed.sql` is validated for syntax with a real Postgres parser as part
-  of development, and that's all. `npm run db:reset` against a real project
-  is the first real test.
-- **Anonymous sign-in is a development shortcut, not a launch setting.** An
-  anonymous Supabase account costs nothing to create, so the per-user rate
-  limit and reputation floor in `create_post` currently defend against one
-  account, not one person with a script. This needs phone verification before
-  the Supabase-backed mode is used with strangers.
-- **No early resolution.** A `seats` post lives for its full 20-minute TTL even
-  if the tables fill up two minutes in. There's no `resolve_post` RPC. Given
-  that `seats` is explicitly a launched feature now, this is the most
-  material gap to close next.
-- **No photo uploads**, despite `post_media` existing in the schema.
-- **No push notifications**, despite `cell_subscriptions` existing as the
-  intended hook — the Edge Function that would publish to FCM on insert isn't
-  built.
-- **Demo mode and `seed.sql` can silently drift.** There is nothing enforcing
-  that a category change in the database gets mirrored into
-  `demo-gateway.ts`'s hand-written config. If you change a category's
-  behaviour, update both.
-- **A live backend outage mid-session isn't detected** — see
-  [Demo mode](#demo-mode) above.
-- **No Japanese UI strings.** `label_ja` exists in the schema and is loaded
-  into `CategoryConfig`, but the web app only ever renders `labelEn`.
-  Bilingual support is a real requirement for this market and is currently
-  unstarted.
-- **GitHub Pages has no server at all**, so it inherits every limitation of
-  the Supabase-anon-key-in-the-browser model rather than adding new ones:
-  fine for this app today, but it means there's nowhere to eventually add a
-  server-side moderation webhook, an image-resizing endpoint, or anything
-  else that shouldn't run in the visitor's own browser — that would need a
-  different host (Vercel, or a small Node server) when the time comes.
-- **Pages' CDN caches aggressively.** A deploy can take a few minutes to
-  actually replace what visitors see, which matters if you're debugging a
-  just-pushed change and it looks like nothing happened yet.
+### iOS requirement
+
+Push notifications on iOS function only within a page added to the Home
+Screen through Safari's Share > Add to Home Screen, opened subsequently
+from that icon rather than from a browser tab. Chrome, Firefox, and every
+other browser on iOS run on WebKit under an Apple platform requirement, and
+none of them can create the standalone execution context push notifications
+require on iOS. Adding the page to the Home Screen from Chrome does not
+produce a context capable of receiving push notifications, regardless of
+what UI Chrome presents for that action. The application detects this
+condition (`getPushAvailability()` in `src/web/push.ts`) and displays
+installation instructions instead of a non-functional control.
+
+### Components
+
+- `cell_subscriptions`: present in the schema since the initial migration
+  and unused until this feature. Represents the areas a user has expressed
+  interest in.
+- `push_endpoints`: new in this feature. Represents which browsers can be
+  reached, with one row per subscribed device. This is separate from
+  `cell_subscriptions` so that a user opening the application on a second
+  device does not need to redeclare which areas matter to them.
+- A trigger on `posts` issues an asynchronous HTTP call to an Edge Function
+  for every new live report. If push notifications have not been
+  configured (see Setup below), the trigger takes no further action, and
+  the rest of the application is unaffected.
+- `supabase/functions/notify-new-post/` holds the VAPID private key as a
+  server secret, since a private key cannot be present in a browser or in a
+  version-controlled migration file. It queries matching subscribers, sends
+  notifications via `web-push`, and removes any subscription a push service
+  reports as permanently invalid (HTTP 404 or 410).
+
+### Setup
+
+None of the following occurs automatically from a `git push`.
+
+1. **VAPID keys.** A working key pair was generated during development of
+   this feature:
+
+   ```
+   Public:  BIlLJvv5uK5sWoYlSIcO7XGjfB1ZWc9sCykGBMNcpIhQNNJYnuic_XJbY-3oT6pyw8kqA6DtJsZaruBuHG3ax9o
+   Private: v_0z1EDQWU-_lKuEJRYipPcgWK-luaslQ25m_5gmplY
+   ```
+
+   Treat the private key above as compromised, since it has been included
+   in this document, and generate a new pair before using this feature in
+   any non-development context:
+
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+
+2. **Configure the Edge Function's secrets:**
+
+   ```bash
+   supabase secrets set VAPID_PUBLIC_KEY=<public key>
+   supabase secrets set VAPID_PRIVATE_KEY=<private key>
+   supabase secrets set PUSH_TRIGGER_SECRET=<a random string>
+   ```
+
+3. **Deploy the function without Supabase's JWT verification.** This
+   function is called only by the database trigger, never by a browser, and
+   authenticates the caller using the shared secret configured above:
+
+   ```bash
+   supabase functions deploy notify-new-post --no-verify-jwt
+   ```
+
+4. **Provide the database with the function's URL and secret.** In the SQL
+   Editor, once. This is intentionally not part of a migration, since a
+   Vault secret's value should not be committed to version control:
+
+   ```sql
+   select vault.create_secret('https://<project-ref>.functions.supabase.co/notify-new-post', 'push_function_url');
+   select vault.create_secret('<the same random string from step 2>', 'push_trigger_secret');
+   ```
+
+   Until this step is completed, the `posts_notify_new` trigger finds no
+   configured URL and takes no action. The rest of the application is
+   unaffected either way.
+
+5. **Provide the client with the public key.** This value is safe to
+   expose; that is the purpose of a VAPID public key. Add it to
+   `apps/web/.env.local` for local development and as a repository variable
+   for the GitHub Pages workflow, alongside the Supabase variables
+   described above:
+
+   ```
+   NEXT_PUBLIC_VAPID_PUBLIC_KEY=<the same public key from step 1>
+   ```
+
+### Limitations
+
+- **No area management interface.** Enabling notifications subscribes to a
+  single approximately 3 km block around the map's current center at the
+  time of subscription. There is no interface to view or manage multiple
+  watched areas, or to subscribe to a second area from the same browser.
+- **Disabling notifications does not remove the associated area.**
+  Unsubscribing deletes the `push_endpoints` row but leaves the
+  corresponding `cell_subscriptions` row in place. This has no functional
+  effect, since a subscription with no endpoint delivers nothing, but the
+  two operations are not symmetric.
+- **The shared secret is a simplified authentication mechanism, not a
+  robust access control model.** A party in possession of the secret could
+  trigger unnecessary invocations of the function, but the function's own
+  query logic only ever sends notifications to endpoints already present in
+  `push_endpoints`. There is no path by which this exposes data.
+
+## Known limitations
+
+- **The SQL schema has not been executed against a live Postgres
+  instance.** Every migration and `seed.sql` is validated for syntax using
+  a Postgres parser during development; this is the extent of pre-deployment
+  verification. Running `npm run db:reset` against a real project is the
+  first execution of this schema.
+- **Anonymous sign-in is a development convenience, not a production
+  authentication model.** Creating an anonymous Supabase account has no
+  cost, so the per-user rate limit and reputation floor enforced by
+  `create_post` currently constrain one account, not one person operating a
+  script. Phone verification is required before using the Supabase-backed
+  mode with untrusted users.
+- **No early resolution mechanism exists.** A `seats` report remains live
+  for its full 20-minute TTL even if the underlying condition changes
+  within minutes. There is no `resolve_post` RPC. Since `seats` is an
+  active feature, this is the most significant functional gap to address.
+- **Photo uploads are not implemented**, despite the `post_media` table
+  existing in the schema.
+- **Push notifications are implemented but unverified end-to-end**, and
+  have no area management interface beyond a single toggle. See [Push
+  notifications](#push-notifications) for the complete list of limitations.
+- **Demo mode and `seed.sql` can diverge without warning.** No mechanism
+  enforces that a category change in the database is reflected in
+  `demo-gateway.ts`'s manually maintained configuration. Both must be
+  updated together when category behavior changes.
+- **A backend outage occurring mid-session is not detected.** See [Demo
+  mode](#demo-mode).
+- **No Japanese-language UI strings are implemented.** `label_ja` exists in
+  the schema and is loaded into `CategoryConfig`, but the web client renders
+  only `labelEn`. Bilingual support is a substantive requirement for this
+  market and has not been started.
+- **GitHub Pages provides no server-side execution environment.** This
+  means the application inherits the limitations of the anonymous-key-in-
+  browser model without introducing new ones, which is acceptable for the
+  application's current scope. It also means there is no location for a
+  future server-side moderation webhook, image-resizing endpoint, or
+  similar functionality that should not execute in the visitor's browser.
+  Such functionality would require a different host, such as Vercel or a
+  dedicated Node server.
+- **GitHub Pages' CDN caches aggressively.** A deployment can take several
+  minutes to become visible to end users, which is relevant when verifying
+  a recently pushed change.

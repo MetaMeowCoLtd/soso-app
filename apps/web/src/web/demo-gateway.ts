@@ -522,5 +522,18 @@ export function createDemoGateway(): SosoGateway {
       // gateway's contract closely enough for demo purposes: the person
       // gets the same "reported" confirmation either way.
     },
+
+    async subscribeToPush(): Promise<void> {
+      // Unlike reportPost above, this one throws rather than pretending to
+      // succeed: there is no server here to ever actually send a push from,
+      // so a silent success would be a promise this mode cannot keep. The UI
+      // catches this and explains why, rather than letting someone believe
+      // they've subscribed to something that will never arrive.
+      throw new Error("Push notifications need the real backend — not available in demo mode.");
+    },
+
+    async unsubscribeFromPush(): Promise<void> {
+      // Nothing to unsubscribe from, since subscribing never succeeded here.
+    },
   };
 }

@@ -46,6 +46,8 @@ class FakeGateway implements SosoGateway {
   }
   async votePost() {}
   async reportPost() {}
+  async subscribeToPush() {}
+  async unsubscribeFromPush() {}
 }
 
 const pin = (id: string, expiresAt = NOW_S + 3600): Pin => ({

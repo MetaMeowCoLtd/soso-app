@@ -40,6 +40,12 @@ export interface FeedQuery {
   limit?: number;
 }
 
+export interface PushEndpoint {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
 export interface SosoGateway {
   /** Boot-time category configuration. Cache it; it changes rarely. */
   loadCategories(): Promise<CategoryConfig[]>;
@@ -59,4 +65,17 @@ export interface SosoGateway {
   votePost(postId: string, vote: 1 | -1): Promise<void>;
 
   reportPost(postId: string, reason: ReportReason, detail?: string): Promise<void>;
+
+  /**
+   * Registers a browser's push subscription and marks the given cells as
+   * areas its owner wants to be notified about. `demo-gateway`-style
+   * implementations with no real backend to push from should reject this
+   * with a clear error rather than silently succeeding — a subscription that
+   * looks accepted but will never actually deliver anything is worse than an
+   * honest "not available here."
+   */
+  subscribeToPush(endpoint: PushEndpoint, cellIds: readonly CellId[]): Promise<void>;
+
+  /** Removes a previously registered subscription by its endpoint URL. */
+  unsubscribeFromPush(endpoint: string): Promise<void>;
 }
