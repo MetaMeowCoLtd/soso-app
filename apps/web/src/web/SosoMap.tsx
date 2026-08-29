@@ -89,38 +89,75 @@ function CuteBaseLayer() {
   useEffect(() => {
     let layer: L.MaplibreGL | null = null;
     let cancelled = false;
+    let fellBack = false;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
     // Routed through Leaflet's own attribution control (the same mechanism
     // `<TileLayer attribution="...">` used) rather than MapLibre's own
     // attribution widget, so there's one attribution corner, not two
     // differently-styled ones competing for the same spot.
-    const attribution =
+    const cuteAttribution =
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
       '<a href="https://openfreemap.org">OpenFreeMap</a>';
+    const rasterAttribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+    function fallToRasterTiles(reason: unknown) {
+      if (cancelled || fellBack) return;
+      fellBack = true;
+      console.warn("[soso] Falling back to plain map tiles:", reason);
+      if (layer) {
+        map.removeLayer(layer);
+        map.attributionControl.removeAttribution(cuteAttribution);
+        layer = null;
+      }
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: rasterAttribution,
+        maxZoom: 19,
+      }).addTo(map);
+    }
 
     void loadCuteMapStyle()
       .then((style) => {
         if (cancelled) return;
         layer = maplibreGL({ style, attributionControl: false });
         layer.addTo(map);
-        map.attributionControl.addAttribution(attribution);
+        map.attributionControl.addAttribution(cuteAttribution);
+
+        const gl = layer.getMaplibreMap();
+
+        // A style JSON can load fine while the vector tile DATA it points at
+        // still fails afterwards — a stalled connection, a bad response, a
+        // CDN hiccup on OpenFreeMap's end. That failure previously had no
+        // handler at all: the map would sit on the plain background colour
+        // forever, with every road/water/park layer just never appearing,
+        // and nothing in the code would ever notice or recover.
+        gl.on("error", (e) => {
+          console.error("[soso] MapLibre error:", e.error);
+          fallToRasterTiles(e.error);
+        });
+
+        // Belt and suspenders: even without an explicit 'error' event (some
+        // failure modes just hang rather than reject), if the main vector
+        // source hasn't finished loading within a few seconds, treat that as
+        // a failure too rather than leaving the person looking at an empty
+        // cream rectangle indefinitely.
+        watchdog = setTimeout(() => {
+          if (!cancelled && !fellBack && !gl.isSourceLoaded("openmaptiles")) {
+            fallToRasterTiles("vector tiles did not finish loading in time");
+          }
+        }, 8000);
       })
       .catch((err) => {
-        // A failed style fetch shouldn't leave a blank map — fall back to
-        // plain OSM raster tiles, which need no network round trip to a
-        // vector source at all.
-        console.warn("[soso] Falling back to plain map tiles:", err);
+        // The style JSON fetch itself failed outright.
         if (cancelled) return;
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          maxZoom: 19,
-        }).addTo(map);
+        fallToRasterTiles(err);
       });
 
     return () => {
       cancelled = true;
+      if (watchdog) clearTimeout(watchdog);
       if (layer) {
         map.removeLayer(layer);
-        map.attributionControl.removeAttribution(attribution);
+        map.attributionControl.removeAttribution(cuteAttribution);
       }
     };
   }, [map]);
