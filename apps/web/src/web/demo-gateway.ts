@@ -1,0 +1,526 @@
+/**
+ * Demo gateway.
+ *
+ * A second implementation of `SosoGateway` (see `soso-core`'s `data/gateway.ts`)
+ * — everything else in the app (`FeedController`, every hook, every component)
+ * talks to that interface and has no idea which implementation is behind it.
+ * `supabase-gateway.ts` in `soso-core` is the real one; this is a local,
+ * browser-only stand-in used when there's no Supabase project to talk to, so
+ * the app is never just a dead screen.
+ *
+ * WHEN THIS IS USED
+ * -----------------
+ * `bootstrap.ts` picks this over the real gateway when either:
+ *   - `NEXT_PUBLIC_SUPABASE_URL` / `..._ANON_KEY` aren't set, or
+ *   - they're set but the initial connection attempt fails or times out
+ *     (wrong project, project paused, no network).
+ *
+ * It does not keep checking after that. A real backend going down mid-session
+ * is not handled — that would need a circuit breaker re-testing connectivity
+ * and swapping the gateway under a live `FeedController`, which is a genuine
+ * feature, not a fallback, and out of scope here.
+ *
+ * WHY THIS DOESN'T LIVE IN packages/core
+ * ---------------------------------------
+ * `soso-core` has zero DOM or platform dependencies — that's what let the
+ * exact same `FeedController` polling policy move from native to web unchanged
+ * (see git history / the mobile app this project's README describes). This
+ * file calls `localStorage` directly, so it stays a web-only concern here. A
+ * rebuilt mobile app would need its own equivalent using AsyncStorage,
+ * following this same file as the pattern to copy, not to import.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT GUARANTEE
+ * ------------------------------------------
+ * The category rules below (TTL, proximity, rate limit, body length) are
+ * copied by hand from `supabase/seed.sql` because there is no server here to
+ * ask. There is nothing enforcing that these two stay in sync beyond this
+ * comment — if you change a category's behaviour in `seed.sql`, mirror it
+ * here or demo mode will quietly diverge from what the real backend does.
+ * And because this all runs in the browser the user controls, none of these
+ * checks are a security boundary the way `create_post` is: anyone with
+ * devtools open can bypass them. That's fine, because demo mode only ever
+ * touches that one browser's own local storage.
+ */
+
+import {
+  SosoError,
+  cellOf,
+  type CategoryConfig,
+  type CellCount,
+  type FeedDelta,
+  type NewPost,
+  type Pin,
+  type PostDetail,
+} from "soso-core";
+import type { FeedQuery, ReportReason, SosoGateway } from "soso-core";
+
+// ---------------------------------------------------------------------------
+// Category configuration, hand-mirrored from supabase/seed.sql's enabled rows.
+// ---------------------------------------------------------------------------
+
+const DEMO_CATEGORIES: CategoryConfig[] = [
+  {
+    key: "incident",
+    labelJa: "事故・トラブル",
+    labelEn: "Incident",
+    defaultTtlSeconds: 6 * 3600,
+    maxTtlSeconds: 24 * 3600,
+    locationPrecisionM: 0,
+    requiresProximity: true,
+    proximityRadiusM: 500,
+    allowsBody: true,
+    bodyMaxLength: 300,
+    allowsMedia: true,
+    minReputation: 0,
+    hourlyPostLimit: 5,
+    sortOrder: 10,
+    subtypes: [
+      { key: "traffic_accident", labelJa: "交通事故", labelEn: "Traffic accident", sortOrder: 10 },
+      { key: "road_hazard", labelJa: "道路の危険", labelEn: "Road hazard", sortOrder: 20 },
+      { key: "crowding", labelJa: "混雑", labelEn: "Crowding", sortOrder: 30 },
+      { key: "outage", labelJa: "停電・断水", labelEn: "Utility outage", sortOrder: 40 },
+    ],
+  },
+  {
+    key: "construction",
+    labelJa: "工事情報",
+    labelEn: "Construction",
+    defaultTtlSeconds: 7 * 86400,
+    maxTtlSeconds: 180 * 86400,
+    locationPrecisionM: 0,
+    requiresProximity: false,
+    proximityRadiusM: 500,
+    allowsBody: true,
+    bodyMaxLength: 300,
+    allowsMedia: true,
+    minReputation: 0,
+    hourlyPostLimit: 5,
+    sortOrder: 20,
+    subtypes: [
+      { key: "road_closure", labelJa: "通行止め", labelEn: "Road closure", sortOrder: 10 },
+      { key: "lane_closure", labelJa: "車線規制", labelEn: "Lane restriction", sortOrder: 20 },
+      { key: "building_work", labelJa: "建築工事", labelEn: "Building work", sortOrder: 30 },
+    ],
+  },
+  {
+    key: "lost",
+    labelJa: "落とし物（なくした）",
+    labelEn: "Lost item",
+    defaultTtlSeconds: 14 * 86400,
+    maxTtlSeconds: 60 * 86400,
+    locationPrecisionM: 0,
+    requiresProximity: false,
+    proximityRadiusM: 500,
+    allowsBody: true,
+    bodyMaxLength: 500,
+    allowsMedia: true,
+    minReputation: 0,
+    hourlyPostLimit: 5,
+    sortOrder: 30,
+    subtypes: [],
+  },
+  {
+    key: "found",
+    labelJa: "落とし物（拾った）",
+    labelEn: "Found item",
+    defaultTtlSeconds: 14 * 86400,
+    maxTtlSeconds: 60 * 86400,
+    locationPrecisionM: 0,
+    requiresProximity: true,
+    proximityRadiusM: 500,
+    allowsBody: true,
+    bodyMaxLength: 500,
+    allowsMedia: true,
+    minReputation: 0,
+    hourlyPostLimit: 5,
+    sortOrder: 40,
+    subtypes: [],
+  },
+  {
+    key: "seats",
+    labelJa: "空席情報",
+    labelEn: "Seat availability",
+    defaultTtlSeconds: 20 * 60,
+    maxTtlSeconds: 3600,
+    locationPrecisionM: 0,
+    requiresProximity: true,
+    proximityRadiusM: 150,
+    allowsBody: false,
+    bodyMaxLength: 0,
+    allowsMedia: false,
+    minReputation: 0,
+    hourlyPostLimit: 20,
+    sortOrder: 50,
+    subtypes: [
+      { key: "seats_open", labelJa: "空席あり", labelEn: "Seats available", sortOrder: 10 },
+      { key: "short_wait", labelJa: "待ち時間少", labelEn: "Short wait", sortOrder: 20 },
+      { key: "full", labelJa: "満席", labelEn: "Full", sortOrder: 30 },
+    ],
+  },
+];
+
+const DISPUTE_THRESHOLD = 3; // mirrors soso.dispute_threshold()
+
+// ---------------------------------------------------------------------------
+// Local storage model
+// ---------------------------------------------------------------------------
+
+type PostStatus = "live" | "hidden" | "removed";
+
+interface DemoPost {
+  id: string;
+  authorId: string;
+  category: string;
+  subtype: string | null;
+  body: string | null;
+  lng: number;
+  lat: number;
+  cellId: number;
+  status: PostStatus;
+  createdAt: number; // epoch seconds
+  expiresAt: number; // epoch seconds
+  updatedAt: number; // epoch seconds — bumped on every write, mirrors the posts_derive trigger
+  confirmCount: number;
+  disputeCount: number;
+}
+
+interface DemoVote {
+  postId: string;
+  voterId: string;
+  vote: 1 | -1;
+}
+
+const POSTS_KEY = "soso-demo:posts:v1";
+const VOTES_KEY = "soso-demo:votes:v1";
+const ME_KEY = "soso-demo:me:v1";
+
+function nowSeconds(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
+function readJSON<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJSON(key: string, value: unknown): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage can be full or disabled (private browsing in some browsers).
+    // Demo mode degrades to "nothing persists across reload", not a crash.
+  }
+}
+
+function getMe(): string {
+  let id = window.localStorage.getItem(ME_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    window.localStorage.setItem(ME_KEY, id);
+  }
+  return id;
+}
+
+/** Metres between two points. Good enough for a client-side proximity gate. */
+function haversineMetres(a: { lng: number; lat: number }, b: { lng: number; lat: number }): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+function toPin(p: DemoPost): Pin {
+  return {
+    id: p.id,
+    category: p.category,
+    subtype: p.subtype,
+    lng: p.lng,
+    lat: p.lat,
+    createdAt: p.createdAt,
+    expiresAt: p.expiresAt,
+    net: p.confirmCount - p.disputeCount,
+    hasMedia: false,
+  };
+}
+
+function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
+  if (posts.length > 0) return posts;
+  const now = nowSeconds();
+  const near = (dLng: number, dLat: number) => ({ lng: 139.7671 + dLng, lat: 35.6812 + dLat });
+
+  const seeds: DemoPost[] = (
+    [
+      {
+        id: crypto.randomUUID(),
+        authorId: "seed",
+        category: "incident",
+        subtype: "crowding",
+        body: "Ticket gates backed up on the east side — allow extra time.",
+        ...near(0.0009, -0.0006),
+        status: "live" as const,
+        createdAt: now - 18 * 60,
+        expiresAt: now + (6 * 3600 - 18 * 60),
+        updatedAt: now - 18 * 60,
+        confirmCount: 4,
+        disputeCount: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        authorId: "seed",
+        category: "construction",
+        subtype: "lane_closure",
+        body: "North sidewalk narrowed for underground work.",
+        ...near(0.003, 0.0018),
+        status: "live" as const,
+        createdAt: now - 95 * 60,
+        expiresAt: now + 7 * 86400 - 95 * 60,
+        updatedAt: now - 95 * 60,
+        confirmCount: 2,
+        disputeCount: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        authorId: "seed",
+        category: "found",
+        subtype: null,
+        body: "Found near the station entrance — ask about the handle pattern to claim it.",
+        ...near(-0.0016, 0.0009),
+        status: "live" as const,
+        createdAt: now - 210 * 60,
+        expiresAt: now + 14 * 86400 - 210 * 60,
+        updatedAt: now - 210 * 60,
+        confirmCount: 1,
+        disputeCount: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        authorId: "seed",
+        category: "seats",
+        subtype: "seats_open",
+        body: null,
+        ...near(0.0006, 0.0012),
+        status: "live" as const,
+        createdAt: now - 4 * 60,
+        expiresAt: now + 20 * 60 - 4 * 60,
+        updatedAt: now - 4 * 60,
+        confirmCount: 1,
+        disputeCount: 0,
+      },
+    ] satisfies Array<Omit<DemoPost, "cellId">>
+  ).map((s) => ({ ...s, cellId: cellOf(s.lng, s.lat) }));
+
+  writeJSON(POSTS_KEY, seeds);
+  return seeds;
+}
+
+function loadPosts(): DemoPost[] {
+  return seedIfEmpty(readJSON<DemoPost[]>(POSTS_KEY, []));
+}
+
+function savePosts(posts: DemoPost[]): void {
+  writeJSON(POSTS_KEY, posts);
+}
+
+function loadVotes(): DemoVote[] {
+  return readJSON<DemoVote[]>(VOTES_KEY, []);
+}
+
+function saveVotes(votes: DemoVote[]): void {
+  writeJSON(VOTES_KEY, votes);
+}
+
+// ---------------------------------------------------------------------------
+// The gateway
+// ---------------------------------------------------------------------------
+
+export function createDemoGateway(): SosoGateway {
+  return {
+    async loadCategories(): Promise<CategoryConfig[]> {
+      return DEMO_CATEGORIES;
+    },
+
+    async feedDelta(query: FeedQuery): Promise<FeedDelta> {
+      const now = nowSeconds();
+      const cellSet = new Set(query.cells);
+      const categorySet = query.categories ? new Set(query.categories) : null;
+      const sinceMs = query.since ? Date.parse(query.since) - 10_000 : null; // lap back 10s, same as feed_delta
+
+      const candidates = loadPosts().filter(
+        (p) => cellSet.has(p.cellId) && (!categorySet || categorySet.has(p.category)),
+      );
+
+      const isLive = (p: DemoPost) => p.status === "live" && p.expiresAt > now;
+      const updatedAfter = (p: DemoPost) => sinceMs === null || p.updatedAt * 1000 > sinceMs;
+
+      const live = candidates.filter(isLive);
+      const added = live
+        .filter(updatedAfter)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, query.limit ?? 200)
+        .map(toPin);
+
+      const removed =
+        sinceMs === null
+          ? []
+          : candidates.filter((p) => !isLive(p) && updatedAfter(p)).map((p) => p.id);
+
+      return {
+        cursor: new Date(now * 1000).toISOString(),
+        added,
+        removed,
+        truncated: live.length > (query.limit ?? 200),
+      };
+    },
+
+    async cellCounts(cells, categories): Promise<CellCount[]> {
+      const now = nowSeconds();
+      const cellSet = new Set(cells);
+      const categorySet = categories ? new Set(categories) : null;
+      const counts = new Map<number, number>();
+
+      for (const p of loadPosts()) {
+        if (!cellSet.has(p.cellId)) continue;
+        if (categorySet && !categorySet.has(p.category)) continue;
+        if (p.status !== "live" || p.expiresAt <= now) continue;
+        counts.set(p.cellId, (counts.get(p.cellId) ?? 0) + 1);
+      }
+
+      return [...counts.entries()].map(([cellId, n]) => ({ cellId, n }));
+    },
+
+    async postDetail(postId: string): Promise<PostDetail | null> {
+      const post = loadPosts().find((p) => p.id === postId);
+      if (!post) return null;
+      const me = getMe();
+
+      return {
+        ...toPin(post),
+        body: post.body,
+        confirmCount: post.confirmCount,
+        disputeCount: post.disputeCount,
+        mine: post.authorId === me,
+        author: { id: post.authorId, handle: "demo", displayName: post.authorId === me ? "You" : "A neighbour" },
+        media: [],
+      };
+    },
+
+    async createPost(input: NewPost): Promise<Pin> {
+      const category = DEMO_CATEGORIES.find((c) => c.key === input.category);
+      if (!category) throw new SosoError("soso/category_unavailable");
+
+      if (input.subtype && !category.subtypes.some((s) => s.key === input.subtype)) {
+        throw new SosoError("soso/invalid_subtype");
+      }
+
+      const body = input.body?.trim() || null;
+      if (body) {
+        if (!category.allowsBody) throw new SosoError("soso/body_not_allowed");
+        if (body.length > category.bodyMaxLength) throw new SosoError("soso/body_too_long");
+      }
+
+      const me = getMe();
+      const oneHourAgo = nowSeconds() - 3600;
+      const recentCount = loadPosts().filter(
+        (p) => p.authorId === me && p.category === category.key && p.createdAt > oneHourAgo,
+      ).length;
+      if (recentCount >= category.hourlyPostLimit) throw new SosoError("soso/rate_limited");
+
+      const { lng, lat } = input.at;
+      if (!Number.isFinite(lng) || !Number.isFinite(lat) || Math.abs(lng) > 180 || Math.abs(lat) > 85) {
+        throw new SosoError("soso/invalid_location");
+      }
+
+      if (category.requiresProximity) {
+        if (!input.device) throw new SosoError("soso/device_location_required");
+        const distance = haversineMetres(
+          { lng: input.device.lng, lat: input.device.lat },
+          { lng, lat },
+        );
+        if (distance > category.proximityRadiusM) throw new SosoError("soso/too_far_away");
+      }
+
+      // Fuzzing is a no-op for every category currently enabled here
+      // (locationPrecisionM is 0 for all five) — kept for parity with
+      // create_post's shape rather than because it does anything today.
+      const fuzzed = category.locationPrecisionM > 0
+        ? {
+            lng: Math.round(lng / (category.locationPrecisionM / 111_320)) * (category.locationPrecisionM / 111_320),
+            lat,
+          }
+        : { lng, lat };
+
+      const ttlSeconds = Math.min(
+        input.ttlMinutes ? Math.max(input.ttlMinutes * 60, 60) : category.defaultTtlSeconds,
+        category.maxTtlSeconds,
+      );
+
+      const now = nowSeconds();
+      const post: DemoPost = {
+        id: crypto.randomUUID(),
+        authorId: me,
+        category: category.key,
+        subtype: input.subtype ?? null,
+        body,
+        lng: fuzzed.lng,
+        lat: fuzzed.lat,
+        cellId: cellOf(fuzzed.lng, fuzzed.lat),
+        status: "live",
+        createdAt: now,
+        expiresAt: now + ttlSeconds,
+        updatedAt: now,
+        confirmCount: 0,
+        disputeCount: 0,
+      };
+
+      savePosts([post, ...loadPosts()]);
+      return toPin(post);
+    },
+
+    async votePost(postId: string, vote: 1 | -1): Promise<void> {
+      const posts = loadPosts();
+      const post = posts.find((p) => p.id === postId);
+      const now = nowSeconds();
+      if (!post || post.status !== "live" || post.expiresAt <= now) {
+        throw new SosoError("soso/post_unavailable");
+      }
+
+      const me = getMe();
+      if (post.authorId === me) throw new SosoError("soso/cannot_vote_own");
+
+      const votes = loadVotes().filter((v) => !(v.postId === postId && v.voterId === me));
+      votes.push({ postId, voterId: me, vote });
+      saveVotes(votes);
+
+      const confirmCount = votes.filter((v) => v.postId === postId && v.vote === 1).length;
+      const disputeCount = votes.filter((v) => v.postId === postId && v.vote === -1).length;
+
+      // Same rule as soso.tg_votes_recount: enough disputes, and disputes
+      // outnumbering confirmations more than 2:1, hides the post pending review.
+      const shouldHide =
+        post.status === "live" && disputeCount >= DISPUTE_THRESHOLD && disputeCount > confirmCount * 2;
+
+      savePosts(
+        posts.map((p) =>
+          p.id === postId
+            ? { ...p, confirmCount, disputeCount, status: shouldHide ? "hidden" : p.status, updatedAt: now }
+            : p,
+        ),
+      );
+    },
+
+    async reportPost(_postId: string, _reason: ReportReason, _detail?: string): Promise<void> {
+      // No moderation queue exists locally — there's nobody to hand this to.
+      // Accepting it silently (rather than throwing) matches the real
+      // gateway's contract closely enough for demo purposes: the person
+      // gets the same "reported" confirmation either way.
+    },
+  };
+}

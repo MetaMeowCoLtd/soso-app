@@ -1,0 +1,353 @@
+# Soso
+
+Soso is a location-first social platform for practical local reporting: what's
+happening right now, at a specific place, until it isn't relevant anymore.
+Every post — an accident, a lane closure, a lost wallet, a table opening up —
+is modelled the same way: **something is true, at a place, until a time.** That
+one idea is what makes expiry, per-category lifetimes, and a small working set
+fall out of the schema instead of being bolted on.
+
+This repository is the web MVP: a Next.js + Leaflet map backed by Supabase.
+
+> This is a development-stage application, not an emergency service. For
+> immediate danger, use local emergency services.
+
+## What it is
+
+- A full-screen map. Click anywhere to drop a pin; click an existing pin (or a
+  row in the local-buzz drawer) to see its detail and confirm or dispute it.
+- Reports carry a server-assigned lifetime and disappear on their own —
+  nothing needs to be manually marked "resolved."
+- Every category's rules — how long a post lives, whether it needs a
+  description, whether the poster has to actually be there — are configured in
+  the database, not in application code. Enabling or retiring a category is a
+  data change, not a deploy.
+- Runs with **no Supabase project at all**: if the backend is unreachable or
+  unconfigured, the app falls back to a local demo mode automatically. See
+  [Demo mode](#demo-mode) below.
+
+## Features and their status
+
+| Feature | Status |
+| --- | --- |
+| Map with click-to-report | Implemented |
+| Incident reporting (accident, hazard, crowding, outage) | Implemented |
+| Construction / closures | Implemented |
+| Lost & found | Implemented |
+| Seat availability (restaurant/cafe) | Implemented |
+| Per-category expiry (TTL) | Implemented — server-assigned, client cannot extend it |
+| Server-side validation (proximity, rate limits, body length, subtype) | Implemented — enforced in Postgres, not just the form |
+| Corroboration ("still here" / "not true") and auto-hide on disputes | Implemented |
+| Reporting a post (flagging for review) | Implemented — accepted, no moderator workflow behind it yet |
+| Local demo mode (no backend required) | Implemented |
+| Polls ("where should we eat tonight?") | Modelled, disabled — needs its own options/votes tables |
+| Local news / official notices | Modelled, disabled |
+| Topic groups | Not built |
+| Harassment reporting | Modelled, **shipped disabled** — needs legal review before it can go live; see the comment in `supabase/seed.sql` |
+| Photo uploads | Not built (`post_media` table exists, nothing writes to it) |
+| Push notifications | Not built (`cell_subscriptions` table exists as the intended hook) |
+| Early resolution (e.g. "seats just filled up," before the TTL expires) | Not built — everything currently expires only via TTL |
+| Native iOS/Android app | Not currently in this repo — see [About the mobile app](#about-the-mobile-app) |
+
+## Platforms
+
+**Web (this repo, primary target).** Next.js 15 + React 19 + Leaflet, in
+`apps/web`. Runs in any modern desktop or mobile browser. This is the fast
+iteration surface: no build queue, no store review, no native toolchain.
+
+**iOS / Android.** Not present in this repository right now. An earlier pass
+built a working Expo + `react-native-maps` app against the same backend, and
+it worked — typechecked, tested, built — but it's been removed rather than
+maintained alongside a web app that's still actively changing shape. The
+architecture that made that possible is still here and unchanged:
+
+- `packages/core` (domain logic, the `SosoGateway` port, the Supabase adapter,
+  the polling feed controller) has zero React, zero DOM, and zero React Native
+  in it. It's plain TypeScript.
+- Every platform-specific thing — the map component, hooks, the demo-mode
+  fallback — lives under that platform's own `apps/*` folder and consumes
+  `packages/core` as its only shared dependency.
+
+Rebuilding the mobile app later means creating `apps/mobile` and writing a
+map/composer/detail view against the same `SosoGateway` interface `apps/web`
+already uses — not re-deriving the schema, the validation rules, or the
+polling strategy. See [Adding a native app later](#adding-a-native-app-later).
+
+## Prerequisites
+
+- **Node.js 20 or later.** Check with `node --version`.
+- **A Supabase account** (free tier is enough) — optional. Without one, the
+  app runs in local demo mode; see below.
+- **The Supabase CLI**, only if you want to run the real backend locally
+  instead of a hosted project: [supabase.com/docs/guides/cli](https://supabase.com/docs/guides/cli).
+
+## Build and run
+
+```bash
+git clone <this repo> soso && cd soso
+npm install
+```
+
+That one `npm install` covers `packages/core` and `apps/web` together — they
+share a single npm workspace (see [Why the workspace only has two
+members](#why-the-workspace-only-has-two-members)).
+
+### Run without a backend (fastest path)
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:3000`. With no `.env.local`, the app drops straight
+into demo mode — a few seeded reports near Tokyo Station, fully interactive,
+persisted to your browser's `localStorage`. Good enough to look at the whole
+interaction loop in under a minute.
+
+### Run against a real Supabase backend
+
+1. Create a Supabase project (or run one locally with `supabase start`, from
+   the repo root — `supabase/` there is already configured).
+2. Apply the schema:
+
+   ```bash
+   npm run db:reset
+   ```
+
+   This runs every file in `supabase/migrations/` in order, then
+   `supabase/seed.sql`, which is where the actual product configuration lives
+   — every category's TTL, proximity rule, and body limit is a row there, not
+   a line of application code. Worth reading on its own.
+3. Copy `apps/web/.env.local.example` to `apps/web/.env.local` and fill in
+   your project's URL and anon key (Supabase dashboard → Settings → API).
+4. In the Supabase dashboard, enable **Authentication → Providers →
+   Anonymous** — the app signs users in anonymously so posting doesn't need a
+   signup flow yet (see [Known gaps](#known-gaps) for why that's temporary).
+5. `npm run dev` again.
+
+If any of that is misconfigured or unreachable, you'll silently get demo mode
+back rather than a broken page — see the next section.
+
+### Tests and typechecking
+
+```bash
+npm test         # packages/core — 46 tests, pure logic, no database needed
+npm run typecheck # packages/core and apps/web together
+npm run build     # production build of apps/web
+```
+
+Nothing in `packages/core`'s test suite touches a network or a database. The
+SQL itself is validated for syntax with a real Postgres parser as part of
+development, but **has not been executed against a live instance** — running
+`npm run db:reset` against a real project is the first real test of it. Budget
+for fixing something on that first run.
+
+## Demo mode
+
+`apps/web/src/web/bootstrap.ts` decides once, at startup, which backend to
+use. If `NEXT_PUBLIC_SUPABASE_URL` / `..._ANON_KEY` are missing, or a
+connection attempt to them fails or times out (6 seconds), it falls back to
+`apps/web/src/web/demo-gateway.ts` — a second, complete implementation of the
+exact same `SosoGateway` interface the real Supabase adapter implements,
+backed by `localStorage` instead of Postgres.
+
+Every screen in the app is written against that interface and has no idea
+which implementation answered it. That's the reason this was cheap to add:
+the port/adapter split wasn't done in anticipation of a demo mode
+specifically, but it's exactly the kind of thing that split is for.
+
+What demo mode gets right:
+
+- The same five enabled categories, with the same TTLs, proximity radii, body
+  limits, and subtypes — hand-mirrored from `supabase/seed.sql` (see the
+  warning comment at the top of `demo-gateway.ts`: there's nothing keeping
+  these two in sync automatically).
+- The same corroboration/auto-hide rule (3+ disputes, outnumbering
+  confirmations more than 2:1, hides a post).
+- The same validation error codes, so the UI's error messages don't diverge
+  between modes.
+
+What it deliberately doesn't get right:
+
+- **It is not a security boundary.** The real backend's rules are enforced in
+  Postgres, where the browser can't touch them. Demo mode's rules run in the
+  browser the user controls — anyone with devtools open can bypass every one
+  of them. That's fine, because demo mode only ever touches that one browser's
+  own local storage; there's no shared data to protect.
+- **No location fuzzing runs in practice.** The five enabled categories all
+  have `locationPrecisionM = 0`, so this never triggers today even though the
+  code path exists for parity with `create_post`.
+- **A backend that goes down mid-session isn't detected.** The gateway is
+  resolved once, at startup, and held for the life of the tab. If Supabase was
+  reachable when the page loaded and then goes away, the app doesn't notice or
+  fall back — that would need a circuit breaker re-testing connectivity and
+  swapping the gateway under a live feed controller, which is a real feature,
+  not a fallback.
+
+## The architecture, briefly
+
+```
+packages/core/     Domain logic, the SosoGateway port, the Supabase adapter,
+                    the incremental-fetch feed controller. Pure TypeScript —
+                    no React, no DOM, no platform code. Tested in isolation.
+apps/web/           Next.js + Leaflet. Owns everything platform-specific:
+                    the map component, React hooks, the demo-mode fallback.
+supabase/           The schema. migrations/ is the mechanism; seed.sql is the
+                    product spec — read it to see what each category actually
+                    does.
+```
+
+**One `posts` table, configuration in a table, not branches in code.** An
+incident, a lost wallet, and a seat-availability note are the same underlying
+object with different rows in `post_categories`. Adding a category is an
+`INSERT`. Disabling one during a legal review is an `UPDATE`. See the extended
+comments in `supabase/migrations/20260828000003_core.sql` and `seed.sql`.
+
+**Writes go through `SECURITY DEFINER` functions, not RLS insert policies.**
+`create_post` is where TTL clamping, proximity checks, rate limits, and body
+length all run together, in one place, with error codes the client can
+actually branch on. A client cannot write a post directly — that's
+deliberate, and it's what "server-side validation" concretely means here: the
+web form doesn't duplicate these rules, it just submits and displays whatever
+the server decides. See `supabase/migrations/20260828000005_api.sql`.
+
+**The feed is polled incrementally, not refetched.** `feed_delta` takes a
+cursor and returns only what changed since it, plus a tombstone list for
+anything that stopped being live. A quiet viewport costs about 150 bytes per
+poll instead of tens of kilobytes. This is also why pins expire automatically
+in the UI with no extra request: every pin already carries its own
+`expiresAt`, and the client stops drawing it once that passes.
+
+## Why the workspace only has two members
+
+`packages/core` and `apps/web` share one npm workspace and one `node_modules`.
+A React Native app does not belong in that same install: React Native and
+Next.js need incompatible major versions of `react`/`react-dom`, and npm's
+hoisting will happily produce a broken tree if you ask it to satisfy both at
+once (this actually happened while building this repo — the fix was
+separating the installs, not pinning a version). If `apps/mobile` comes back,
+it should get its **own** `npm install`, consuming `packages/core` the same
+way it did before removal: plain relative filesystem imports into
+`packages/core/src`, which need no workspace symlink or module resolution at
+all.
+
+## Adding a native app later
+
+The interface to build against is `SosoGateway` in
+`packages/core/src/data/gateway.ts` — five methods: load categories, an
+incremental feed fetch, per-cell counts, post detail, and the four writes
+(create, vote, report). `apps/web`'s `SosoMap.tsx`, `hooks.ts`, and
+`ReportForm.tsx` are a complete worked example of a client built against that
+interface: the map rendering and the React bindings are the parts that would
+actually need rewriting for React Native, not the data layer underneath them.
+
+A prior version of this repo did exactly that with Expo + `react-native-maps`,
+including a discrete-freshness-state marker strategy (native `Marker` views
+can't afford a continuously animated fade the way an SVG can) and a Metro
+monorepo config. Neither survived into this version, but the pattern is real
+and worth re-deriving rather than guessing at from scratch.
+
+## Deploying to GitHub Pages
+
+This works, and it works specifically *because* every Supabase call in this
+app already happens in the browser (`src/web/supabase.ts`, `demo-gateway.ts`)
+— there are no server components fetching data, no route handlers, no server
+actions. Next has nothing server-side to give up, which is what
+`output: "export"` in `next.config.ts` needs to be true. That setting makes
+`next build` emit a plain folder of HTML/JS/CSS (`apps/web/out`) instead of
+anything requiring a Node server — exactly what GitHub Pages, a static file
+host, can serve.
+
+**One thing to decide first: user page or project page.**
+
+- A repo literally named `<your-github-username>.github.io` deploys to your
+  domain root (`https://<username>.github.io/`). No extra config.
+- Any other repo name deploys under a subpath
+  (`https://<username>.github.io/<repo-name>/`), and Next needs to know that
+  subpath at build time via `basePath` — get this wrong and the page loads
+  with every asset 404ing, because the HTML asks for `/​_next/...` when the
+  files actually live at `/<repo-name>/_next/...`.
+
+`next.config.ts` reads this from a `NEXT_BASE_PATH` env var, empty by
+default, so local dev is unaffected either way.
+
+**Setup, once:**
+
+1. Repo → Settings → Pages → **Build and deployment → Source: GitHub
+   Actions.**
+2. Repo → Settings → Secrets and variables → Actions → **Variables** tab (not
+   Secrets — see why below) → add `NEXT_PUBLIC_SUPABASE_URL` and
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`. If this is a project page, also add
+   `NEXT_BASE_PATH` set to `/<repo-name>`. Skip all three and the site will
+   simply build in demo mode, same as running it locally with no `.env.local`.
+3. Push to `main`. `.github/workflows/deploy-pages.yml` installs, runs the
+   `packages/core` test suite, builds the static export with those values
+   baked in, and publishes it.
+
+**Why repository *variables* and not *secrets*:** a Supabase anon key is
+designed to be public — it's what's protecting the data that matters, Row
+Level Security, not keeping the key hidden. `NEXT_PUBLIC_*` values get
+compiled directly into the JavaScript bundle at build time (there's no server
+left at request time to read `process.env` from), so it would end up visible
+in the shipped files regardless of which GitHub Actions context supplied it.
+Putting it in **Secrets** would suggest a confidentiality guarantee that
+doesn't exist and isn't needed.
+
+**The `.nojekyll` gotcha:** GitHub Pages runs the Jekyll static site generator
+over your files by default, and Jekyll ignores any folder starting with an
+underscore — which is exactly what Next names its asset folder,
+`_next/`. Without a `.nojekyll` file, Pages silently drops every JS and CSS
+file and you get a blank page with a wall of 404s in the console. This repo
+already has an empty `apps/web/public/.nojekyll`, which `next build` copies
+into `out/` automatically; you don't need to do anything about it unless
+you've deleted it.
+
+**Updating the Supabase URL or key later** means pushing again — these values
+are baked into the build, not read at runtime, so editing the repo variable
+alone doesn't change anything live until the next deploy.
+
+**Verified, not assumed:** both the root-page (`NEXT_BASE_PATH` unset) and
+project-page (`NEXT_BASE_PATH=/soso`) builds were run end-to-end as part of
+building this repo, and the exported HTML's asset references were checked
+byte-for-byte to confirm the `basePath` prefix landed on every one of them,
+not just asserted from documentation.
+
+## Known gaps
+
+
+
+- **The SQL has never run against a live Postgres instance.** Every migration
+  and `seed.sql` is validated for syntax with a real Postgres parser as part
+  of development, and that's all. `npm run db:reset` against a real project
+  is the first real test.
+- **Anonymous sign-in is a development shortcut, not a launch setting.** An
+  anonymous Supabase account costs nothing to create, so the per-user rate
+  limit and reputation floor in `create_post` currently defend against one
+  account, not one person with a script. This needs phone verification before
+  the Supabase-backed mode is used with strangers.
+- **No early resolution.** A `seats` post lives for its full 20-minute TTL even
+  if the tables fill up two minutes in. There's no `resolve_post` RPC. Given
+  that `seats` is explicitly a launched feature now, this is the most
+  material gap to close next.
+- **No photo uploads**, despite `post_media` existing in the schema.
+- **No push notifications**, despite `cell_subscriptions` existing as the
+  intended hook — the Edge Function that would publish to FCM on insert isn't
+  built.
+- **Demo mode and `seed.sql` can silently drift.** There is nothing enforcing
+  that a category change in the database gets mirrored into
+  `demo-gateway.ts`'s hand-written config. If you change a category's
+  behaviour, update both.
+- **A live backend outage mid-session isn't detected** — see
+  [Demo mode](#demo-mode) above.
+- **No Japanese UI strings.** `label_ja` exists in the schema and is loaded
+  into `CategoryConfig`, but the web app only ever renders `labelEn`.
+  Bilingual support is a real requirement for this market and is currently
+  unstarted.
+- **GitHub Pages has no server at all**, so it inherits every limitation of
+  the Supabase-anon-key-in-the-browser model rather than adding new ones:
+  fine for this app today, but it means there's nowhere to eventually add a
+  server-side moderation webhook, an image-resizing endpoint, or anything
+  else that shouldn't run in the visitor's own browser — that would need a
+  different host (Vercel, or a small Node server) when the time comes.
+- **Pages' CDN caches aggressively.** A deploy can take a few minutes to
+  actually replace what visitors see, which matters if you're debugging a
+  just-pushed change and it looks like nothing happened yet.

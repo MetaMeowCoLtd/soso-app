@@ -1,0 +1,15 @@
+{
+  "name": "soso",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Soso monorepo: packages/core (shared domain, gateway port, feed controller) and apps/web (Next.js + Leaflet). No mobile app right now — see README.",
+  "workspaces": ["packages/core", "apps/web"],
+  "scripts": {
+    "test": "npm run test -w soso-core",
+    "typecheck": "npm run typecheck -w soso-core && npm run typecheck -w soso-web",
+    "dev": "npm run dev -w soso-web",
+    "build": "npm run build -w soso-web",
+    "db:reset": "supabase db reset",
+    "db:types": "supabase gen types typescript --local > packages/core/src/data/database.types.ts"
+  }
+}

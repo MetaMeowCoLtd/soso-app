@@ -1,0 +1,28 @@
+project_id = "soso"
+
+[db]
+port = 54322
+major_version = 15
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[api]
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 500
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+
+# The web app calls signInAnonymously() so posting works without a signup flow.
+# This is off by default in a hosted Supabase project and must be enabled in
+# the dashboard too (Authentication -> Providers -> Anonymous). It's a
+# development shortcut, not a launch setting — see apps/web/src/web/supabase.ts.
+# If it's disabled, or the project is unreachable at all, the web app falls
+# back to a local demo mode automatically rather than failing outright — see
+# apps/web/src/web/bootstrap.ts.
+enable_anonymous_sign_ins = true

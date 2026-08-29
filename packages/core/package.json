@@ -1,0 +1,19 @@
+{
+  "name": "soso-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Soso domain logic, gateway port and feed controller. Platform-agnostic: no DOM, no React Native, no framework. Consumed by apps/web and (later) apps/mobile.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.7.5"
+  }
+}
