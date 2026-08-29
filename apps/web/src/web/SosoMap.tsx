@@ -72,6 +72,8 @@ interface SosoMapProps {
   onMapClick: (at: Coordinates) => void;
   onPinClick: (pin: Pin) => void;
   selectedId?: string;
+  /** Plays the "pop" landing animation on this pin once it appears — see `pinIcon`. */
+  celebrateId?: string | null;
 }
 
 function ViewportWatcher({
@@ -226,7 +228,7 @@ const draftIcon = L.divIcon({
   iconAnchor: [21, 36],
 });
 
-function pinIcon(pin: Pin, nowSeconds: number, selected: boolean) {
+function pinIcon(pin: Pin, nowSeconds: number, celebrate: boolean) {
   const look = lookOf(pin.category);
   const span = pin.expiresAt - pin.createdAt;
   const fraction = span > 0 ? Math.max(0, Math.min(1, (pin.expiresAt - nowSeconds) / span)) : 0;
@@ -236,7 +238,7 @@ function pinIcon(pin: Pin, nowSeconds: number, selected: boolean) {
 
   return L.divIcon({
     className: "soso-pin-shell",
-    html: `<span class="soso-pin${selected ? " soso-pin-pop" : ""}" style="--pin-color:${look.color};opacity:${opacity}"><span>${look.icon}</span></span>`,
+    html: `<span class="soso-pin${celebrate ? " soso-pin-pop" : ""}" style="--pin-color:${look.color};opacity:${opacity}"><span>${look.icon}</span></span>`,
     iconSize: [48, 48],
     iconAnchor: [24, 42],
   });
@@ -263,6 +265,7 @@ export default function SosoMap({
   onMapClick,
   onPinClick,
   selectedId,
+  celebrateId,
 }: SosoMapProps) {
   const handlePinClick = useCallback((pin: Pin) => onPinClick(pin), [onPinClick]);
 
@@ -273,12 +276,12 @@ export default function SosoMap({
             <Marker
               key={pin.id}
               position={[pin.lat, pin.lng]}
-              icon={pinIcon(pin, nowSeconds, pin.id === selectedId)}
+              icon={pinIcon(pin, nowSeconds, pin.id === selectedId || pin.id === celebrateId)}
               eventHandlers={{ click: () => handlePinClick(pin) }}
             />
           ))
         : null,
-    [feed.mode, feed.pins, placing, nowSeconds, selectedId, handlePinClick],
+    [feed.mode, feed.pins, placing, nowSeconds, selectedId, celebrateId, handlePinClick],
   );
 
   const countMarkers = useMemo(

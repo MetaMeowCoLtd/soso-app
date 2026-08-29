@@ -22,6 +22,17 @@ const fallbackLocation: Coordinates = { latitude: DEFAULT_CENTER[0], longitude: 
 /** How close the map's centre has to be to "you" for the locate button to light up. */
 const AT_LOCATION_THRESHOLD_M = 60;
 
+/**
+ * How long the pin-drop animation plays (`.draft-pin`'s `pin-fall` keyframes
+ * in globals.css) before the category picker appears. Kept as one named
+ * constant because the two have to agree: opening the composer any earlier
+ * would cut the drop animation off mid-bounce.
+ */
+const PIN_DROP_ANIMATION_MS = 650;
+
+/** How long a freshly-created pin plays its "pop" animation once it appears on the map. */
+const CELEBRATE_DURATION_MS = 1600;
+
 export default function Home() {
   const [resolved, setResolved] = useState<{ gateway: SosoGateway; mode: GatewayMode } | null>(null);
 
@@ -114,6 +125,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [draftAt, setDraftAt] = useState<Coordinates | null>(null);
   const [showComposer, setShowComposer] = useState(false);
   const [showFeedDrawer, setShowFeedDrawer] = useState(false);
+  const dropTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [celebrateId, setCelebrateId] = useState<string | null>(null);
+  const celebrateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
@@ -147,9 +162,27 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   );
 
   function beginPin(at: Coordinates) {
+    if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
+    // The draft marker appears — and the map stops accepting further clicks
+    // (see `placing` below) — the instant a location is chosen, so the drop
+    // animation plays immediately. The category picker itself is deliberately
+    // delayed until that animation finishes, so the sequence reads as one
+    // continuous motion (drop, *then* choose) rather than the form just
+    // appearing on top of an unfinished animation.
     setDraftAt(at);
-    setShowComposer(true);
+    setShowComposer(false);
     setNotice("Pin placed — now give it a type!");
+    dropTimeoutRef.current = setTimeout(() => setShowComposer(true), PIN_DROP_ANIMATION_MS);
+  }
+
+  /** Closing the composer for any reason — cancel, backdrop tap, or a completed submit. */
+  function cancelComposer() {
+    if (dropTimeoutRef.current) {
+      clearTimeout(dropTimeoutRef.current);
+      dropTimeoutRef.current = null;
+    }
+    setShowComposer(false);
+    setDraftAt(null);
   }
 
   /** "Drop a pin" / "Click map or start here": wherever the map is looking right now. */
@@ -169,13 +202,22 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
   async function submitReport(input: NewPost): Promise<Pin> {
     const pin = await gateway.createPost(input);
-    setShowComposer(false);
-    setDraftAt(null);
+    cancelComposer();
     // Refresh rather than inserting the draft locally: some categories fuzz
     // the coordinates server-side, so the authoritative pin is whatever the
     // next delta returns, not the one the client sent.
     refresh();
     setNotice(mode === "supabase" ? "Your pin is live for everyone! ✨" : "Your pin is live on this device ✨");
+
+    // A short celebratory pop once the new pin actually appears on the map —
+    // see `pinIcon` in SosoMap.tsx. Cosmetic only: it never gates anything,
+    // and clears itself even if this exact id somehow never shows up.
+    if (celebrateTimeoutRef.current) clearTimeout(celebrateTimeoutRef.current);
+    setCelebrateId(pin.id);
+    celebrateTimeoutRef.current = setTimeout(() => {
+      setCelebrateId((current) => (current === pin.id ? null : current));
+    }, CELEBRATE_DURATION_MS);
+
     return pin;
   }
 
@@ -208,9 +250,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       <SosoMap
         feed={view}
         nowSeconds={nowSeconds}
-        placing={showComposer ? draftAt : null}
+        placing={draftAt}
         focusAt={focusAt}
         flyToSignal={flyToSignal}
+        celebrateId={celebrateId}
         onViewportChange={handleViewportChange}
         onMapClick={beginPin}
         onPinClick={selectPin}
@@ -308,12 +351,12 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       </aside>
 
       {showComposer && draftAt && (
-        <div className="composer-backdrop" role="presentation" onMouseDown={() => setShowComposer(false)}>
+        <div className="composer-backdrop" role="presentation" onMouseDown={cancelComposer}>
           <div role="dialog" aria-modal="true" aria-label="Create a local pin" onMouseDown={(e) => e.stopPropagation()}>
             <ReportForm
               categories={categories}
               location={draftAt}
-              onCancel={() => setShowComposer(false)}
+              onCancel={cancelComposer}
               onSubmit={submitReport}
             />
           </div>
