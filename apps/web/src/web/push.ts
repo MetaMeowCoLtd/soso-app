@@ -122,10 +122,14 @@ export async function subscribeToPush(vapidPublicKey: string): Promise<WebPushSu
     throw new Error(permission === "denied" ? "Notifications are blocked" : "Permission not granted");
   }
 
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-  });
+  // Safari can retain a subscription even when the page's initial lookup
+  // missed it (for example, directly after a Home Screen relaunch). Calling
+  // subscribe() again in that state throws InvalidStateError; reuse it.
+  const subscription = await registration.pushManager.getSubscription()
+    ?? await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
 
   return toWebPushSubscription(subscription);
 }

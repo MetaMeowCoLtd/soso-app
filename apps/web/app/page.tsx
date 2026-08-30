@@ -178,7 +178,19 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         setNotice("You'll be notified about new pins near here! 🔔");
       }
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Couldn't update notifications.");
+      // `soso/unknown` previously hid the useful PostgREST cause (most often
+      // a missing `subscribe_to_push` migration or stale API schema), which
+      // made a broken subscription look like a browser/iOS problem.
+      const cause = err instanceof Error && "cause" in err ? (err as Error & { cause?: unknown }).cause : null;
+      const databaseMessage = typeof cause === "object" && cause !== null && "message" in cause
+        ? String((cause as { message: unknown }).message)
+        : null;
+      console.error("[soso] Could not update push notifications", err);
+      setNotice(
+        err instanceof Error && err.message === "soso/unknown"
+          ? `Push subscription failed: ${databaseMessage ?? "database RPC unavailable"}`
+          : err instanceof Error ? err.message : "Couldn't update notifications.",
+      );
     } finally {
       setPushBusy(false);
     }

@@ -441,10 +441,9 @@ installation instructions instead of a non-functional control.
   reached, with one row per subscribed device. This is separate from
   `cell_subscriptions` so that a user opening the application on a second
   device does not need to redeclare which areas matter to them.
-- A trigger on `posts` issues an asynchronous HTTP call to an Edge Function
-  for every new live report. If push notifications have not been
-  configured (see Setup below), the trigger takes no further action, and
-  the rest of the application is unaffected.
+- A Supabase Dashboard Database Webhook calls an Edge Function for every new
+  report. The function accepts the Dashboard's `INSERT` event format, selects
+  only live reports, then looks up and notifies matching subscribers.
 - `supabase/functions/notify-new-pin/` holds the VAPID private key as a
   server secret, since a private key cannot be present in a browser or in a
   version-controlled migration file. It queries matching subscribers, sends
@@ -476,34 +475,34 @@ None of the following occurs automatically from a `git push`.
    ```bash
    supabase secrets set VAPID_PUBLIC_KEY=<public key>
    supabase secrets set VAPID_PRIVATE_KEY=<private key>
-   supabase secrets set PUSH_TRIGGER_SECRET=<a random string>
    ```
 
-3. **Deploy the function without Supabase's JWT verification.** This
-   function is called only by the database trigger, never by a browser, and
-   authenticates the caller using the shared secret configured above:
+   `PUSH_TRIGGER_SECRET` is optional in this version. It is retained only
+   for installations still using the old pg_net database trigger; the
+   Dashboard webhook below authenticates with the project's service key.
+
+3. **Deploy the function without Supabase's JWT verification.** It is called
+   by the Database Webhook, never by a browser. The function manually checks
+   the service-key bearer header that the webhook adds in the next step:
 
    ```bash
    supabase functions deploy notify-new-pin --no-verify-jwt
    ```
 
-4. **Provide the database with the function's URL and secret.** In the SQL
-   Editor, once. This is intentionally not part of a migration, since a
-   Vault secret's value should not be committed to version control. The URL
-   format below (`<project-ref>.supabase.co/functions/v1/<name>`) is the
-   correct, current format; an earlier version of this document specified
-   `<project-ref>.functions.supabase.co/<name>`, which does not resolve, and
-   any deployment following that instruction should be corrected to the
-   format shown here:
+4. **Create the Database Webhook in the Supabase Dashboard.** Open
+   **Database > Webhooks > Create a new webhook** and use:
 
-   ```sql
-   select vault.create_secret('https://<project-ref>.supabase.co/functions/v1/notify-new-pin', 'push_function_url');
-   select vault.create_secret('<the same random string from step 2>', 'push_trigger_secret');
-   ```
+   - Name: `notify-new-pin`
+   - Table: `public.posts`
+   - Events: **Insert** only
+   - Type: **Supabase Edge Function**
+   - Edge Function: `notify-new-pin`
+   - Enable **Add auth header with service key**
 
-   Until this step is completed, the `posts_notify_new` trigger finds no
-   configured URL and takes no action. The rest of the application is
-   unaffected either way.
+   Save it, then make one test post. Do not also use the old `pg_net` trigger:
+   migration `20260830000008_dashboard_push_webhook.sql` removes it so a new
+   report produces one notification, not two. For an existing hosted project,
+   apply that migration with `supabase db push` before testing.
 
 5. **Provide the client with the public key.** This value is safe to
    expose; that is the purpose of a VAPID public key. Add it to
@@ -527,10 +526,37 @@ None of the following occurs automatically from a `git push`.
   effect, since a subscription with no endpoint delivers nothing, but the
   two operations are not symmetric.
 - **The shared secret is a simplified authentication mechanism, not a
-  robust access control model.** A party in possession of the secret could
-  trigger unnecessary invocations of the function, but the function's own
-  query logic only ever sends notifications to endpoints already present in
-  `push_endpoints`. There is no path by which this exposes data.
+  robust access control model.** It is used only by legacy pg_net deployments.
+  The recommended Database Webhook uses the project's service-key header;
+  neither credential is exposed to the browser.
+
+### Debugging a subscription or delivery
+
+If tapping the bell reports `soso/unknown`, this version now exposes the
+underlying database message in the in-app notice and logs the full error in
+the browser console. The usual cause is that migration 0007 has not been
+applied or PostgREST has not refreshed its schema cache. Run `supabase db
+push`, then retry once after a minute.
+
+After a successful subscription, the bell becomes yellow. It means both the
+browser subscription and the `subscribe_to_push` database call succeeded.
+Check the saved records in the SQL Editor (run as a project owner):
+
+```sql
+select user_id, endpoint, created_at from public.push_endpoints;
+select user_id, cell_id, label from public.cell_subscriptions order by cell_id;
+```
+
+For a delivery test, use two different browsers or two anonymous accounts.
+On the receiving device, first enable the bell. Post from the other account
+within the same small map area; Soso watches a 3×3 cell block around the map
+centre, so a report in a different neighbourhood will correctly match nobody.
+Then open **Edge Functions > notify-new-pin > Logs**. A healthy invocation
+contains `processing post` and `delivery complete` with a nonzero `sent`.
+`no subscribers for cell` means the devices are not watching the same map
+cell; `Unauthorized` means the webhook was created without **Add auth header
+with service key**; `unexpected webhook payload` means it is not configured
+as an INSERT webhook on `public.posts`.
 
 ## Known limitations
 

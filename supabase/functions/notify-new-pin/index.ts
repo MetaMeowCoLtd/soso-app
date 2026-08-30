@@ -1,8 +1,9 @@
 // Edge Function: notify-new-pin
 //
-// Called by the `posts_notify_new` trigger (see migration 20260829000007) once
-// per new live post. Looks up who's subscribed to that post's cell, and pushes
-// a notification to each of their registered browsers.
+// Called by a Supabase Database Webhook once per new live post. Looks up who's
+// subscribed to that post's cell, and pushes a notification to each of their
+// registered browsers. It also accepts the older direct-trigger payload so an
+// existing deployment can be migrated without breaking delivery mid-release.
 //
 // UNVERIFIED — READ THIS FIRST
 // -----------------------------
@@ -36,21 +37,30 @@
 //      supabase secrets set VAPID_PUBLIC_KEY=<from the README>
 //      supabase secrets set VAPID_PRIVATE_KEY=<from the README>
 //   2. supabase functions deploy notify-new-pin --no-verify-jwt
-//   3. In the SQL editor, once:
-//      select vault.create_secret('<function URL>', 'push_function_url');
-//      select vault.create_secret('<same random string as step 1>', 'push_trigger_secret');
-//
-// Until step 3 is done, the trigger finds no URL in Vault and does nothing —
-// the rest of the app is completely unaffected by push being unconfigured.
+//   3. Create a Database Webhook for INSERTs on public.posts which invokes
+//      this function and has "Add auth header with service key" enabled.
+//      The README contains the complete, UI-specific walkthrough.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3";
 
-interface TriggerPayload {
+interface PostPayload {
   post_id: string;
   cell_id: number;
   category_key: string;
   author_id: string;
+}
+
+/** The body Supabase Database Webhooks send to an Edge Function. */
+interface DatabaseWebhookPayload {
+  type?: string;
+  record?: {
+    id?: unknown;
+    cell_id?: unknown;
+    category_key?: unknown;
+    author_id?: unknown;
+    status?: unknown;
+  };
 }
 
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
@@ -65,14 +75,63 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails("mailto:support@example.com", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Normalise both delivery formats:
+ * - Database Webhook: { type: "INSERT", record: { id, cell_id, ... } }
+ * - legacy pg_net trigger: { post_id, cell_id, category_key, author_id }
+ */
+function parsePostPayload(value: unknown): PostPayload | null {
+  if (!isRecord(value)) return null;
+
+  const isWebhook = isRecord(value.record);
+  if (isWebhook && value.type !== "INSERT") return null;
+
+  const source = isWebhook ? value.record : value;
+  const postId = source.id ?? source.post_id;
+  const cellId = source.cell_id;
+  const categoryKey = source.category_key;
+  const authorId = source.author_id;
+
+  if (
+    typeof postId !== "string" ||
+    typeof cellId !== "number" ||
+    !Number.isInteger(cellId) ||
+    typeof categoryKey !== "string" ||
+    typeof authorId !== "string"
+  ) {
+    return null;
+  }
+
+  // A Dashboard webhook runs for all INSERTs. Keep the old trigger's
+  // behaviour: only live posts result in an alert.
+  if (isWebhook && source.status !== "live") return null;
+
+  return { post_id: postId, cell_id: cellId, category_key: categoryKey, author_id: authorId };
+}
+
+function isAuthorized(req: Request): boolean {
+  const triggerSecret = req.headers.get("x-push-secret");
+  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+
+  // Recommended: the Database Webhook's "Add auth header with service key"
+  // option. The custom secret remains for installations that still use the
+  // older pg_net trigger.
+  return (
+    (!!SERVICE_ROLE_KEY && bearer === SERVICE_ROLE_KEY) ||
+    (!!PUSH_TRIGGER_SECRET && triggerSecret === PUSH_TRIGGER_SECRET)
+  );
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  // The one access control this function has. See the module comment for why
-  // this exists instead of Supabase's own JWT verification.
-  if (!PUSH_TRIGGER_SECRET || req.headers.get("x-push-secret") !== PUSH_TRIGGER_SECRET) {
+  if (!isAuthorized(req)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -83,12 +142,24 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
   }
 
-  let payload: TriggerPayload;
+  let rawPayload: unknown;
   try {
-    payload = await req.json();
+    rawPayload = await req.json();
   } catch {
     return new Response("Bad request", { status: 400 });
   }
+
+  const payload = parsePostPayload(rawPayload);
+  if (!payload) {
+    console.error("[notify-new-pin] unexpected webhook payload", rawPayload);
+    return new Response("Bad request", { status: 400 });
+  }
+
+  console.log("[notify-new-pin] processing post", {
+    postId: payload.post_id,
+    cellId: payload.cell_id,
+    category: payload.category_key,
+  });
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -112,6 +183,7 @@ Deno.serve(async (req: Request) => {
     .map((s) => s.user_id);
 
   if (userIds.length === 0) {
+    console.log("[notify-new-pin] no subscribers for cell", payload.cell_id);
     return new Response(JSON.stringify({ sent: 0, reason: "no subscribers for this cell" }), { status: 200 });
   }
 
@@ -166,6 +238,14 @@ Deno.serve(async (req: Request) => {
   if (staleEndpoints.length > 0) {
     await supabase.from("push_endpoints").delete().in("endpoint", staleEndpoints);
   }
+
+  console.log("[notify-new-pin] delivery complete", {
+    postId: payload.post_id,
+    matchedUsers: userIds.length,
+    endpoints: (endpoints ?? []).length,
+    sent,
+    stale: staleEndpoints.length,
+  });
 
   return new Response(JSON.stringify({ sent, stale: staleEndpoints.length }), { status: 200 });
 });

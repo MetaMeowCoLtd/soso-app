@@ -24,6 +24,8 @@ export const SOSO_ERROR_CODES = [
   'soso/invalid_vote',
   'soso/post_unavailable',
   'soso/cannot_vote_own',
+  'soso/push_not_configured',
+  'soso/push_subscription_invalid',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -78,5 +80,7 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/invalid_vote': 'Invalid response.',
   'soso/post_unavailable': 'That post is no longer available.',
   'soso/cannot_vote_own': 'You cannot confirm your own post.',
+  'soso/push_not_configured': 'Notifications are not configured for this project yet.',
+  'soso/push_subscription_invalid': 'This browser gave Soso an invalid notification subscription. Try enabling alerts again.',
   'soso/unknown': 'Something went wrong. Try again.',
 };
