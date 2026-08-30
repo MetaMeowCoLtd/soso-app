@@ -26,7 +26,7 @@
 -- migration file committed to git — can read it. So this migration only goes
 -- as far as firing an async HTTP call (via pg_net) to a Supabase Edge
 -- Function on every new live post; the Edge Function (supabase/functions/
--- notify-new-post/) holds the private key as a server secret and does the
+-- notify-new-pin/) holds the private key as a server secret and does the
 -- actual sending. See that function's own comments for the rest of the story,
 -- and the project README for the manual setup this requires — none of it is
 -- automatic from just running these migrations.

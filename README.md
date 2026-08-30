@@ -88,7 +88,7 @@ support](#native-application-support).
 ## Installation
 
 If this project was obtained as a downloaded archive rather than cloned from
-an existing Git repository, initialize a git repository first. Skipping this step is the
+an existing Git repository, initialize one first. Skipping this step is the
 most common cause of a repository missing its `.github` directory, or a CI
 run failing because `package-lock.json` was never committed:
 
@@ -413,8 +413,11 @@ TypeScript compiles, and the Web Push and VAPID APIs are called according
 to their documented usage. The most likely point of failure on first
 deployment is whether Deno's Node compatibility layer runs the
 `npm:web-push` import without modification. If notifications do not arrive
-after completing the setup steps below, investigate this first, using
-`supabase functions logs notify-new-post`.
+after completing the setup steps below, investigate this first, using the
+Dashboard: Edge Functions > notify-new-pin > Logs. The CLI's
+`functions logs` subcommand does not exist in current versions and should
+not be relied on; the Dashboard is the reliable path regardless of CLI
+version.
 
 ### iOS requirement
 
@@ -442,7 +445,7 @@ installation instructions instead of a non-functional control.
   for every new live report. If push notifications have not been
   configured (see Setup below), the trigger takes no further action, and
   the rest of the application is unaffected.
-- `supabase/functions/notify-new-post/` holds the VAPID private key as a
+- `supabase/functions/notify-new-pin/` holds the VAPID private key as a
   server secret, since a private key cannot be present in a browser or in a
   version-controlled migration file. It queries matching subscribers, sends
   notifications via `web-push`, and removes any subscription a push service
@@ -481,15 +484,20 @@ None of the following occurs automatically from a `git push`.
    authenticates the caller using the shared secret configured above:
 
    ```bash
-   supabase functions deploy notify-new-post --no-verify-jwt
+   supabase functions deploy notify-new-pin --no-verify-jwt
    ```
 
 4. **Provide the database with the function's URL and secret.** In the SQL
    Editor, once. This is intentionally not part of a migration, since a
-   Vault secret's value should not be committed to version control:
+   Vault secret's value should not be committed to version control. The URL
+   format below (`<project-ref>.supabase.co/functions/v1/<name>`) is the
+   correct, current format; an earlier version of this document specified
+   `<project-ref>.functions.supabase.co/<name>`, which does not resolve, and
+   any deployment following that instruction should be corrected to the
+   format shown here:
 
    ```sql
-   select vault.create_secret('https://<project-ref>.functions.supabase.co/notify-new-post', 'push_function_url');
+   select vault.create_secret('https://<project-ref>.supabase.co/functions/v1/notify-new-pin', 'push_function_url');
    select vault.create_secret('<the same random string from step 2>', 'push_trigger_secret');
    ```
 

@@ -1,4 +1,4 @@
-// Edge Function: notify-new-post
+// Edge Function: notify-new-pin
 //
 // Called by the `posts_notify_new` trigger (see migration 20260829000007) once
 // per new live post. Looks up who's subscribed to that post's cell, and pushes
@@ -35,7 +35,7 @@
 //   1. supabase secrets set PUSH_TRIGGER_SECRET=<random string>
 //      supabase secrets set VAPID_PUBLIC_KEY=<from the README>
 //      supabase secrets set VAPID_PRIVATE_KEY=<from the README>
-//   2. supabase functions deploy notify-new-post --no-verify-jwt
+//   2. supabase functions deploy notify-new-pin --no-verify-jwt
 //   3. In the SQL editor, once:
 //      select vault.create_secret('<function URL>', 'push_function_url');
 //      select vault.create_secret('<same random string as step 1>', 'push_trigger_secret');
@@ -103,7 +103,7 @@ Deno.serve(async (req: Request) => {
     .neq("user_id", payload.author_id);
 
   if (subsError) {
-    console.error("[notify-new-post] cell_subscriptions query failed:", subsError);
+    console.error("[notify-new-pin] cell_subscriptions query failed:", subsError);
     return new Response("Internal error", { status: 500 });
   }
 
@@ -121,7 +121,7 @@ Deno.serve(async (req: Request) => {
     .in("user_id", userIds);
 
   if (endpointsError) {
-    console.error("[notify-new-post] push_endpoints query failed:", endpointsError);
+    console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
     return new Response("Internal error", { status: 500 });
   }
 
@@ -157,7 +157,7 @@ Deno.serve(async (req: Request) => {
         if (status === 404 || status === 410) {
           staleEndpoints.push(row.endpoint);
         } else {
-          console.error("[notify-new-post] push failed:", status, err);
+          console.error("[notify-new-pin] push failed:", status, err);
         }
       }
     }),
