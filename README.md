@@ -88,7 +88,7 @@ support](#native-application-support).
 ## Installation
 
 If this project was obtained as a downloaded archive rather than cloned from
-an existing Git repository, initialize one first. Skipping this step is the
+an existing Git repository, initialize a git repository first. Skipping this step is the
 most common cause of a repository missing its `.github` directory, or a CI
 run failing because `package-lock.json` was never committed:
 
