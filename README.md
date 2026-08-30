@@ -475,15 +475,15 @@ None of the following occurs automatically from a `git push`.
    ```bash
    supabase secrets set VAPID_PUBLIC_KEY=<public key>
    supabase secrets set VAPID_PRIVATE_KEY=<private key>
+   supabase secrets set PUSH_TRIGGER_SECRET=<a long random value>
    ```
 
-   `PUSH_TRIGGER_SECRET` is optional in this version. It is retained only
-   for installations still using the old pg_net database trigger; the
-   Dashboard webhook below authenticates with the project's service key.
+   Keep the random value private. It authenticates the Dashboard webhook to
+   the function without putting a Supabase API key in a webhook header.
 
 3. **Deploy the function without Supabase's JWT verification.** It is called
    by the Database Webhook, never by a browser. The function manually checks
-   the service-key bearer header that the webhook adds in the next step:
+   the private webhook header configured in the next step:
 
    ```bash
    supabase functions deploy notify-new-pin --no-verify-jwt
@@ -497,7 +497,8 @@ None of the following occurs automatically from a `git push`.
    - Events: **Insert** only
    - Type: **Supabase Edge Function**
    - Edge Function: `notify-new-pin`
-   - Enable **Add auth header with service key**
+   - HTTP header: `x-push-secret` with the exact random value used for
+     `PUSH_TRIGGER_SECRET` in step 2
 
    Save it, then make one test post. Do not also use the old `pg_net` trigger:
    migration `20260830000008_dashboard_push_webhook.sql` removes it so a new
@@ -554,9 +555,9 @@ centre, so a report in a different neighbourhood will correctly match nobody.
 Then open **Edge Functions > notify-new-pin > Logs**. A healthy invocation
 contains `processing post` and `delivery complete` with a nonzero `sent`.
 `no subscribers for cell` means the devices are not watching the same map
-cell; `Unauthorized` means the webhook was created without **Add auth header
-with service key**; `unexpected webhook payload` means it is not configured
-as an INSERT webhook on `public.posts`.
+cell; `Unauthorized` means the webhook header is missing or does not match
+`PUSH_TRIGGER_SECRET`; `unexpected webhook payload` means it is not
+configured as an INSERT webhook on `public.posts`.
 
 ## Known limitations
 

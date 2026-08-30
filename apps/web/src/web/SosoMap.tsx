@@ -228,6 +228,27 @@ const draftIcon = L.divIcon({
   iconAnchor: [21, 36],
 });
 
+/**
+ * A stable pseudo-random number in [0, 1) derived from a pin's id.
+ *
+ * Deliberately not `Math.random()`. `pinIcon` runs on every re-render (each
+ * countdown tick, each pan), so a fresh random value would hand the pin a
+ * different animation offset every time, restarting its bob mid-cycle and
+ * making it visibly jump. Hashing the id gives a value that is stable for a
+ * given pin across its whole life, but well spread out between pins.
+ *
+ * FNV-1a: small, no dependencies, and good enough distribution for
+ * scattering animation timings.
+ */
+function stableUnitFromId(id: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    hash ^= id.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return ((hash >>> 0) % 10000) / 10000;
+}
+
 function pinIcon(pin: Pin, nowSeconds: number, celebrate: boolean) {
   const look = lookOf(pin.category);
   const span = pin.expiresAt - pin.createdAt;
@@ -236,9 +257,36 @@ function pinIcon(pin: Pin, nowSeconds: number, celebrate: boolean) {
   // this can be continuous here but is bucketed on mobile.
   const opacity = 0.45 + fraction * 0.55;
 
+  // Scatter the idle bob so pins do not all rise and fall in lockstep.
+  //
+  // The delay is NEGATIVE on purpose: a negative animation-delay starts the
+  // animation already partway through its cycle, whereas a positive one would
+  // leave the pin motionless until its turn came round, which looks worse than
+  // the synchronised version it replaces.
+  //
+  // Varying the duration as well as the phase matters. With a shared duration,
+  // pins offset only by phase stay permanently the same distance apart in the
+  // cycle; slightly different speeds keep them drifting relative to each other
+  // instead of ever settling into a visible pattern.
+  const variance = stableUnitFromId(pin.id);
+  const bobDuration = 2.1 + variance * 1.4; // 2.1s to 3.5s
+  const bobDelay = -(variance * bobDuration); // start somewhere inside the cycle
+  // A second, independent variation so pins differ in how far they travel, not
+  // just when. Offset the hash input so rise and duration are not correlated;
+  // otherwise every slow pin would also be a tall one.
+  const bobRise = 3 + stableUnitFromId(`${pin.id}-rise`) * 3; // 3px to 6px
+
+  const style = [
+    `--pin-color:${look.color}`,
+    `opacity:${opacity}`,
+    `--bob-duration:${bobDuration.toFixed(2)}s`,
+    `--bob-delay:${bobDelay.toFixed(2)}s`,
+    `--bob-rise:${bobRise.toFixed(1)}px`,
+  ].join(";");
+
   return L.divIcon({
     className: "soso-pin-shell",
-    html: `<span class="soso-pin${celebrate ? " soso-pin-pop" : ""}" style="--pin-color:${look.color};opacity:${opacity}"><span>${look.icon}</span></span>`,
+    html: `<span class="soso-pin${celebrate ? " soso-pin-pop" : ""}" style="${style}"><span>${look.icon}</span></span>`,
     iconSize: [48, 48],
     iconAnchor: [24, 42],
   });
