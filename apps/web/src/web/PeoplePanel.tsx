@@ -23,10 +23,21 @@ import type { UsePresenceResult } from "./usePresence";
 interface PeoplePanelProps {
   presence: UsePresenceResult;
   demoMode: boolean;
-  onClose: () => void;
+  /**
+   * Drives a minimize animation rather than an unmount. The panel stays
+   * mounted at all times (`usePresence`'s heartbeat lives in the parent
+   * regardless, so this costs nothing extra) and CSS alone collapses it
+   * toward the header icon on true, and restores it on false. A conditional
+   * `{!minimized && <PeoplePanel/>}` would unmount in the same render pass a
+   * class toggle happens in, leaving no time for the transition to play —
+   * exactly the difference between this reading as "minimized to that icon"
+   * versus "closed like a desktop dialog."
+   */
+  minimized: boolean;
+  onMinimize: () => void;
 }
 
-export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanelProps) {
+export default function PeoplePanel({ presence, demoMode, minimized, onMinimize }: PeoplePanelProps) {
   const [handleInput, setHandleInput] = useState("");
   const [confirmBlock, setConfirmBlock] = useState<string | null>(null);
   // Which friend's ⋯ menu is open, if any. Remove/Block used to sit directly
@@ -107,11 +118,29 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
   }
 
   return (
-    <aside className="people-frame" aria-label="People">
+    <aside
+      className={`people-frame ${minimized ? "minimized" : ""}`}
+      aria-label="People"
+      aria-hidden={minimized}
+      // Genuinely out of the tab order while minimized, not just visually
+      // hidden — otherwise a keyboard user could still tab into a panel
+      // that is, to a mouse user, an icon in the header.
+      inert={minimized || undefined}
+    >
       <div className="people-frame-head">
         <span className="people-frame-title">People</span>
-        <button className="people-frame-close" onClick={onClose} aria-label="Close" type="button">
-          ×
+        <button
+          className="people-frame-close"
+          onClick={onMinimize}
+          aria-label="Minimize"
+          title="Minimize"
+          type="button"
+        >
+          {/* A minimize dash rather than a close "×" — the glyph itself
+              should say "this collapses," not "this goes away." */}
+          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+            <rect x="1" y="5.25" width="10" height="1.5" rx=".75" fill="currentColor" />
+          </svg>
         </button>
       </div>
 

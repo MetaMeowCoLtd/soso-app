@@ -512,13 +512,15 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         </div>
       )}
 
-      {showPeople && (
-        <PeoplePanel
-          presence={presence}
-          demoMode={mode !== "supabase"}
-          onClose={() => setShowPeople(false)}
-        />
-      )}
+      {/* Always mounted, never conditionally rendered — see the comment on
+          PeoplePanel's `minimized` prop for why: a CSS-driven minimize
+          animation needs the component to still exist while it plays. */}
+      <PeoplePanel
+        presence={presence}
+        demoMode={mode !== "supabase"}
+        minimized={!showPeople}
+        onMinimize={() => setShowPeople(false)}
+      />
 
       {selectedPin && (
         <ReportDetail
