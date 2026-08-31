@@ -22,31 +22,65 @@
  * over-constrained, so WebKit may ignore its bottom edge and expose the
  * document background under the Home Indicator.
  */
-html { min-height:100%; background:#bcd9d2; }
-body { position:fixed; inset:0; width:100%; margin:0; overflow:hidden; overscroll-behavior:none; background:#bcd9d2; }
+/*
+ * The magenta diagnostic established that the strip is NOT the Leaflet
+ * container (that would have shown magenta) — it is this document
+ * background showing below a `position:fixed` body that is not spanning the
+ * full visual viewport on iOS.
+ *
+ * `height:100%` rather than `min-height`: min-height lets the element grow
+ * past the viewport but does not force it to fill it, so html could resolve
+ * shorter than the visual viewport and leave its own background exposed at
+ * the bottom. The fallback chain matters on iOS specifically — each later
+ * declaration overrides the previous one only in browsers that understand
+ * it, so this resolves to the largest unit each engine actually supports:
+ *   100%                    - universal baseline
+ *   -webkit-fill-available  - iOS Safari's own "fill the real viewport"
+ *   100dvh                  - dynamic viewport unit
+ */
+html {
+  height:100%;
+  height:-webkit-fill-available;
+  height:100dvh;
+  background:#bcd9d2;
+  overflow:hidden;
+  overscroll-behavior:none;
+}
+/*
+ * `inset:0` alone resolves a fixed element against the LAYOUT viewport,
+ * which on iOS does not include the strip the home indicator sits over —
+ * that is the gap. Explicit width/height using the same fallback chain as
+ * html pins the body to the VISUAL viewport instead.
+ *
+ * The previous rule combined `inset:0` with `width:100%` and no height,
+ * over-constraining the horizontal axis while leaving the vertical one
+ * derived — the same class of over-constraint the .map-app comment below
+ * warns about. Setting both axes explicitly removes the ambiguity.
+ */
+body {
+  position:fixed;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
+  height:-webkit-fill-available;
+  height:100dvh;
+  margin:0;
+  overflow:hidden;
+  overscroll-behavior:none;
+  background:#bcd9d2;
+}
 body { color:var(--ink); font-family:ui-rounded, "SF Pro Rounded", "Avenir Next", Arial, sans-serif; }
 button, input, textarea { font:inherit; } button { cursor:pointer; } button:focus-visible, input:focus-visible, textarea:focus-visible { outline:3px solid #ffd35d; outline-offset:3px; }
-.map-app { position:absolute; inset:0; min-height:0; overflow:hidden; background:#bcd9d2; }
 /*
- * TEMPORARY DIAGNOSTIC — revert before shipping.
- *
- * The document background (html/body/.map-app, #bcd9d2) and the Leaflet
- * container background (#c7dcd4) are close enough to be indistinguishable by
- * eye, which means a green strip at the bottom of the screen could be EITHER
- * of two completely different bugs, needing opposite fixes:
- *
- *   - #bcd9d2 showing  -> the document is taller than the viewport, or is
- *     rubber-band overscrolling. A CSS/layout problem. This is what several
- *     earlier fixes assumed and addressed at the html/body level.
- *   - #c7dcd4 showing  -> the document is fine; the MapLibre GL canvas is not
- *     covering the bottom of its own container. A canvas-sizing problem, and
- *     entirely unaffected by any amount of position:fixed on the body, which
- *     would explain why those earlier fixes did not resolve it.
- *
- * MAGENTA is the Leaflet container. If the strip is magenta, the canvas is
- * the problem. If it stays green, the document is.
+ * `--app-height` is set from `visualViewport.height` by the script in
+ * layout.tsx and is authoritative when present: measured from what iOS
+ * actually reports, rather than inferred from a CSS unit whose behaviour
+ * differs between engines and launch states. The `100%` fallback applies
+ * before that script runs and in browsers without `visualViewport`.
  */
-.map { position:absolute!important; inset:0; z-index:0; height:100%; width:100%; background:#ff00ff; }
+.map-app { position:absolute; top:0; left:0; width:100%; height:100%; height:var(--app-height, 100%); min-height:0; overflow:hidden; background:#bcd9d2; }
+.map { position:absolute!important; inset:0; z-index:0; height:100%; width:100%; background:#bcd9d2; }
 .leaflet-control-attribution { background:rgba(255,255,255,.65)!important; font-size:9px!important; }.leaflet-container { font-family:inherit!important; }
 .map-header { position:absolute; z-index:10; top:0; left:0; right:0; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); display:flex; align-items:center; gap:8px; pointer-events:none; }.map-header > * { pointer-events:auto; }.map-header .brand { margin-right:auto; }
 .brand { display:inline-flex; align-items:center; height:38px; padding:0 13px; border-radius:999px; background:rgba(255,255,255,.9); border:1px solid rgba(255,255,255,.7); box-shadow:var(--e1); backdrop-filter:blur(20px) saturate(180%); color:var(--deep); font-size:1.12rem; font-weight:900; line-height:1; letter-spacing:-.045em; text-decoration:none; }.brand span { color:var(--hot); }

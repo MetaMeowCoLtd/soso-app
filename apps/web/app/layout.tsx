@@ -55,6 +55,52 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        {/*
+          Pins the app shell to the height iOS actually reports, rather than
+          to a CSS unit.
+
+          Why this exists despite the CSS already using a 100% /
+          -webkit-fill-available / 100dvh fallback chain: those units are
+          resolved by the engine against ITS idea of the viewport, and on a
+          cold iOS PWA launch that idea is briefly wrong — the safe-area
+          insets settle after first paint, and nothing re-resolves a CSS unit
+          afterwards. `visualViewport.height` is the one value that reports
+          the real, current visible height, and it fires an event when that
+          changes. Setting a custom property from it means the layout follows
+          the actual viewport rather than a prediction of it.
+
+          Runs before hydration (inline in <head>) so the first painted frame
+          already has the correct height, rather than visibly correcting a
+          wrong one a moment later.
+
+          The `scroll` listener is not redundant with `resize`: iOS fires
+          scroll on the visual viewport when the keyboard opens or the page
+          is panned under a pinned element, without necessarily firing resize.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){
+  function setAppHeight(){
+    var vv = window.visualViewport;
+    var h = vv ? vv.height : window.innerHeight;
+    document.documentElement.style.setProperty('--app-height', h + 'px');
+  }
+  setAppHeight();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setAppHeight);
+    window.visualViewport.addEventListener('scroll', setAppHeight);
+  }
+  window.addEventListener('resize', setAppHeight);
+  window.addEventListener('orientationchange', function(){
+    setAppHeight();
+    setTimeout(setAppHeight, 300);
+  });
+  [100, 400, 1000].forEach(function(ms){ setTimeout(setAppHeight, ms); });
+})();`,
+          }}
+        />
+      </head>
       <body>{children}</body>
     </html>
   );
