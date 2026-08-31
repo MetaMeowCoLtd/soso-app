@@ -249,13 +249,36 @@ function stableUnitFromId(id: string): number {
   return ((hash >>> 0) % 10000) / 10000;
 }
 
-function pinIcon(pin: Pin, nowSeconds: number, celebrate: boolean) {
-  const look = lookOf(pin.category);
+/**
+ * Fraction of a pin's life remaining, used to fade it as it nears expiry.
+ *
+ * Kept separate from the icon itself: it changes continuously with
+ * `nowSeconds`, but must NOT trigger a new `L.divIcon`. Leaflet's `Marker`
+ * exposes opacity as its own option (`marker.setOpacity`), which mutates the
+ * existing icon element's `style.opacity` in place. Baking opacity into the
+ * icon's `html` instead would mean every tick — and every viewport refetch,
+ * since that hands `pinMarkers` a fresh `pins` array too — produces a new
+ * icon object, and a new `icon` prop forces React-Leaflet to call
+ * `marker.setIcon()`, which replaces the DOM node the `pin-bob` CSS animation
+ * is running on. The animation itself restarts fine (same deterministic
+ * delay), but the element swap is what causes the visible glitch — so the
+ * fix is to never swap it for a change that doesn't need to.
+ */
+function pinFreshness(pin: Pin, nowSeconds: number): number {
   const span = pin.expiresAt - pin.createdAt;
   const fraction = span > 0 ? Math.max(0, Math.min(1, (pin.expiresAt - nowSeconds) / span)) : 0;
-  // Continuous fade as a post nears expiry — see the module comment for why
-  // this can be continuous here but is bucketed on mobile.
-  const opacity = 0.45 + fraction * 0.55;
+  return 0.45 + fraction * 0.55;
+}
+
+/**
+ * Builds a pin's `L.divIcon`. Deliberately takes nothing that changes on a
+ * clock tick or a viewport refetch — only things that change when the pin
+ * itself meaningfully changes (its category, privacy, or celebrate state).
+ * Callers must cache the result (see `getPinIcon`) rather than calling this
+ * fresh on every render, or the DOM-node-swap problem above comes right back.
+ */
+function pinIcon(pin: Pin, celebrate: boolean) {
+  const look = lookOf(pin.category);
 
   // Scatter the idle bob so pins do not all rise and fall in lockstep.
   //
@@ -278,7 +301,6 @@ function pinIcon(pin: Pin, nowSeconds: number, celebrate: boolean) {
 
   const style = [
     `--pin-color:${look.color}`,
-    `opacity:${opacity}`,
     `--bob-duration:${bobDuration.toFixed(2)}s`,
     `--bob-delay:${bobDelay.toFixed(2)}s`,
     `--bob-rise:${bobRise.toFixed(1)}px`,
@@ -320,6 +342,34 @@ export default function SosoMap({
 }: SosoMapProps) {
   const handlePinClick = useCallback((pin: Pin) => onPinClick(pin), [onPinClick]);
 
+  // Icons are cached per pin, keyed on only the fields that should ever
+  // produce a visually different icon. A viewport refetch (moveend) or a
+  // `nowSeconds` tick hands us a brand-new `feed.pins` array — often full of
+  // brand-new `Pin` objects for the exact same underlying reports — but as
+  // long as a given pin's id/category/privacy/celebrate state are unchanged,
+  // this returns the SAME `L.divIcon` instance every time. Same object
+  // reference means React-Leaflet's `<Marker icon={...}>` never calls
+  // `marker.setIcon()`, so the DOM node the bob animation runs on is never
+  // swapped out and the animation just keeps playing through a pan.
+  const iconCache = useRef(new Map<string, L.DivIcon>());
+  const getPinIcon = useCallback((pin: Pin, celebrate: boolean) => {
+    const key = `${pin.id}|${pin.category}|${pin.audience ? 1 : 0}|${celebrate ? 1 : 0}`;
+    const cached = iconCache.current.get(key);
+    if (cached) return cached;
+    const icon = pinIcon(pin, celebrate);
+    iconCache.current.set(key, icon);
+    return icon;
+  }, []);
+
+  // Drop cache entries for pins no longer in the feed so this doesn't grow
+  // without bound over a long session.
+  useEffect(() => {
+    const live = new Set(feed.pins.map((pin) => pin.id));
+    for (const key of iconCache.current.keys()) {
+      if (!live.has(key.split("|", 1)[0])) iconCache.current.delete(key);
+    }
+  }, [feed.pins]);
+
   const pinMarkers = useMemo(
     () =>
       feed.mode === "pins" && !placing
@@ -327,12 +377,17 @@ export default function SosoMap({
             <Marker
               key={pin.id}
               position={[pin.lat, pin.lng]}
-              icon={pinIcon(pin, nowSeconds, pin.id === selectedId || pin.id === celebrateId)}
+              icon={getPinIcon(pin, pin.id === selectedId || pin.id === celebrateId)}
+              // Leaflet's own opacity option — mutates the existing icon
+              // element's style in place via `marker.setOpacity()` rather
+              // than swapping the icon, so the fade-with-age effect stays
+              // smooth without ever touching the bob animation's DOM node.
+              opacity={pinFreshness(pin, nowSeconds)}
               eventHandlers={{ click: () => handlePinClick(pin) }}
             />
           ))
         : null,
-    [feed.mode, feed.pins, placing, nowSeconds, selectedId, celebrateId, handlePinClick],
+    [feed.mode, feed.pins, placing, nowSeconds, selectedId, celebrateId, handlePinClick, getPinIcon],
   );
 
   const countMarkers = useMemo(
