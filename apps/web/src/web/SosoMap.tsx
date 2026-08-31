@@ -216,20 +216,77 @@ function CuteBaseLayer() {
   return null;
 }
 
+/**
+ * The double-tap window the leaflet-doubletapdragzoom plugin itself uses to
+ * decide whether a second touchstart is "part of a double tap" at all (read
+ * directly from that plugin's source, not guessed). Reused here rather than
+ * picking an unrelated number, so this handler agrees with the plugin about
+ * what counts as a double tap.
+ */
+const DOUBLE_TAP_WINDOW_MS = 500;
+
 function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {
   const map = useMap();
+  const pendingClick = useRef<{ timer: ReturnType<typeof setTimeout>; latlng: L.LatLng } | null>(null);
+
+  useEffect(
+    () => () => {
+      if (pendingClick.current) clearTimeout(pendingClick.current.timer);
+    },
+    [],
+  );
+
   useMapEvents({
     click: (e) => {
-      // A double-tap-and-hold-drag zoom (see OneHandedZoomConfig below)
-      // starts with a real second touchstart at a real point on the map.
-      // Nothing in that plugin's own code suppresses Leaflet's normal tap-
-      // to-click synthesis for it, so without this guard, one-handed
-      // zooming would also drop a report pin at wherever the gesture
-      // happened to end — a bad enough outcome (an unwanted pin, not just
-      // a cosmetic glitch) to guard against even without being able to
-      // reproduce it on a device to confirm it happens.
-      if (oneHandedZoomInProgress.get(map)) return;
-      onMapClick({ latitude: e.latlng.lat, longitude: e.latlng.lng });
+      /**
+       * A DIFFERENT, earlier bug than the one oneHandedZoomInProgress
+       * guards below: that flag only starts protecting once
+       * doubletapdragstart actually fires, but the plugin's own source
+       * (read directly, not assumed) waits 100ms after the second
+       * touchstart before firing that event, specifically to distinguish
+       * "this second tap is turning into a hold-drag" from "this was just
+       * a quick double-tap." Leaflet's own touch-to-click synthesis fires
+       * a `click` off the FIRST tap's touchend well before either of
+       * those things happens — so the pin-creating click was never the
+       * one during the recognized drag at all, it was the very first tap
+       * of the pair, fired before the plugin's state machine had done
+       * anything yet.
+       *
+       * The fix has to be the same kind Leaflet's own doubleClickZoom
+       * already needs internally to tell a single tap from the first half
+       * of a double one: don't act on a click immediately — wait to see
+       * whether a second one follows within the window that would make it
+       * a double tap. If one does, both are part of a double tap (whether
+       * that turns into a quick zoom-in or a one-handed zoom-drag, neither
+       * should ever also drop a pin), so the pending pin-drop is cancelled
+       * outright rather than fired for either tap.
+       *
+       * The real, felt cost of this: a genuine single tap intended to drop
+       * a pin now waits out this same window before the composer opens,
+       * since there is no way to know on the first tap alone whether a
+       * second one is coming. That delay is the trade this fix makes —
+       * it's the standard cost of any single-vs-double-tap disambiguation,
+       * not a bug in this fix.
+       */
+      if (pendingClick.current) {
+        clearTimeout(pendingClick.current.timer);
+        pendingClick.current = null;
+        return;
+      }
+
+      const latlng = e.latlng;
+      const timer = setTimeout(() => {
+        pendingClick.current = null;
+        // Still worth checking this: a one-handed zoom that started slowly
+        // enough for its own 100ms recognition delay to land inside this
+        // window, without a second `click` ever firing in between, is a
+        // real possibility depending on exactly how Leaflet's touch-to-
+        // click synthesis behaves — kept as a second, independent layer
+        // rather than assumed redundant with the debounce above.
+        if (oneHandedZoomInProgress.get(map)) return;
+        onMapClick({ latitude: latlng.lat, longitude: latlng.lng });
+      }, DOUBLE_TAP_WINDOW_MS);
+      pendingClick.current = { timer, latlng };
     },
   });
   return null;
