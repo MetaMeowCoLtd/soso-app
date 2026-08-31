@@ -10,6 +10,26 @@ import { lookOf } from "./theme";
 import { loadCuteMapStyle } from "./mapStyle";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, leafletBoundsToBounds, type Coordinates } from "./region";
 
+// Side-effect imports: each registers itself onto the global `L` namespace,
+// the same way `@maplibre/maplibre-gl-leaflet` above does. Neither ships its
+// own TypeScript types, hence the module augmentation immediately below.
+import "leaflet-doubletapdrag";
+import "leaflet-doubletapdragzoom";
+
+declare module "leaflet" {
+  interface MapOptions {
+    /**
+     * Enables double-tap-and-hold-then-drag zoom (leaflet-doubletapdragzoom).
+     * `"center"` zooms toward the map's centre regardless of where the
+     * gesture started, rather than toward the touch point — the plugin
+     * author's own documented setting for matching Google Maps' behaviour,
+     * which is what was actually asked for here.
+     */
+    doubleTapDragZoom?: boolean | "center";
+    doubleTapDragZoomOptions?: { reverse?: boolean };
+  }
+}
+
 /**
  * MapLibre GL JS v6 parses vector tiles in a Web Worker, and — unlike loading
  * it straight from a CDN `<script type="module">` tag, where `import.meta.url`
@@ -196,9 +216,82 @@ function CuteBaseLayer() {
   return null;
 }
 
-function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {  useMapEvents({
-    click: (e) => onMapClick({ latitude: e.latlng.lat, longitude: e.latlng.lng }),
+function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {
+  const map = useMap();
+  useMapEvents({
+    click: (e) => {
+      // A double-tap-and-hold-drag zoom (see OneHandedZoomConfig below)
+      // starts with a real second touchstart at a real point on the map.
+      // Nothing in that plugin's own code suppresses Leaflet's normal tap-
+      // to-click synthesis for it, so without this guard, one-handed
+      // zooming would also drop a report pin at wherever the gesture
+      // happened to end — a bad enough outcome (an unwanted pin, not just
+      // a cosmetic glitch) to guard against even without being able to
+      // reproduce it on a device to confirm it happens.
+      if (oneHandedZoomInProgress.get(map)) return;
+      onMapClick({ latitude: e.latlng.lat, longitude: e.latlng.lng });
+    },
   });
+  return null;
+}
+
+/**
+ * Tracks whether a one-handed zoom gesture is currently in progress, keyed
+ * by map instance. A WeakMap rather than a property on the map object
+ * itself: this app only ever has one map, but keying by instance costs
+ * nothing and avoids adding an untyped field to a third-party class.
+ */
+const oneHandedZoomInProgress = new WeakMap<L.Map, boolean>();
+
+/**
+ * Configures the double-tap-and-hold-drag zoom gesture (Google/Apple Maps'
+ * "one-handed zoom") to match Google Maps' specific behaviour, and guards
+ * ClickHandler against the gesture accidentally dropping a pin.
+ *
+ * WHY THIS ISN'T JUST A PROP ON <MapContainer>
+ * -----------------------------------------------
+ * `doubleTapDragZoom` and `doubleTapDragZoomOptions` are options this
+ * plugin adds to Leaflet's own Map class, not options react-leaflet itself
+ * knows about — whether react-leaflet's <MapContainer> forwards arbitrary
+ * unrecognised props through to the underlying `L.map()` constructor call
+ * is not something this could confirm without a device to test against.
+ * Reading the plugin's own source instead: `_onDoubleTapDragStart` and
+ * `_onDoubleTapDrag` read `map.options.doubleTapDragZoom` and
+ * `map.options.doubleTapDragZoomOptions.reverse` FRESH on every gesture,
+ * not once at handler-construction time. That makes mutating `map.options`
+ * directly, after the map already exists, a safe and deterministic
+ * integration point — it sidesteps the react-leaflet prop-forwarding
+ * question entirely rather than depending on an answer to it.
+ *
+ * The plugin also merges its own default (`doubleTapDragZoom: true` on any
+ * touch browser) the moment it's imported, so the gesture is already active
+ * with SOME configuration before this component ever runs; this only
+ * upgrades that configuration to the specific "center, reverse" mode the
+ * plugin's own docs describe as matching Google Maps, rather than turning
+ * the feature on from nothing.
+ *
+ * UNVERIFIED: everything about how this actually feels — the 200-unit
+ * scale-per-pixel constant is internal to the plugin, not something this
+ * exposes for tuning, and there is no way to feel out whether that pace
+ * matches expectation without a real touchscreen.
+ */
+function OneHandedZoomConfig() {
+  const map = useMap();
+  useEffect(() => {
+    map.options.doubleTapDragZoom = "center";
+    map.options.doubleTapDragZoomOptions = { reverse: true };
+
+    const onStart = () => oneHandedZoomInProgress.set(map, true);
+    const onEnd = () => oneHandedZoomInProgress.set(map, false);
+    map.on("doubletapdragstart", onStart);
+    map.on("doubletapdragend", onEnd);
+
+    return () => {
+      map.off("doubletapdragstart", onStart);
+      map.off("doubletapdragend", onEnd);
+      oneHandedZoomInProgress.delete(map);
+    };
+  }, [map]);
   return null;
 }
 
@@ -620,6 +713,7 @@ export default function SosoMap({
     >
       <CuteBaseLayer />
       <SafeAreaResizeFix />
+      <OneHandedZoomConfig />
       <ViewportWatcher onViewportChange={onViewportChange} />
       {!placing && <ClickHandler onMapClick={onMapClick} />}
       <FlyToDraft at={placing ?? focusAt} />
