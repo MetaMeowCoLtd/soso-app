@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { areaCellOf, type Friend, type MyProfile, type SosoGateway } from "soso-core";
+import { areaCellOf, type Friend, type FriendTier, type MyProfile, type SosoGateway } from "soso-core";
 
 /**
  * Presence and the social graph.
@@ -56,6 +56,8 @@ export interface UsePresenceResult {
   follow: (handle: string) => Promise<void>;
   unfollow: (userId: string) => Promise<void>;
   block: (userId: string) => Promise<void>;
+  /** Marks a friend close/standard. Private and one-directional — see setFriendTier on the gateway. */
+  setFriendTier: (userId: string, tier: FriendTier) => Promise<void>;
 }
 
 export function usePresence(
@@ -203,6 +205,30 @@ export function usePresence(
     [gateway, refreshFriends],
   );
 
+  // Optimistic: the friend list is what the tier toggle reads to render its
+  // own state, so waiting for the next `refreshFriends` poll (up to 60s away)
+  // would make a tap look like it did nothing. Reverts on failure rather than
+  // trusting the optimistic value, since the server is the one place that
+  // actually knows whether the follow is still mutual.
+  const setFriendTier = useCallback(
+    async (userId: string, tier: FriendTier) => {
+      const previous = friends;
+      setFriends((current) => current.map((f) => (f.id === userId ? { ...f, tier } : f)));
+      setError(null);
+      try {
+        await gateway.setFriendTier(userId, tier);
+      } catch (err) {
+        setFriends(previous);
+        setError(
+          err instanceof Error && err.message === "soso/not_friends"
+            ? "You need to follow each other before marking someone close."
+            : "Couldn't update that. Try again.",
+        );
+      }
+    },
+    [gateway, friends],
+  );
+
   return {
     sharing,
     setSharing,
@@ -215,5 +241,6 @@ export function usePresence(
     follow,
     unfollow,
     block,
+    setFriendTier,
   };
 }

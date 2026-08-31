@@ -144,7 +144,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
-  const [showPeople, setShowPeople] = useState(false);
+  const [showPeople, setShowPeople] = useState(true);
   // Presence tracks the map centre rather than the device's GPS: the area
   // count answers "is where I'm looking busy", and tying it to the viewport
   // means it works without a second location permission prompt.
@@ -371,10 +371,11 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           <span>so</span>so
         </a>
         <button
-          className={`people-button ${presence.sharing ? "sharing" : ""}`}
-          onClick={() => setShowPeople(true)}
+          className={`people-button ${presence.sharing ? "sharing" : ""} ${showPeople ? "active" : ""}`}
+          onClick={() => setShowPeople((v) => !v)}
           type="button"
           aria-label="People around here"
+          aria-pressed={showPeople}
           title="People around here"
         >
           <span aria-hidden="true">☺</span>

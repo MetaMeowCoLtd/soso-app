@@ -26,6 +26,14 @@ export const SOSO_ERROR_CODES = [
   'soso/cannot_vote_own',
   'soso/push_not_configured',
   'soso/push_subscription_invalid',
+  'soso/user_not_found',
+  'soso/cannot_follow_self',
+  'soso/cannot_block_self',
+  'soso/not_friends',
+  'soso/no_recipients',
+  'soso/too_many_recipients',
+  'soso/too_many_zones',
+  'soso/invalid_zone_audience',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -82,5 +90,13 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/cannot_vote_own': 'You cannot confirm your own post.',
   'soso/push_not_configured': 'Notifications are not configured for this project yet.',
   'soso/push_subscription_invalid': 'This browser gave Soso an invalid notification subscription. Try enabling alerts again.',
+  'soso/user_not_found': 'No user with that handle.',
+  'soso/cannot_follow_self': "That's your own handle.",
+  'soso/cannot_block_self': "You can't block yourself.",
+  'soso/not_friends': 'You need to follow each other before you can do that.',
+  'soso/no_recipients': 'Pick at least one person to share this with.',
+  'soso/too_many_recipients': "That's too many people to share with at once.",
+  'soso/too_many_zones': "You've reached the limit on saved areas.",
+  'soso/invalid_zone_audience': 'Pick who this area is shared with.',
   'soso/unknown': 'Something went wrong. Try again.',
 };

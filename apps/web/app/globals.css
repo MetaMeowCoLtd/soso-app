@@ -100,7 +100,7 @@
    badge counter-rotates to stay upright. */
 .soso-pin-private::before { content:"\1F512"; position:absolute; top:-5px; right:-5px; display:grid; place-items:center; width:17px; height:17px; border-radius:50%; background:#fff; color:#41564f; font-size:.55rem; box-shadow:var(--e1); transform:rotate(45deg); z-index:2; }
 
-@media (max-width:600px) { .map-app { min-height:540px; }.brand { height:34px; padding:0 11px; font-size:1rem; }.notify-button, .people-button { width:34px; height:34px; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; } }
+@media (max-width:600px) { .map-app { min-height:540px; }.brand { height:34px; padding:0 11px; font-size:1rem; }.notify-button, .people-button { width:34px; height:34px; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; }.people-frame { top:64px; left:10px; width:min(260px, calc(100% - 20px)); max-height:calc(100dvh - 84px); } }
 
 /* --- Added for the Supabase-backed rewrite: subtype chips reuse .vibe-picker/
    .vibe-option above as-is. Everything below is new: the detail panel (tap a
@@ -144,11 +144,14 @@
 .people-button { position:relative; display:grid; place-items:center; width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.92); color:#2b5d52; font-size:1.02rem; transition:background .18s, transform .18s; }
 .people-button:hover { background:#fff; transform:scale(1.05); }.people-button:active { transform:scale(.94); }
 .people-button.sharing { background:var(--teal); color:#fff; border-color:transparent; }
+.people-button.active { box-shadow:0 0 0 2px var(--teal); }
 .people-count { position:absolute; top:-3px; right:-3px; min-width:17px; height:17px; padding:0 4px; border-radius:999px; background:var(--hot); color:#fff; font-size:.62rem; font-weight:750; display:grid; place-items:center; border:1.5px solid #fff; }
 
-.people-panel { position:relative; padding:24px 22px 20px; background:#fff; border-radius:20px; }
-.people-panel h2 { margin:0 0 4px; letter-spacing:-.02em; font-size:1.2rem; font-weight:800; color:var(--deep); }
-.people-heading { margin-top:24px!important; font-size:.95rem!important; }
+.people-frame { position:absolute; z-index:9; top:76px; left:16px; width:min(300px, calc(100% - 32px)); max-height:calc(100dvh - 100px); overflow-y:auto; padding:14px; border-radius:18px; background:rgba(255,255,255,.94); box-shadow:var(--e2); backdrop-filter:blur(20px) saturate(180%); }
+.people-frame-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.people-frame-title { color:var(--muted); font-size:.72rem; font-weight:750; text-transform:uppercase; letter-spacing:.07em; }
+.people-frame-close { display:grid; place-items:center; width:24px; height:24px; border:0; border-radius:50%; background:#f1f4f2; color:#5b706a; font-size:1.15rem; line-height:1; transition:background .16s; }
+.people-frame-close:hover { background:#e4e9e6; }
 .people-note { margin:0 0 12px; color:var(--muted); font-size:.79rem; line-height:1.55; }
 .people-note strong { color:var(--deep); font-weight:700; }
 .people-hint { margin:0 0 10px; padding:10px 12px; border-radius:12px; background:#eef7f4; color:#2c5d52; font-size:.78rem; line-height:1.5; }
@@ -158,11 +161,8 @@
 .area-activity-number { font-size:1.85rem; font-weight:800; color:var(--deep); letter-spacing:-.03em; }
 .area-activity-label { color:var(--muted); font-size:.82rem; font-weight:550; }
 
-.presence-toggle { display:flex; align-items:flex-start; gap:11px; margin:14px 0 0; padding:14px; border-radius:14px; background:#f5f8f7; cursor:pointer; transition:background .16s; }.presence-toggle:hover { background:#eef3f1; }
-.presence-toggle input { margin-top:2px; width:17px; height:17px; accent-color:var(--teal); flex-shrink:0; }
-.presence-toggle span { display:grid; gap:3px; }
-.presence-toggle strong { font-size:.85rem; font-weight:700; color:var(--deep); }
-.presence-toggle em { font-style:normal; color:var(--muted); font-size:.76rem; line-height:1.5; }
+.presence-toggle { display:flex; align-items:center; gap:9px; margin:10px 0; padding:10px 12px; border-radius:12px; background:#f5f8f7; cursor:pointer; transition:background .16s; font-size:.82rem; font-weight:650; color:var(--deep); }.presence-toggle:hover { background:#eef3f1; }
+.presence-toggle input { width:16px; height:16px; accent-color:var(--teal); flex-shrink:0; }
 
 .follow-row { display:flex; gap:7px; margin-bottom:10px; }
 .follow-row input { flex:1; min-width:0; padding:11px 12px; border:1px solid #d8e2de; border-radius:12px; background:#fafcfb; font-size:.86rem; color:var(--ink); transition:border-color .16s, background .16s; }
@@ -181,3 +181,7 @@
 .friend-actions button, .friend-confirm button { padding:6px 11px; border:1px solid #e2eae6; border-radius:999px; background:#fff; color:#5b706a; font-size:.72rem; font-weight:600; transition:background .16s, border-color .16s; }
 .friend-actions button:hover, .friend-confirm button:hover { background:#f5f8f7; border-color:#cfdad5; color:#3d534c; }
 .friend-confirm button:first-child { border-color:#dc2626; color:#b91c1c; }
+
+.tier-star { flex-shrink:0; width:30px; height:30px; border:0; border-radius:50%; background:transparent; color:#c8d3ce; font-size:1.15rem; line-height:1; display:grid; place-items:center; transition:transform .15s, color .15s; }
+.tier-star:hover { transform:scale(1.15); color:#e0b64a; }
+.tier-star.active { color:#f5b731; }
