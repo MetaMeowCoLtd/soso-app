@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
 import { setWorkerUrl } from "maplibre-gl";
 import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
-import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
+import { Circle, MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import { cellCentre, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
 import { lookOf } from "./theme";
 import { loadCuteMapStyle } from "./mapStyle";
@@ -74,6 +74,15 @@ interface SosoMapProps {
   selectedId?: string;
   /** Plays the "pop" landing animation on this pin once it appears — see `pinIcon`. */
   celebrateId?: string | null;
+  /**
+   * The device's own live position, for the Apple/Google Maps-style "blue
+   * dot". Purely decorative from this component's point of view — it's
+   * rendered the same way a pin or a count badge is, as a local Leaflet
+   * layer, and never touches the feed or any gateway call. See the
+   * `myLocation` state comment in `page.tsx` for why that also means it's
+   * inherently private to this browser tab.
+   */
+  myLocation?: { at: Coordinates; accuracyM: number; headingDeg: number | null } | null;
 }
 
 function ViewportWatcher({
@@ -400,6 +409,74 @@ function CountBadge({ count }: { count: CellCount }) {
   return <Marker position={[centre.lat, centre.lng]} icon={icon} interactive={false} />;
 }
 
+/**
+ * The "blue dot". `heading` is `null` unless the device is actively moving
+ * (`GeolocationCoordinates.heading` is only populated then), in which case
+ * the cone is omitted rather than pointing in a stale, no-longer-true
+ * direction.
+ *
+ * Rounded to the nearest 10° before being used as a cache key by
+ * `MyLocationMarker` below — a raw heading value changes on essentially
+ * every GPS tick, and rebuilding (and thus swapping) the divIcon that often
+ * would restart the pulse animation every time the same way the pin-icon
+ * cache doc explains for pins. A 10° step is well under what's visually
+ * distinguishable on a small map anyway.
+ */
+function myLocationIcon(headingDeg: number | null): L.DivIcon {
+  const hasHeading = headingDeg !== null && Number.isFinite(headingDeg);
+  return L.divIcon({
+    className: "my-location-shell",
+    html: [
+      '<span class="my-location-pulse" aria-hidden="true"></span>',
+      hasHeading ? `<span class="my-location-cone" style="--heading:${headingDeg}deg" aria-hidden="true"></span>` : "",
+      '<span class="my-location-dot" aria-hidden="true"></span>',
+    ].join(""),
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
+}
+
+/**
+ * Renders the current-position dot plus its accuracy halo. Kept as its own
+ * component, rather than inlined in `SosoMap`, purely so the icon cache
+ * below can live next to the state it caches instead of cluttering the
+ * parent's render body — the same reasoning as `getPinIcon`.
+ */
+function MyLocationMarker({ myLocation }: { myLocation: NonNullable<SosoMapProps["myLocation"]> }) {
+  const iconCache = useRef(new Map<number, L.DivIcon>());
+  const headingBucket =
+    myLocation.headingDeg !== null && Number.isFinite(myLocation.headingDeg)
+      ? Math.round(myLocation.headingDeg / 10) * 10
+      : -1; // -1: the "no heading" bucket, distinct from an actual 0° (north).
+
+  let icon = iconCache.current.get(headingBucket);
+  if (!icon) {
+    icon = myLocationIcon(headingBucket === -1 ? null : headingBucket);
+    iconCache.current.set(headingBucket, icon);
+  }
+
+  return (
+    <>
+      {/* A real-world radius in metres, via react-leaflet's `Circle` — unlike
+          the dot itself, this one genuinely should grow and shrink as the
+          map zooms, since it represents the same physical uncertainty
+          regardless of how zoomed in the view is. */}
+      <Circle
+        center={[myLocation.at.latitude, myLocation.at.longitude]}
+        radius={myLocation.accuracyM}
+        interactive={false}
+        pathOptions={{ color: "#3b82f6", weight: 1, fillColor: "#3b82f6", fillOpacity: 0.12 }}
+      />
+      <Marker
+        position={[myLocation.at.latitude, myLocation.at.longitude]}
+        icon={icon}
+        interactive={false}
+        zIndexOffset={1000}
+      />
+    </>
+  );
+}
+
 export default function SosoMap({
   feed,
   nowSeconds,
@@ -411,6 +488,7 @@ export default function SosoMap({
   onPinClick,
   selectedId,
   celebrateId,
+  myLocation,
 }: SosoMapProps) {
   const handlePinClick = useCallback((pin: Pin) => onPinClick(pin), [onPinClick]);
 
@@ -486,6 +564,7 @@ export default function SosoMap({
       {!placing && <ClickHandler onMapClick={onMapClick} />}
       <FlyToDraft at={placing ?? focusAt} />
       <FlyToSignal signal={flyToSignal} />
+      {myLocation && <MyLocationMarker myLocation={myLocation} />}
       {pinMarkers}
       {countMarkers}
       {placing && (

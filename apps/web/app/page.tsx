@@ -70,6 +70,51 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [flyToSignal, setFlyToSignal] = useState<{ at: Coordinates; id: number } | null>(null);
   const flyIdRef = useRef(0);
 
+  // The live "blue dot" — Apple/Google Maps-style current-position marker.
+  //
+  // Deliberately a separate concern from `userLocation`/`locateMe` above,
+  // which exist to answer "fly the camera somewhere" and want one-shot
+  // fixes. This wants a continuously-updating stream (`watchPosition`, not
+  // `getCurrentPosition`) plus accuracy and heading, which the fly-to case
+  // has no use for.
+  //
+  // Purely client-side rendering: this never goes through `gateway`, is
+  // never written anywhere, and vanishes the instant the tab closes or
+  // permission is revoked. That's what makes it visible only to the person
+  // looking at their own screen — there's no code path by which it could
+  // reach anyone else. Contrast `presence` (`usePresence.ts`), which is an
+  // explicit, opt-in, *server-mediated* "I'm nearby" signal shared with
+  // mutual follows; this dot is a different, unrelated feature that happens
+  // to also use the device's location.
+  const [myLocation, setMyLocation] = useState<{
+    at: Coordinates;
+    accuracyM: number;
+    headingDeg: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!("geolocation" in navigator)) return;
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setMyLocation({
+          at: { latitude: pos.coords.latitude, longitude: pos.coords.longitude },
+          accuracyM: pos.coords.accuracy,
+          // Only populated by the OS while actually moving on most devices;
+          // null the rest of the time, which SosoMap treats as "draw the
+          // dot with no heading cone" rather than a stale direction.
+          headingDeg: pos.coords.heading,
+        });
+      },
+      // Silent on purpose: this is a passive overlay nobody explicitly asked
+      // for in the moment, unlike a press of the locate button — `locateMe`
+      // below already owns surfacing an error for the case where a failure
+      // is worth interrupting someone about.
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
+
   // Wherever the map is actually looking right now — derived from the
   // viewport bounds on every pan/zoom, not just set once. This is what "Drop
   // a pin", "Click map or start here", and the notification area target: the
@@ -365,6 +410,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         onMapClick={beginPin}
         onPinClick={selectPin}
         selectedId={selectedPin?.id}
+        myLocation={myLocation}
       />
 
       <header className="map-header">
