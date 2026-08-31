@@ -366,7 +366,8 @@ export default function SosoMap({
   useEffect(() => {
     const live = new Set(feed.pins.map((pin) => pin.id));
     for (const key of iconCache.current.keys()) {
-      if (!live.has(key.split("|", 1)[0])) iconCache.current.delete(key);
+      const pinId = key.slice(0, key.indexOf("|"));
+      if (!live.has(pinId)) iconCache.current.delete(key);
     }
   }, [feed.pins]);
 
