@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
@@ -56,62 +55,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>
-        {/*
-          The actual fix for the iOS standalone-launch gap at the bottom of
-          the screen — not just the theme-color belt-and-suspenders above.
-
-          `100dvh` is *supposed* to always equal the current visible
-          viewport. In practice, on a cold launch of the installed
-          (`apple-mobile-web-app-capable`) app, WebKit does not always
-          resolve it correctly on the very first layout pass — it settles
-          into the right value only once something (a scroll, a resize)
-          forces a fresh recompute. Until then, `.map-app`'s height can be
-          shorter than the true visible area, leaving a real, empty strip at
-          the bottom — not a color mismatch, an actual unfilled gap.
-
-          `window.visualViewport` doesn't have this bug: it reports the true
-          current visible height immediately and fires `resize` on every
-          change. This mirrors that value into a CSS custom property the
-          moment it's known, and `.map-app` in globals.css reads
-          `var(--app-height, 100dvh)` — falling back to the CSS unit only for
-          the one frame before this runs, and on any browser without
-          `visualViewport` support at all.
-
-          This is independent of, and sits alongside, the `position:fixed`
-          scroll lock on html/body in globals.css: that stops the page from
-          *scrolling*; this fixes the *sizing* of `.map-app` on first paint.
-          Losing either one reintroduces a bottom-of-screen gap, just from a
-          different cause — this exact mechanism was accidentally dropped
-          once already (see the `position:fixed` commit's diff, which
-          rewrote this file for the zoom lock and lost it as a side effect)
-          and reappeared as "the bottom bar never goes away" in standalone
-          mode. Don't remove this again without keeping something equivalent.
-
-          `beforeInteractive` is required, not `afterInteractive`: this has
-          to set the property before the first paint the user sees, or the
-          gap flashes once anyway and this becomes a no-op.
-        */}
-        <Script id="app-height-fix" strategy="beforeInteractive">
-          {`
-            (function () {
-              function setAppHeight() {
-                var vv = window.visualViewport;
-                var h = (vv && vv.height) || window.innerHeight;
-                document.documentElement.style.setProperty("--app-height", h + "px");
-              }
-              setAppHeight();
-              if (window.visualViewport) {
-                window.visualViewport.addEventListener("resize", setAppHeight);
-                window.visualViewport.addEventListener("scroll", setAppHeight);
-              }
-              window.addEventListener("resize", setAppHeight);
-              window.addEventListener("orientationchange", setAppHeight);
-            })();
-          `}
-        </Script>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
