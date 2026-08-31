@@ -241,6 +241,41 @@ function SafeAreaResizeFix() {
   useEffect(() => {
     const container = map.getContainer();
 
+    /**
+     * Re-measure both layers, not just Leaflet.
+     *
+     * `map.invalidateSize()` tells LEAFLET to re-read its container, and
+     * Leaflet in turn asks the MapLibre GL layer to resize. That indirection
+     * is the gap this now closes: if the GL canvas is the element lagging
+     * behind the container (rather than Leaflet's own idea of its size),
+     * driving it only through Leaflet can leave the canvas stale even once
+     * Leaflet itself is correct — the WebGL drawing buffer keeps its old
+     * pixel dimensions, and the strip it no longer covers paints as the
+     * Leaflet container's own background instead of map tiles.
+     *
+     * Calling `gl.resize()` directly, immediately after, makes the GL canvas
+     * re-read its container in the same frame rather than depending on
+     * Leaflet to propagate it.
+     */
+    const resizeBoth = () => {
+      map.invalidateSize();
+      // The MapLibre layer is added asynchronously (the style is fetched
+      // first — see CuteBaseLayer), so on the earliest resize events it may
+      // not exist yet. Those early calls are exactly the ones that matter
+      // least: when it does attach, it measures the container itself.
+      map.eachLayer((layer) => {
+        const glLayer = layer as { getMaplibreMap?: () => { resize: () => void } };
+        if (typeof glLayer.getMaplibreMap === "function") {
+          try {
+            glLayer.getMaplibreMap().resize();
+          } catch {
+            // A layer mid-teardown can throw here; a failed resize is not
+            // worth propagating past this handler.
+          }
+        }
+      });
+    };
+
     // Leaflet already calls invalidateSize() on genuine `window` resize
     // events; this only needs to catch the case that slips past that, where
     // the container's own box changes without the window itself resizing.
@@ -252,22 +287,47 @@ function SafeAreaResizeFix() {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         frame = null;
-        map.invalidateSize();
+        resizeBoth();
       });
     });
     observer.observe(container);
+
+    /**
+     * iOS-specific: the visual viewport settles after first paint on a cold
+     * PWA launch, and that settle does not always change the CONTAINER's
+     * size — so the ResizeObserver above may never fire for it. `visualViewport`
+     * is the one API that reports this directly, and it is what the
+     * document-level CSS fixes could not reach: they constrain the document
+     * box, but nothing tells the already-initialised WebGL drawing buffer to
+     * re-read its size afterwards.
+     */
+    const vv = window.visualViewport;
+    const onViewportChange = () => resizeBoth();
+    vv?.addEventListener("resize", onViewportChange);
+    vv?.addEventListener("scroll", onViewportChange);
 
     // Orientation changes hit the same class of problem: the safe area's
     // top/bottom insets swap to left/right (and vice versa). In practice the
     // container's own size also changes when this happens, so the observer
     // above already covers it — this listener is a direct, immediate signal
     // kept alongside it rather than relied on alone.
-    const onOrientationChange = () => map.invalidateSize();
+    const onOrientationChange = () => resizeBoth();
     window.addEventListener("orientationchange", onOrientationChange);
+
+    // A cold PWA launch can settle its insets after the first few frames,
+    // and on a first-ever launch (service worker registering, nothing
+    // cached) that can land later than any single frame callback. These are
+    // a cheap backstop for the case where neither observer above fires:
+    // three extra resize calls cost nothing measurable and cover a settle
+    // that arrives after everything else has gone quiet.
+    const settleTimers = [150, 600, 1500].map((ms) => setTimeout(resizeBoth, ms));
 
     return () => {
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
+      settleTimers.forEach(clearTimeout);
+      vv?.removeEventListener("resize", onViewportChange);
+      vv?.removeEventListener("scroll", onViewportChange);
       window.removeEventListener("orientationchange", onOrientationChange);
     };
   }, [map]);
