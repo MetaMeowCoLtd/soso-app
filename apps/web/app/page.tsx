@@ -7,6 +7,7 @@ import ReportDetail from "@/src/web/ReportDetail";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeoplePanel from "@/src/web/PeoplePanel";
+import { PeopleIcon, BellIcon } from "@/src/web/icons";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { usePresence } from "@/src/web/usePresence";
 import { lookOf } from "@/src/web/theme";
@@ -378,7 +379,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           aria-pressed={showPeople}
           title="People around here"
         >
-          <span aria-hidden="true">☺</span>
+          <PeopleIcon />
           {presence.areaCount !== null && presence.areaCount > 0 && (
             <span className="people-count">{presence.areaCount}</span>
           )}
@@ -393,7 +394,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             aria-label={pushSubscribed ? "Turn off notifications" : "Get notified about pins near here"}
             title={pushSubscribed ? "Notifications on" : "Get notified about pins near here"}
           >
-            {pushSubscribed ? "🔔" : "🔕"}
+            <BellIcon muted={!pushSubscribed} />
           </button>
         )}
       </header>
