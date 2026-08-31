@@ -275,5 +275,40 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       const { error } = await client.rpc('delete_zone', { p_zone_id: zoneId });
       if (error) throw toSosoError(error);
     },
+
+    // --- Live change signals ---------------------------------------------
+    //
+    // Realtime is filtered by RLS (posts_read / media_read / follows_read_own,
+    // see migration 20260901000012), so a subscriber only ever receives
+    // events for rows it could already read via the normal REST path. That
+    // is what makes it safe to treat this as a bare "refetch" trigger rather
+    // than something that needs its own audience check.
+
+    subscribePostsChanged(onChange: () => void): () => void {
+      const channel = client
+        .channel(`posts-changed-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => onChange())
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'post_media' },
+          () => onChange(),
+        )
+        .subscribe();
+
+      return () => {
+        void client.removeChannel(channel);
+      };
+    },
+
+    subscribeFollowsChanged(onChange: () => void): () => void {
+      const channel = client
+        .channel(`follows-changed-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'follows' }, () => onChange())
+        .subscribe();
+
+      return () => {
+        void client.removeChannel(channel);
+      };
+    },
   };
 }

@@ -56,6 +56,12 @@ class FakeGateway implements SosoGateway {
   async deleteZone() {}
   async subscribeToPush() {}
   async unsubscribeFromPush() {}
+  subscribePostsChanged() {
+    return () => {};
+  }
+  subscribeFollowsChanged() {
+    return () => {};
+  }
 
   // Presence and social graph are irrelevant to the feed controller; these
   // exist only to satisfy the interface.

@@ -595,5 +595,17 @@ export function createDemoGateway(): SosoGateway {
     },
 
     async deleteZone(): Promise<void> {},
+
+    // No realtime transport in demo mode -- there's nobody else to hear
+    // from, and the 30s poll (harmless here, since it's a local read) is
+    // the only signal this mode will ever have. A no-op unsubscribe matches
+    // the gateway contract rather than pretending to fire.
+    subscribePostsChanged(): () => void {
+      return () => {};
+    },
+
+    subscribeFollowsChanged(): () => void {
+      return () => {};
+    },
   };
 }

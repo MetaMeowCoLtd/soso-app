@@ -73,6 +73,24 @@ export function useFeed(
     };
     document.addEventListener("visibilitychange", onVisibility);
 
+    // The 30s heartbeat above is a ceiling, not a push — it exists so the
+    // feed never goes fully stale, not so it's the only way to learn
+    // something changed. This is the actual push: a payload-free "something
+    // changed" signal (real Realtime in the Supabase gateway, a no-op in the
+    // demo gateway) that triggers an out-of-band refetch through the same
+    // audience-checked feedDelta path the heartbeat already uses. Debounced
+    // rather than refetching per event, since a burst of nearby edits should
+    // cost one request, not one per row.
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const onPostsChanged = () => {
+      if (debounce) return;
+      debounce = setTimeout(() => {
+        debounce = null;
+        void controller.refresh();
+      }, 500);
+    };
+    const unsubscribeRealtime = gateway.subscribePostsChanged(onPostsChanged);
+
     // Carry the viewport across a controller rebuild so toggling a category
     // filter does not blank the map.
     if (lastViewport.current) {
@@ -80,11 +98,13 @@ export function useFeed(
     }
 
     return () => {
+      if (debounce) clearTimeout(debounce);
+      unsubscribeRealtime();
       document.removeEventListener("visibilitychange", onVisibility);
       controller.stop();
       unsubscribe();
     };
-  }, [controller]);
+  }, [controller, gateway]);
 
   return {
     view,

@@ -133,4 +133,22 @@ export interface SosoGateway {
   myZones(): Promise<Zone[]>;
   createZone(zone: NewZone): Promise<string>;
   deleteZone(zoneId: string): Promise<void>;
+
+  // --- Live change signals ------------------------------------------------
+  //
+  // Both are payload-free "something changed, go refetch" signals, not a
+  // data source in their own right. Callers must always refetch through the
+  // normal audience-checked read path (feedDelta, friendsPresence) on
+  // receipt rather than trusting anything about the event itself -- this
+  // keeps the same soso.can_see_post / follows RLS in the loop that the
+  // polling path already went through, instead of opening a second,
+  // unchecked way to learn about a post or a follow. Implementations with no
+  // realtime transport (demo-gateway) return a no-op unsubscribe and never
+  // fire, since the polling heartbeat is the only signal that mode has.
+
+  /** Fires when any post or post_media row the caller can see changes. */
+  subscribePostsChanged(onChange: () => void): () => void;
+
+  /** Fires when any follows row involving the caller changes. */
+  subscribeFollowsChanged(onChange: () => void): () => void;
 }

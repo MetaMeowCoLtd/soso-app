@@ -147,6 +147,29 @@ export function usePresence(
     return () => clearInterval(id);
   }, [enabled, refreshFriends]);
 
+  // FRIENDS_REFRESH_MS above is the ceiling both sides fall back to; it's
+  // what used to make a follow-back take up to a minute to show on either
+  // side, since nothing told a tab a follows row involving it had changed.
+  // follows_read_own scopes each row to the two people on it, so this only
+  // ever fires for a change involving the current user -- no separate check
+  // needed before refetching through friendsPresence.
+  useEffect(() => {
+    if (!enabled) return;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const onFollowsChanged = () => {
+      if (debounce) return;
+      debounce = setTimeout(() => {
+        debounce = null;
+        refreshFriends();
+      }, 400);
+    };
+    const unsubscribe = gateway.subscribeFollowsChanged(onFollowsChanged);
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      unsubscribe();
+    };
+  }, [gateway, enabled, refreshFriends]);
+
   const setSharing = useCallback(
     (next: boolean) => {
       setSharingState(next);

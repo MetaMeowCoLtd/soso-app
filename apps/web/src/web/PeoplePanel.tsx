@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatAgo } from "soso-core";
 import type { UsePresenceResult } from "./usePresence";
 
@@ -28,7 +28,36 @@ interface PeoplePanelProps {
 export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanelProps) {
   const [handleInput, setHandleInput] = useState("");
   const [confirmBlock, setConfirmBlock] = useState<string | null>(null);
+  // Which friend's ⋯ menu is open, if any. Remove/Block used to sit directly
+  // on the row; tucking both behind a menu is the point of this change, so a
+  // stray tap on the row itself can no longer trigger either.
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const menuRef = useRef<HTMLSpanElement | null>(null);
   const nowSeconds = Math.floor(Date.now() / 1000);
+
+  function closeMenu() {
+    setOpenMenu(null);
+    setConfirmBlock(null);
+  }
+
+  // Outside click / Escape closes whichever menu is open, including a
+  // pending block confirmation — a popover that only closes via its own
+  // buttons is easy to get stuck in.
+  useEffect(() => {
+    if (!openMenu) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeMenu();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMenu();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openMenu]);
 
   async function submitFollow() {
     const handle = handleInput.trim().replace(/^@/, "");
@@ -138,25 +167,55 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
                   >
                     {friend.tier === "close" ? "★" : "☆"}
                   </button>
-                  {confirmBlock === friend.id ? (
-                    <span className="friend-confirm">
-                      <button type="button" onClick={() => void presence.block(friend.id)}>
-                        Block
-                      </button>
-                      <button type="button" onClick={() => setConfirmBlock(null)}>
-                        Cancel
-                      </button>
-                    </span>
-                  ) : (
-                    <span className="friend-actions">
-                      <button type="button" onClick={() => void presence.unfollow(friend.id)}>
-                        Remove
-                      </button>
-                      <button type="button" onClick={() => setConfirmBlock(friend.id)}>
-                        Block
-                      </button>
-                    </span>
-                  )}
+                  <span className="friend-menu" ref={openMenu === friend.id ? menuRef : undefined}>
+                    <button
+                      type="button"
+                      className="friend-menu-trigger"
+                      onClick={() => (openMenu === friend.id ? closeMenu() : setOpenMenu(friend.id))}
+                      aria-haspopup="menu"
+                      aria-expanded={openMenu === friend.id}
+                      aria-label={`More options for ${friend.displayName}`}
+                    >
+                      ⋯
+                    </button>
+                    {openMenu === friend.id &&
+                      (confirmBlock === friend.id ? (
+                        <span className="friend-popover friend-confirm" role="menu">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void presence.block(friend.id);
+                              closeMenu();
+                            }}
+                          >
+                            Yes, block
+                          </button>
+                          <button type="button" onClick={() => setConfirmBlock(null)}>
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <span className="friend-popover" role="menu">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              void presence.unfollow(friend.id);
+                              closeMenu();
+                            }}
+                          >
+                            Remove
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => setConfirmBlock(friend.id)}
+                          >
+                            Block
+                          </button>
+                        </span>
+                      ))}
+                  </span>
                 </li>
               ))}
             </ul>
