@@ -110,7 +110,6 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
     <aside className="people-frame" aria-label="People">
       <div className="people-frame-head">
         <span className="people-frame-title">People</span>
-        {presence.me && <span className="people-frame-handle">@{presence.me.handle}</span>}
         <button className="people-frame-close" onClick={onClose} aria-label="Close" type="button">
           ×
         </button>
@@ -120,6 +119,18 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
         <p className="people-empty">Demo mode has nobody else to see — connect a backend.</p>
       ) : (
         <>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={presence.sharing}
+            className={`presence-toggle ${presence.sharing ? "active" : ""}`}
+            title="Adds you to the count below and lets mutual follows see you as online. Shares only your ward, never an exact spot."
+            onClick={() => presence.setSharing(!presence.sharing)}
+          >
+            <span className="presence-toggle-dot" aria-hidden="true" />
+            Sharing
+          </button>
+
           <div
             className="area-activity"
             title="A count only — nobody can see who, including you."
@@ -127,36 +138,6 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
             <span className="area-activity-number">{presence.areaCount ?? "–"}</span>
             <span className="area-activity-label">nearby</span>
           </div>
-
-          <button
-            type="button"
-            role="switch"
-            aria-checked={presence.sharing}
-            className={`presence-toggle ${presence.sharing ? "active" : ""}`}
-            title="Adds you to the count above and lets mutual follows see you as online. Shares only your ward, never an exact spot."
-            onClick={() => presence.setSharing(!presence.sharing)}
-          >
-            <span className="presence-toggle-dot" aria-hidden="true" />
-            Sharing
-          </button>
-
-          <div className="follow-row">
-            <input
-              value={handleInput}
-              onChange={(e) => setHandleInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void submitFollow();
-              }}
-              placeholder="add by handle"
-              aria-label="Add someone by their handle"
-              maxLength={21}
-            />
-            <button type="button" onClick={() => void submitFollow()} disabled={presence.busy}>
-              Add
-            </button>
-          </div>
-
-          {presence.error && <p className="people-hint">{presence.error}</p>}
 
           {presence.friends.length === 0 ? (
             <p className="people-empty">Nobody yet.</p>
@@ -276,6 +257,30 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
               ))}
             </ul>
           )}
+
+          <div className="add-friend-block">
+            {presence.me && (
+              <p className="people-own-handle">
+                Your handle is <strong>@{presence.me.handle}</strong> — share it so others can add you.
+              </p>
+            )}
+            <div className="follow-row">
+              <input
+                value={handleInput}
+                onChange={(e) => setHandleInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void submitFollow();
+                }}
+                placeholder="add by handle"
+                aria-label="Add someone by their handle"
+                maxLength={21}
+              />
+              <button type="button" onClick={() => void submitFollow()} disabled={presence.busy}>
+                Add
+              </button>
+            </div>
+            {presence.error && <p className="people-hint">{presence.error}</p>}
+          </div>
         </>
       )}
     </aside>
