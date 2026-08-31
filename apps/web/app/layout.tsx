@@ -19,6 +19,13 @@ export const metadata: Metadata = {
   icons: {
     apple: "icons/apple-touch-icon.png",
   },
+  // Next emits the modern `mobile-web-app-capable` tag from `appleWebApp`,
+  // but recent static builds do not reliably emit this legacy Apple tag.
+  // iOS still uses it to decide whether a Home Screen web app may draw below
+  // the status bar/notch when `black-translucent` is requested.
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+  },
 };
 
 export const viewport: Viewport = {
