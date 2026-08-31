@@ -41,6 +41,7 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
     <aside className="people-frame" aria-label="People">
       <div className="people-frame-head">
         <span className="people-frame-title">People</span>
+        {presence.me && <span className="people-frame-handle">@{presence.me.handle}</span>}
         <button className="people-frame-close" onClick={onClose} aria-label="Close" type="button">
           ×
         </button>
@@ -77,7 +78,7 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
               onKeyDown={(e) => {
                 if (e.key === "Enter") void submitFollow();
               }}
-              placeholder={presence.me ? `add by handle (you're @${presence.me.handle})` : "add by handle"}
+              placeholder="add by handle"
               aria-label="Add someone by their handle"
               maxLength={21}
             />
