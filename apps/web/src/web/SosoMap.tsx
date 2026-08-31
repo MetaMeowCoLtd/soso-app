@@ -193,6 +193,50 @@ function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {  useMa
   return null;
 }
 
+/**
+ * Forces Leaflet (and, through it, the MapLibre GL layer it wraps) to
+ * re-measure its container after mount, rather than trusting the size it
+ * happened to read the instant it was created.
+ *
+ * On a cold launch of an installed iOS PWA, the WKWebView applies the safe
+ * area (the notch/status-bar inset unlocked by `viewport-fit=cover`) to
+ * layout slightly AFTER first paint, as part of the launch-screen transition
+ * — not as part of the normal DOM layout pass Leaflet's mount measurement
+ * happens in. Leaflet has no way to know that measurement was premature: it
+ * only ever re-measures on an explicit `invalidateSize()` call or a genuine
+ * `window` resize event, neither of which fires here since, from the
+ * WebView's perspective, the viewport's own dimensions never change — only
+ * the safe area applied on top of them settles late. Left alone, the map's
+ * container — and the MapLibre GL canvas sized to match it — permanently
+ * excludes that strip, which is why it shows the page background instead of
+ * map tiles no matter how correct the CSS is.
+ *
+ * Re-measuring once on the next animation frame covers the common case;
+ * the follow-up timeout is a cheap safety net for the rarer case where the
+ * safe area is still settling a frame later.
+ */
+function SafeAreaResizeFix() {
+  const map = useMap();
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => map.invalidateSize());
+    const settle = setTimeout(() => map.invalidateSize(), 300);
+
+    // Orientation changes hit the same class of problem: the safe area's
+    // top/bottom insets swap to left/right (and vice versa), and Leaflet's
+    // own `window.resize` listener doesn't reliably fire for this in an
+    // installed iOS PWA the way it does in a normal browser tab.
+    const onOrientationChange = () => map.invalidateSize();
+    window.addEventListener("orientationchange", onOrientationChange);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(settle);
+      window.removeEventListener("orientationchange", onOrientationChange);
+    };
+  }, [map]);
+  return null;
+}
+
 function FlyToDraft({ at }: { at: Coordinates | null }) {
   const map = useMap();
   useEffect(() => {
@@ -409,6 +453,7 @@ export default function SosoMap({
       zoomControl={false}
     >
       <CuteBaseLayer />
+      <SafeAreaResizeFix />
       <ViewportWatcher onViewportChange={onViewportChange} />
       {!placing && <ClickHandler onMapClick={onMapClick} />}
       <FlyToDraft at={placing ?? focusAt} />
