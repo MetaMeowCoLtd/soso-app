@@ -162,14 +162,20 @@
 .area-activity-number { font-size:1.3rem; font-weight:800; color:var(--deep); letter-spacing:-.03em; }
 .area-activity-label { color:var(--muted); font-size:.7rem; font-weight:550; }
 
-.presence-toggle { display:flex; align-items:center; gap:7px; margin:6px 0; padding:7px 9px; border-radius:10px; background:rgba(245,248,247,.6); cursor:pointer; transition:background .16s; font-size:.72rem; font-weight:600; color:var(--deep); }.presence-toggle:hover { background:rgba(238,243,241,.8); }
-.presence-toggle input { width:14px; height:14px; accent-color:var(--teal); flex-shrink:0; }
+/* Same pill-toggle language as .chip/.audience-option elsewhere in the app —
+   an inline dot carries the on/off state so the label can stay a single
+   short word instead of a full sentence borrowed from the tooltip. */
+.presence-toggle { display:inline-flex; align-items:center; gap:6px; align-self:flex-start; margin:6px 0; padding:7px 12px; border:1px solid var(--hairline); border-radius:999px; background:#fff; cursor:pointer; transition:background .16s, border-color .16s, color .16s; font-size:.72rem; font-weight:650; color:#41564f; }
+.presence-toggle:hover { border-color:#c2d2cc; background:#f7faf9; }
+.presence-toggle-dot { width:7px; height:7px; border-radius:50%; background:#c8d3ce; flex-shrink:0; transition:background .16s, box-shadow .16s; }
+.presence-toggle.active { background:var(--deep); border-color:var(--deep); color:#fff; }
+.presence-toggle.active .presence-toggle-dot { background:#34d399; box-shadow:0 0 0 2px rgba(52,211,153,.3); }
 
 .follow-row { display:flex; gap:5px; margin-bottom:6px; }
-.follow-row input { flex:1; min-width:0; padding:7px 9px; border:1px solid rgba(216,226,222,.8); border-radius:10px; background:rgba(250,252,251,.7); font-size:.72rem; color:var(--ink); transition:border-color .16s, background .16s; }
+.follow-row input { flex:1; min-width:0; padding:7px 9px; border:1px solid rgba(216,226,222,.8); border-radius:12px; background:rgba(250,252,251,.7); font-size:.72rem; color:var(--ink); transition:border-color .16s, background .16s; }
 .follow-row input::placeholder { font-size:.72rem; color:var(--muted); }
 .follow-row input:focus { outline:none; border-color:var(--teal); background:#fff; }
-.follow-row button { padding:7px 11px; border:0; border-radius:10px; background:var(--deep); color:#fff; font-size:.72rem; font-weight:700; transition:background .16s; }.follow-row button:hover:not(:disabled) { background:#0a1d1a; }
+.follow-row button { padding:7px 11px; border:0; border-radius:12px; background:var(--deep); color:#fff; font-size:.72rem; font-weight:700; transition:background .16s; }.follow-row button:hover:not(:disabled) { background:#0a1d1a; }
 .follow-row button:disabled { opacity:.5; }
 
 .friend-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
@@ -187,7 +193,11 @@
 .friend-menu { position:relative; flex-shrink:0; }
 .friend-menu-trigger { width:22px; height:22px; border:0; border-radius:50%; background:transparent; color:#8a9a94; font-size:.9rem; line-height:1; display:grid; place-items:center; transition:background .15s, color .15s; }
 .friend-menu-trigger:hover, .friend-menu-trigger[aria-expanded="true"] { background:rgba(20,50,43,.08); color:#3d534c; }
-.friend-popover { position:absolute; top:calc(100% + 4px); right:0; z-index:10; display:flex; flex-direction:column; gap:2px; min-width:104px; padding:4px; border-radius:12px; background:#fff; border:1px solid rgba(20,50,43,.1); box-shadow:var(--e2); }
+/* Rendered through a portal into document.body (see PeoplePanel.tsx) so it
+   escapes .people-frame's overflow clipping and always layers on top of the
+   frame rather than being cut off/scrolled inside it. top/left are set
+   inline per-instance from the trigger's bounding rect. */
+.friend-popover { position:fixed; z-index:1000; display:flex; flex-direction:column; gap:2px; min-width:104px; padding:4px; border-radius:12px; background:#fff; border:1px solid rgba(20,50,43,.1); box-shadow:var(--e3); }
 .friend-popover button { padding:6px 9px; border:0; border-radius:8px; background:transparent; color:#3d534c; font-size:.72rem; font-weight:600; text-align:left; transition:background .12s; }
 .friend-popover button:hover { background:rgba(20,50,43,.06); }
 .friend-popover.friend-confirm button:first-child { color:#b91c1c; }

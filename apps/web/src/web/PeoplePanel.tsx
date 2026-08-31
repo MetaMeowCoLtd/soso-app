@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatAgo } from "soso-core";
 import type { UsePresenceResult } from "./usePresence";
 
@@ -32,31 +33,70 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
   // on the row; tucking both behind a menu is the point of this change, so a
   // stray tap on the row itself can no longer trigger either.
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const menuRef = useRef<HTMLSpanElement | null>(null);
+  // The popover is rendered in a portal (see below) so it can float above the
+  // frame instead of being clipped by it, which means its position has to be
+  // computed from the trigger button's rect rather than relying on normal
+  // in-flow `position: absolute` placement.
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLSpanElement | null>(null);
   const nowSeconds = Math.floor(Date.now() / 1000);
 
   function closeMenu() {
     setOpenMenu(null);
     setConfirmBlock(null);
+    setMenuPos(null);
+  }
+
+  function openMenuFor(id: string, trigger: HTMLButtonElement) {
+    const rect = trigger.getBoundingClientRect();
+    // Right-align the popover to the trigger, flip above if there isn't room
+    // below — the frame sits near the top of the screen, so a long friend
+    // list can otherwise push this off the bottom of the viewport.
+    const estimatedHeight = 84;
+    const top =
+      rect.bottom + estimatedHeight > window.innerHeight
+        ? rect.top - estimatedHeight - 4
+        : rect.bottom + 4;
+    setMenuPos({ top, left: rect.right - 104 });
+    triggerRef.current = trigger;
+    setOpenMenu(id);
   }
 
   // Outside click / Escape closes whichever menu is open, including a
   // pending block confirmation — a popover that only closes via its own
-  // buttons is easy to get stuck in.
+  // buttons is easy to get stuck in. Both the trigger and the portaled
+  // popover count as "inside".
   useEffect(() => {
     if (!openMenu) return;
     const onPointerDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeMenu();
+      const target = e.target as Node;
+      if (
+        (!triggerRef.current || !triggerRef.current.contains(target)) &&
+        (!popoverRef.current || !popoverRef.current.contains(target))
+      ) {
+        closeMenu();
+      }
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeMenu();
     };
+    // Reposition (or close) on scroll/resize so the popover never drifts away
+    // from its trigger — the frame itself scrolls independently of the page.
+    const onReflow = () => {
+      if (triggerRef.current) openMenuFor(openMenu, triggerRef.current);
+    };
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onReflow, true);
+    window.addEventListener("resize", onReflow);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onReflow, true);
+      window.removeEventListener("resize", onReflow);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openMenu]);
 
   async function submitFollow() {
@@ -88,17 +128,17 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
             <span className="area-activity-label">nearby</span>
           </div>
 
-          <label
-            className="presence-toggle"
+          <button
+            type="button"
+            role="switch"
+            aria-checked={presence.sharing}
+            className={`presence-toggle ${presence.sharing ? "active" : ""}`}
             title="Adds you to the count above and lets mutual follows see you as online. Shares only your ward, never an exact spot."
+            onClick={() => presence.setSharing(!presence.sharing)}
           >
-            <input
-              type="checkbox"
-              checked={presence.sharing}
-              onChange={(e) => presence.setSharing(e.target.checked)}
-            />
-            <span>Share presence here</span>
-          </label>
+            <span className="presence-toggle-dot" aria-hidden="true" />
+            Sharing
+          </button>
 
           <div className="follow-row">
             <input
@@ -167,11 +207,13 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
                   >
                     {friend.tier === "close" ? "★" : "☆"}
                   </button>
-                  <span className="friend-menu" ref={openMenu === friend.id ? menuRef : undefined}>
+                  <span className="friend-menu">
                     <button
                       type="button"
                       className="friend-menu-trigger"
-                      onClick={() => (openMenu === friend.id ? closeMenu() : setOpenMenu(friend.id))}
+                      onClick={(e) =>
+                        openMenu === friend.id ? closeMenu() : openMenuFor(friend.id, e.currentTarget)
+                      }
                       aria-haspopup="menu"
                       aria-expanded={openMenu === friend.id}
                       aria-label={`More options for ${friend.displayName}`}
@@ -179,42 +221,56 @@ export default function PeoplePanel({ presence, demoMode, onClose }: PeoplePanel
                       ⋯
                     </button>
                     {openMenu === friend.id &&
-                      (confirmBlock === friend.id ? (
-                        <span className="friend-popover friend-confirm" role="menu">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void presence.block(friend.id);
-                              closeMenu();
-                            }}
+                      menuPos &&
+                      createPortal(
+                        confirmBlock === friend.id ? (
+                          <span
+                            className="friend-popover friend-confirm"
+                            role="menu"
+                            ref={popoverRef}
+                            style={{ top: menuPos.top, left: menuPos.left }}
                           >
-                            Yes, block
-                          </button>
-                          <button type="button" onClick={() => setConfirmBlock(null)}>
-                            Cancel
-                          </button>
-                        </span>
-                      ) : (
-                        <span className="friend-popover" role="menu">
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              void presence.unfollow(friend.id);
-                              closeMenu();
-                            }}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void presence.block(friend.id);
+                                closeMenu();
+                              }}
+                            >
+                              Yes, block
+                            </button>
+                            <button type="button" onClick={() => setConfirmBlock(null)}>
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <span
+                            className="friend-popover"
+                            role="menu"
+                            ref={popoverRef}
+                            style={{ top: menuPos.top, left: menuPos.left }}
                           >
-                            Remove
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => setConfirmBlock(friend.id)}
-                          >
-                            Block
-                          </button>
-                        </span>
-                      ))}
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                void presence.unfollow(friend.id);
+                                closeMenu();
+                              }}
+                            >
+                              Remove
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => setConfirmBlock(friend.id)}
+                            >
+                              Block
+                            </button>
+                          </span>
+                        ),
+                        document.body,
+                      )}
                   </span>
                 </li>
               ))}
