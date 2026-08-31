@@ -174,6 +174,30 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    the filters and the feed so they read as one system. */
 .sheet { position:absolute; z-index:7; left:0; right:0; bottom:0; display:flex; flex-direction:column; max-height:min(62vh,460px); padding-bottom:max(10px, env(safe-area-inset-bottom)); border-radius:22px 22px 0 0; background:rgba(255,255,255,.96); box-shadow:var(--e3); backdrop-filter:blur(24px) saturate(180%); transition:max-height .32s cubic-bezier(.32,.72,0,1); }
 .sheet:not(.expanded) { max-height:132px; }
+/*
+ * A third sheet state, alongside the existing peek (:not(.expanded)) and
+ * full-list (.expanded) ones. Needs its own rule rather than reusing either:
+ * a pin preview needs more room than the filter-chip peek but has no reason
+ * to claim as much height as the full scrollable list.
+ *
+ * `.previewing` and `.expanded` are mutually exclusive in the JSX (only one
+ * is ever applied), so there is no real conflict between this and the
+ * `.expanded` rule above to resolve — this exists as its own rule for
+ * clarity, not because the cascade would otherwise pick the wrong one.
+ */
+.sheet.previewing { max-height:272px; }
+
+.pin-preview { display:flex; flex-direction:column; padding:2px clamp(14px,3vw,22px) 14px; }
+.pin-preview-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.pin-preview-kicker { margin:0; }
+.pin-preview-close { flex-shrink:0; display:grid; place-items:center; width:26px; height:26px; border:0; border-radius:50%; background:#f1f4f2; color:#5b706a; font-size:1.2rem; line-height:1; transition:background .16s; }
+.pin-preview-close:hover { background:#e4e9e6; }
+.pin-preview-age { margin:1px 0 6px; }
+.pin-preview-snippet { margin:0 0 8px; color:var(--ink); font-size:.86rem; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.pin-preview-meta { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 10px; }
+.pin-preview-countdown, .pin-preview-corroboration { margin:0; }
+.pin-preview-expand { align-self:stretch; padding:10px 14px; border:0; border-radius:12px; background:var(--deep); color:#fff; font-size:.84rem; font-weight:700; transition:background .16s; }
+.pin-preview-expand:hover { background:#0a1d1a; }
 .sheet-grabber { display:grid; place-items:center; width:100%; padding:9px 0 4px; border:0; background:transparent; }
 .grabber-bar { width:36px; height:4px; border-radius:99px; background:#cfdbd6; transition:background .18s; }
 .sheet-grabber:hover .grabber-bar { background:#aebfb8; }

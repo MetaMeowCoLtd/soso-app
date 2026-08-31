@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
 import ReportDetail from "@/src/web/ReportDetail";
+import PinPreview from "@/src/web/PinPreview";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeoplePanel from "@/src/web/PeoplePanel";
@@ -268,6 +269,11 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
+  // Selecting a pin always starts in the compact, non-blocking preview —
+  // never straight into the full modal. Reaching the full modal (voting,
+  // reporting) is always one explicit "See more" tap away, never the
+  // default outcome of a quick tap meant only to glance at a pin.
+  const [detailExpanded, setDetailExpanded] = useState(false);
   const [focusAt, setFocusAt] = useState<Coordinates | null>(null);
 
   // Transient feedback only. The old permanent "click anywhere to drop a pin"
@@ -292,7 +298,11 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // The sheet's resting height, used to position the control rail above it so
   // the two never overlap. Kept as one value rather than duplicated magic
   // numbers in the CSS and the inline style.
-  const sheetOffset = showFeedDrawer ? "min(62vh, 460px)" : "132px";
+  // A pin preview takes visual priority over whatever browse state the
+  // sheet was already in — selecting a pin always shows its preview,
+  // regardless of whether the feed list happened to be expanded at the time.
+  const previewingPin = Boolean(selectedPin) && !detailExpanded;
+  const sheetOffset = previewingPin ? "272px" : showFeedDrawer ? "min(62vh, 460px)" : "132px";
 
   const handleViewportChange = useCallback(
     (bounds: ReturnType<typeof leafletBoundsToBounds>, zoom: number) => {
@@ -315,6 +325,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
   function beginPin(at: Coordinates) {
     if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
+    // A resolved tap on empty map space reasonably means "I'm done looking
+    // at that other pin" — dismiss any open preview alongside starting the
+    // compose flow, rather than leaving a stale preview showing underneath.
+    deselectPin();
     // The draft marker appears — and the map stops accepting further clicks
     // (see `placing` below) — the instant a location is chosen, so the drop
     // animation plays immediately. The category picker itself is deliberately
@@ -345,11 +359,19 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   function selectPin(pin: Pin) {
     setSelectedPin(pin);
     setSelectedDetail(null);
+    setDetailExpanded(false);
     setFocusAt({ latitude: pin.lat, longitude: pin.lng });
     void gateway
       .postDetail(pin.id)
       .then(setSelectedDetail)
       .catch(() => setSelectedDetail(null));
+  }
+
+  /** Closing the preview, the full detail modal, or starting a new pin — every path that should drop the current selection. */
+  function deselectPin() {
+    setSelectedPin(null);
+    setSelectedDetail(null);
+    setDetailExpanded(false);
   }
 
   async function submitReport(input: NewPost): Promise<Pin> {
@@ -486,62 +508,77 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           floating filter dock and a separate corner drawer. Peek height shows
           the filters; expanding reveals the list. */}
       <section
-        className={`sheet ${showFeedDrawer ? "expanded" : ""}`}
-        aria-label="Local updates"
+        className={`sheet ${previewingPin ? "previewing" : showFeedDrawer ? "expanded" : ""}`}
+        aria-label={previewingPin ? "Pin preview" : "Local updates"}
       >
-        <button
-          className="sheet-grabber"
-          onClick={() => setShowFeedDrawer((open) => !open)}
-          type="button"
-          aria-expanded={showFeedDrawer}
-          aria-label={showFeedDrawer ? "Collapse updates" : "Expand updates"}
-        >
-          <span className="grabber-bar" />
-        </button>
-
-        <div className="sheet-head">
-          <div className="sheet-title">
-            <h2>{view.pins.length} nearby</h2>
-            <span className={mode === "supabase" ? "live-dot" : "live-dot demo"}>
-              {mode === "supabase" ? "Live" : "On this device"}
-            </span>
-          </div>
-        </div>
-
-        <div className="filter-row" role="group" aria-label="Filter by category">
+        {!previewingPin && (
           <button
-            className={activeFilters.length === 0 ? "chip active" : "chip"}
-            onClick={() => setActiveFilters([])}
+            className="sheet-grabber"
+            onClick={() => setShowFeedDrawer((open) => !open)}
             type="button"
-            aria-pressed={activeFilters.length === 0}
+            aria-expanded={showFeedDrawer}
+            aria-label={showFeedDrawer ? "Collapse updates" : "Expand updates"}
           >
-            All
+            <span className="grabber-bar" />
           </button>
-          {categories.map((c) => (
-            <button
-              className={activeFilters.includes(c.key) ? "chip active" : "chip"}
-              key={c.key}
-              onClick={() => toggleFilter(c.key)}
-              type="button"
-              aria-pressed={activeFilters.includes(c.key)}
-              style={{ "--chip-color": lookOf(c.key).color } as React.CSSProperties}
-            >
-              <span className="chip-dot" aria-hidden="true" />
-              {c.labelEn}
-            </button>
-          ))}
-        </div>
+        )}
 
-        {showFeedDrawer && (
-          <div className="sheet-body">
-            <ReportList
-              pins={view.pins}
-              categories={categories}
-              selectedId={selectedPin?.id}
-              nowSeconds={nowSeconds}
-              onSelect={selectPin}
-            />
-          </div>
+        {previewingPin && selectedPin ? (
+          <PinPreview
+            pin={selectedPin}
+            detail={selectedDetail}
+            categories={categories}
+            nowSeconds={nowSeconds}
+            onClose={deselectPin}
+            onExpand={() => setDetailExpanded(true)}
+          />
+        ) : (
+          <>
+            <div className="sheet-head">
+              <div className="sheet-title">
+                <h2>{view.pins.length} nearby</h2>
+                <span className={mode === "supabase" ? "live-dot" : "live-dot demo"}>
+                  {mode === "supabase" ? "Live" : "On this device"}
+                </span>
+              </div>
+            </div>
+
+            <div className="filter-row" role="group" aria-label="Filter by category">
+              <button
+                className={activeFilters.length === 0 ? "chip active" : "chip"}
+                onClick={() => setActiveFilters([])}
+                type="button"
+                aria-pressed={activeFilters.length === 0}
+              >
+                All
+              </button>
+              {categories.map((c) => (
+                <button
+                  className={activeFilters.includes(c.key) ? "chip active" : "chip"}
+                  key={c.key}
+                  onClick={() => toggleFilter(c.key)}
+                  type="button"
+                  aria-pressed={activeFilters.includes(c.key)}
+                  style={{ "--chip-color": lookOf(c.key).color } as React.CSSProperties}
+                >
+                  <span className="chip-dot" aria-hidden="true" />
+                  {c.labelEn}
+                </button>
+              ))}
+            </div>
+
+            {showFeedDrawer && (
+              <div className="sheet-body">
+                <ReportList
+                  pins={view.pins}
+                  categories={categories}
+                  selectedId={selectedPin?.id}
+                  nowSeconds={nowSeconds}
+                  onSelect={selectPin}
+                />
+              </div>
+            )}
+          </>
         )}
       </section>
 
@@ -568,16 +605,13 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         onMinimize={() => setShowPeople(false)}
       />
 
-      {selectedPin && (
+      {selectedPin && detailExpanded && (
         <ReportDetail
           pin={selectedPin}
           detail={selectedDetail}
           categories={categories}
           nowSeconds={nowSeconds}
-          onClose={() => {
-            setSelectedPin(null);
-            setSelectedDetail(null);
-          }}
+          onClose={deselectPin}
           onVote={vote}
           onReport={report}
         />
