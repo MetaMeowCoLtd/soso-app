@@ -45,17 +45,28 @@ import type { StyleSpecification } from "maplibre-gl";
  * colour — worth an occasional diff against the live style if the map's
  * colours or landmarks ever look partially unstyled.
  *
- * ONE THING THAT COULD NOT BE VERIFIED
- * -------------------------------------
- * The `subclass` values used in `FILTER_ADDITIONS` ("convenience",
- * "department_store", "restaurant") are inferred from OpenMapTiles' own
- * schema documentation, which states that `subclass` preserves the *raw*
- * OSM tag value (so `shop=convenience` should produce `subclass=convenience`
- * verbatim). This was not confirmed against real tile data — nothing in the
- * environment that built this can query a live vector tile's actual field
- * contents. If a category silently shows nothing, this is the first place
- * to check: the OpenMapTiles tile schema reference has the authoritative
- * class/subclass mapping if these strings turn out to be wrong.
+ * WHAT WAS WRONG THE FIRST TIME, AND WHAT IS STILL UNCERTAIN
+ * -------------------------------------------------------------
+ * An earlier version of this file filtered convenience stores, department
+ * stores, and restaurants by ANDing a subclass whitelist onto Liberty's
+ * existing poi_r1/r7/r20 layers, which also gate visibility by OpenMapTiles'
+ * own "rank" (local-importance) score. Convenience stores showed; most
+ * restaurants and department stores did not. The subclass values themselves
+ * were confirmed correct against OpenMapTiles' authoritative poi.yaml
+ * (github.com/openmaptiles/openmaptiles/blob/master/layers/poi/poi.yaml) —
+ * the actual bug was combining a category filter with a rank filter, which
+ * meant two categories could require very different zoom levels to appear
+ * for reasons unrelated to whether either was useful to show. SOSO_SHOPS_LAYER
+ * replaces all three rank-tiered layers with one that filters purely on
+ * subclass, at one fixed zoom.
+ *
+ * What remains genuinely uncertain: whether a train station shows depends
+ * on which of "rail" or "railway" its `class` field actually holds in
+ * OpenFreeMap's live tiles, and the schema documentation and the deployed
+ * style disagree with each other on this — see FILTER_REPLACEMENTS below.
+ * Nothing in the environment that built this can query a live vector tile's
+ * actual field contents to settle it directly, so the filter hedges across
+ * both possibilities rather than betting on one.
  */
 
 const LIBERTY_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
@@ -155,35 +166,118 @@ const PAINT_OVERRIDES: Record<string, Record<string, unknown>> = {
   // at Liberty's own colours: OpenFreeMap's sprite sheet is a plain raster
   // image, not a tintable SDF one, so a paint-level colour override would
   // have no effect on the icons themselves, only the text beside them.
-  poi_r1: { "text-color": "#7a5c45" },
-  poi_r7: { "text-color": "#7a5c45" },
-  poi_r20: { "text-color": "#7a5c45" },
   poi_transit: { "text-color": "#0f766e" },
 };
 
 /**
- * Additional filter conditions, ANDed onto whatever a layer already filters
- * on. This is the mechanism that turns "Liberty shows every POI OSM has"
- * into "Soso shows train stations, department stores, convenience stores,
- * and restaurants" — narrowing, not replacing, so each layer's existing
- * zoom-based rank staging (busier categories only appear once you are
- * zoomed in far enough) still applies on top of the category restriction.
+ * A dedicated landmark layer, built from scratch rather than by filtering
+ * Liberty's existing poi_r1/r7/r20 (which this style now hides entirely —
+ * see HIDDEN_LAYERS). Those three exist to stagger EVERY OSM POI category
+ * across zoom levels by OpenMapTiles' own "rank" (local-importance) score,
+ * so a city's most prominent handful of businesses appear before its
+ * thousands of minor ones as you zoom in. That staging is the wrong
+ * mechanism once the category list is already narrowed to four deliberate
+ * kinds: a convenience store and a restaurant sitting on the same street
+ * can have very different rank scores for reasons unrelated to whether
+ * either one is useful to show, and layering a rank threshold on top of a
+ * category filter meant some categories only appeared several zoom levels
+ * later than others for no reason a person looking at the map could see.
+ * One layer, one minzoom, filtered purely on subclass — every matching
+ * point appears at once, and the earlier clutter concern is handled by the
+ * category list itself, not by an additional threshold on top of it.
+ *
+ * subclass values confirmed against OpenMapTiles' authoritative poi.yaml
+ * (github.com/openmaptiles/openmaptiles/blob/master/layers/poi/poi.yaml):
+ * 'supermarket' and 'department_store' are siblings under one internal
+ * grouping; 'convenience' is its own directly-named subclass under the
+ * general "shop" grouping; 'restaurant' has no broader class mapping at
+ * all, which per the schema's own description means class and subclass are
+ * simply identical for it — subclass == "restaurant" was correct from the
+ * start, not the source of the earlier problem.
  */
-const FILTER_ADDITIONS: Record<string, unknown> = {
-  // poi_r1/r7/r20 together cover every POI class at increasing zoom levels
-  // as their "rank" (OpenMapTiles' own local-importance score) allows. The
-  // added filter is identical on all three: same four categories, whichever
-  // rank tier a given point happens to fall into.
-  poi_r1: ["in", ["get", "subclass"], ["literal", ["department_store", "convenience", "restaurant"]]],
-  poi_r7: ["in", ["get", "subclass"], ["literal", ["department_store", "convenience", "restaurant"]]],
-  poi_r20: ["in", ["get", "subclass"], ["literal", ["department_store", "convenience", "restaurant"]]],
+const SOSO_SHOPS_LAYER = {
+  id: "soso_shops",
+  type: "symbol",
+  source: "openmaptiles",
+  "source-layer": "poi",
+  minzoom: 15,
+  filter: [
+    "all",
+    ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false],
+    ["in", ["get", "subclass"], ["literal", ["convenience", "supermarket", "department_store", "restaurant"]]],
+  ],
+  // icon-image and text-field expressions copied verbatim from Liberty's own
+  // poi_r1 layer, not invented — this reuses a rendering pattern already
+  // proven to work in the live style rather than guessing at new syntax.
+  layout: {
+    "icon-image": ["match", ["get", "subclass"], ["florist", "furniture"], ["get", "subclass"], ["get", "class"]],
+    "text-anchor": "top",
+    "text-field": [
+      "case",
+      ["has", "name:nonlatin"],
+      ["concat", ["get", "name:latin"], "\n", ["get", "name:nonlatin"]],
+      ["coalesce", ["get", "name_en"], ["get", "name"]],
+    ],
+    "text-font": ["Noto Sans Italic"],
+    "text-max-width": 9,
+    "text-offset": [0, 0.6],
+    "text-size": 12,
+  },
+  paint: {
+    "text-color": "#7a5c45",
+    "text-halo-blur": 0.5,
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 1,
+  },
+};
 
-  // poi_transit ships filtering to class in [airport, bus, rail] with no
-  // rank restriction at all (transit stops are considered important enough
-  // to show regardless of local rank). Narrowed to rail only — train
-  // stations were asked for; bus stops and airports were not, and adding
-  // them back is a one-line change here if that changes.
-  poi_transit: ["==", ["get", "class"], "rail"],
+/**
+ * Filters that ADD to whatever a layer already filters on (AND-merged — see
+ * loadCuteMapStyle). Only narrowing is possible this way, which is exactly
+ * wrong for poi_transit: see FILTER_REPLACEMENTS below for why train
+ * stations needed the stronger tool instead.
+ */
+const FILTER_ADDITIONS: Record<string, unknown> = {};
+
+/**
+ * Filters that REPLACE a layer's filter outright, for the one case where
+ * narrowing isn't enough: OpenMapTiles' own schema documentation states
+ * railway stations get class="railway", but Liberty's live, deployed style
+ * filters poi_transit for class in [airport, bus, rail] — "rail", not
+ * "railway". Both were read directly from a real source (the schema config
+ * vs. the actual fetched style JSON), and they disagree, most likely because
+ * OpenFreeMap's tile pipeline diverged from the upstream config at some
+ * point. Rather than bet on either being the one that is actually true of
+ * OpenFreeMap's data, this checks for both spellings of class AND the raw
+ * subclass values ("station", "halt") a railway=station tag would produce,
+ * so a station shows up regardless of which convention actually generated
+ * the tiles being served right now.
+ */
+const FILTER_REPLACEMENTS: Record<string, unknown> = {
+  poi_transit: [
+    "any",
+    ["match", ["get", "class"], ["rail", "railway"], true, false],
+    ["match", ["get", "subclass"], ["station", "halt"], true, false],
+  ],
+};
+
+/**
+ * Layout property overrides — a separate map from PAINT_OVERRIDES because
+ * allow-overlap is a layout property, not a paint one.
+ *
+ * poi_transit forced to always render regardless of collision with any
+ * other label. Train stations are a small, sparse set of points, so
+ * forcing them to draw is a low-risk way to close off an entirely different
+ * possible cause of a missing station name: MapLibre drops overlapping
+ * symbols by draw order, and a station sharing screen space with a place
+ * name (very plausible — a station is often at the centre of the area
+ * named after it) could be losing that collision even with a perfectly
+ * correct filter. Repositioned later in the layer array in
+ * loadCuteMapStyle for the same reason: draw order is what decides which
+ * label wins a collision in the first place.
+ */
+const LAYOUT_OVERRIDES: Record<string, Record<string, unknown>> = {
+  poi_transit: { "text-allow-overlap": true, "icon-allow-overlap": true },
 };
 
 /**
@@ -203,6 +297,13 @@ const HIDDEN_LAYERS = new Set([
   "aeroway_taxiway",
   "airport",
   "building-3d",
+  // Replaced by soso_shops (see above), which filters purely on subclass
+  // with no rank gating, so every wanted category appears at one
+  // consistent zoom rather than some being pushed several levels higher
+  // than others by a local-importance score unrelated to their category.
+  "poi_r1",
+  "poi_r7",
+  "poi_r20",
 ]);
 
 interface LooseLayer {
@@ -220,19 +321,23 @@ export async function loadCuteMapStyle(): Promise<StyleSpecification> {
     throw new Error(`Failed to load base map style: ${response.status}`);
   }
   const style = (await response.json()) as StyleSpecification;
-  const layers = (style.layers as unknown as LooseLayer[]).map((layer) => {
+  let layers = (style.layers as unknown as LooseLayer[]).map((layer) => {
     if (HIDDEN_LAYERS.has(layer.id)) {
       return { ...layer, layout: { ...layer.layout, visibility: "none" } };
     }
 
     let next = layer;
 
-    const extraFilter = FILTER_ADDITIONS[layer.id];
-    if (extraFilter) {
-      next = {
-        ...next,
-        filter: next.filter ? ["all", next.filter, extraFilter] : extraFilter,
-      };
+    if (FILTER_REPLACEMENTS[layer.id]) {
+      next = { ...next, filter: FILTER_REPLACEMENTS[layer.id] };
+    } else {
+      const extraFilter = FILTER_ADDITIONS[layer.id];
+      if (extraFilter) {
+        next = {
+          ...next,
+          filter: next.filter ? ["all", next.filter, extraFilter] : extraFilter,
+        };
+      }
     }
 
     const overrides = PAINT_OVERRIDES[layer.id];
@@ -240,8 +345,36 @@ export async function loadCuteMapStyle(): Promise<StyleSpecification> {
       next = { ...next, paint: { ...next.paint, ...overrides } };
     }
 
+    const layoutOverrides = LAYOUT_OVERRIDES[layer.id];
+    if (layoutOverrides) {
+      next = { ...next, layout: { ...next.layout, ...layoutOverrides } };
+    }
+
     return next;
   });
+
+  // Insert the landmark layer where poi_r1 used to sit (now hidden), rather
+  // than appending it — this keeps it in a sensible position in the draw
+  // order instead of defaulting to wherever push() would put it, which for
+  // a symbol layer also affects collision priority against neighbouring
+  // layers.
+  const shopsInsertAt = layers.findIndex((l) => l.id === "poi_r1");
+  const shopsLayer = SOSO_SHOPS_LAYER as unknown as LooseLayer;
+  layers =
+    shopsInsertAt === -1
+      ? [...layers, shopsLayer]
+      : [...layers.slice(0, shopsInsertAt), shopsLayer, ...layers.slice(shopsInsertAt)];
+
+  // Move train station labels to the very end of the draw order, so their
+  // collision priority beats place-name labels that might otherwise claim
+  // the same screen space first and silently suppress them — see the
+  // comment on LAYOUT_OVERRIDES for why this matters even with
+  // allow-overlap already set.
+  const transitIdx = layers.findIndex((l) => l.id === "poi_transit");
+  if (transitIdx !== -1) {
+    const [transitLayer] = layers.splice(transitIdx, 1);
+    if (transitLayer) layers.push(transitLayer);
+  }
 
   return { ...style, layers } as unknown as StyleSpecification;
 }
