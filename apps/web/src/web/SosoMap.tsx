@@ -195,42 +195,70 @@ function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {  useMa
 
 /**
  * Forces Leaflet (and, through it, the MapLibre GL layer it wraps) to
- * re-measure its container after mount, rather than trusting the size it
- * happened to read the instant it was created.
+ * re-measure its container whenever that container's actual on-screen size
+ * changes, rather than trusting the size it happened to read the instant it
+ * was created.
  *
  * On a cold launch of an installed iOS PWA, the WKWebView applies the safe
- * area (the notch/status-bar inset unlocked by `viewport-fit=cover`) to
- * layout slightly AFTER first paint, as part of the launch-screen transition
- * — not as part of the normal DOM layout pass Leaflet's mount measurement
- * happens in. Leaflet has no way to know that measurement was premature: it
- * only ever re-measures on an explicit `invalidateSize()` call or a genuine
- * `window` resize event, neither of which fires here since, from the
- * WebView's perspective, the viewport's own dimensions never change — only
- * the safe area applied on top of them settles late. Left alone, the map's
- * container — and the MapLibre GL canvas sized to match it — permanently
- * excludes that strip, which is why it shows the page background instead of
- * map tiles no matter how correct the CSS is.
+ * area (the notch/status-bar/home-indicator inset unlocked by
+ * `viewport-fit=cover`) to layout slightly AFTER first paint, as part of the
+ * launch-screen transition — not as part of the normal DOM layout pass
+ * Leaflet's mount measurement happens in. Leaflet has no way to know that
+ * measurement was premature: it only ever re-measures on an explicit
+ * `invalidateSize()` call or a genuine `window` resize event, neither of
+ * which fires here, since from the WebView's perspective the viewport's own
+ * dimensions never change — only the safe area applied on top of them
+ * settles late. Left alone, the map's container — and the MapLibre GL canvas
+ * sized to match it — permanently excludes that strip, which is why it shows
+ * the page background instead of map tiles no matter how correct the CSS is.
  *
- * Re-measuring once on the next animation frame covers the common case;
- * the follow-up timeout is a cheap safety net for the rarer case where the
- * safe area is still settling a frame later.
+ * A first implementation of this fix re-measured once on the next animation
+ * frame, plus a flat 300ms fallback timeout. That covered a warm relaunch but
+ * not reliably a genuinely cold one: on a first-ever install, the WebView is
+ * also registering the service worker and parsing every script uncached, and
+ * a cold safe-area settle can land well past 300ms — exactly the "only on
+ * first launch" pattern this was reported with, and exactly why any later
+ * interaction (which forces some other layout pass) appeared to fix it.
+ *
+ * A ResizeObserver on the map's own container removes the guesswork: it
+ * fires precisely when the container's rendered size actually changes,
+ * whatever that size turns out to be and however long it takes to arrive,
+ * rather than betting on a fixed delay. This subsumes the animation-frame
+ * and timeout retries entirely — there is no longer a "how long could this
+ * take" number to get wrong.
  */
 function SafeAreaResizeFix() {
   const map = useMap();
   useEffect(() => {
-    const raf = requestAnimationFrame(() => map.invalidateSize());
-    const settle = setTimeout(() => map.invalidateSize(), 300);
+    const container = map.getContainer();
+
+    // Leaflet already calls invalidateSize() on genuine `window` resize
+    // events; this only needs to catch the case that slips past that, where
+    // the container's own box changes without the window itself resizing.
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      // Coalesce bursts (a transition can fire this many times in a row)
+      // into a single measurement on the next paint rather than thrashing
+      // Leaflet's layout for every intermediate frame.
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        map.invalidateSize();
+      });
+    });
+    observer.observe(container);
 
     // Orientation changes hit the same class of problem: the safe area's
-    // top/bottom insets swap to left/right (and vice versa), and Leaflet's
-    // own `window.resize` listener doesn't reliably fire for this in an
-    // installed iOS PWA the way it does in a normal browser tab.
+    // top/bottom insets swap to left/right (and vice versa). In practice the
+    // container's own size also changes when this happens, so the observer
+    // above already covers it — this listener is a direct, immediate signal
+    // kept alongside it rather than relied on alone.
     const onOrientationChange = () => map.invalidateSize();
     window.addEventListener("orientationchange", onOrientationChange);
 
     return () => {
-      cancelAnimationFrame(raf);
-      clearTimeout(settle);
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
       window.removeEventListener("orientationchange", onOrientationChange);
     };
   }, [map]);
