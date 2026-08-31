@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
@@ -31,69 +30,34 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   // Matches the app's actual background (html/body/.map-app in globals.css),
-  // not an arbitrary brand color. On iOS this value is what Safari paints
-  // into the safe-area strip around its toolbar before the page's own
-  // 100dvh layout has settled — which on cold launch (toolbar starts
-  // expanded, then collapses on first scroll/drag) is a real, visible
-  // window, not a hypothetical edge case. A mismatched theme-color shows up
-  // there as an obvious stray bar at the bottom; a matching one just looks
-  // like part of the page loading normally. If the page background ever
-  // changes, update this alongside it (and public/manifest.json's
-  // theme_color, which needs the same value for the installed-PWA case).
+  // not an arbitrary brand color — kept from the earlier pass at this bug.
+  // It's a reasonable belt-and-suspenders fallback for a moment before the
+  // page's own background has painted, but it did NOT fix the actual gap on
+  // its own (confirmed by shipping it alone first) — see globals.css for
+  // the fix that did: locking html/body to the viewport with
+  // `position:fixed` so the outer document can never overscroll/bounce.
   themeColor: "#bcd9d2",
   width: "device-width",
   initialScale: 1,
+  // Disables native pinch/double-tap zoom on the page chrome (buttons, the
+  // composer sheet, the people panel) without touching the map's own zoom:
+  // Leaflet implements pinch-to-zoom itself, via its own touch-event
+  // handlers on the map container (see `touchZoom` on <MapContainer> in
+  // SosoMap.tsx, on by default) — it does not use or depend on the
+  // browser's native page-zoom gesture at all, so restricting THAT gesture
+  // at the page level has no effect on the map's zoom. This also removes
+  // one more way the outer page could end up temporarily larger than the
+  // viewport (a stray double-tap zooming the whole page), which is the
+  // same family of problem as the overscroll fix in globals.css.
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>
-        {/*
-          The real fix for the iOS gap, not just the color-matching one.
-
-          `100dvh` is *supposed* to always equal the current visible
-          viewport, live-updating as Safari's toolbar expands/collapses. In
-          practice, on a cold launch, WebKit does not always recompute it
-          correctly on the very first layout pass — it settles into the
-          right value only once something (a scroll, a toolbar drag) forces
-          a fresh resize. Until then, `.map-app`'s `height:100dvh` can be
-          taller than what's actually drawn, leaving a real, empty strip at
-          the bottom — not a color mismatch, an actual unfilled gap.
-
-          `window.visualViewport` does not have this bug: it reports the
-          true current visible height immediately and fires `resize` on
-          every toolbar change. This script mirrors that value into a CSS
-          custom property the moment it's known, and `.map-app` in
-          globals.css reads `var(--app-height, 100dvh)` — falling back to
-          the CSS unit only for the one frame before this runs, and on any
-          browser without visualViewport support at all.
-
-          `beforeInteractive` is required, not `afterInteractive`: this has
-          to set the property before the first paint the user sees, or the
-          gap flashes once anyway and this becomes a no-op.
-        */}
-        <Script id="app-height-fix" strategy="beforeInteractive">
-          {`
-            (function () {
-              function setAppHeight() {
-                var vv = window.visualViewport;
-                var h = (vv && vv.height) || window.innerHeight;
-                document.documentElement.style.setProperty("--app-height", h + "px");
-              }
-              setAppHeight();
-              if (window.visualViewport) {
-                window.visualViewport.addEventListener("resize", setAppHeight);
-                window.visualViewport.addEventListener("scroll", setAppHeight);
-              }
-              window.addEventListener("resize", setAppHeight);
-              window.addEventListener("orientationchange", setAppHeight);
-            })();
-          `}
-        </Script>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
