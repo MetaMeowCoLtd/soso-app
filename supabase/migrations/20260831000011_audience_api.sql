@@ -189,6 +189,20 @@ $$;
 -- ----------------------------------------------------------------------------
 -- create_post  -- audience and zone inheritance
 -- ----------------------------------------------------------------------------
+-- The DROP is essential, not tidiness. Adding two defaulted parameters does
+-- NOT replace the 0005 function: Postgres identifies functions by their full
+-- argument list, so `create or replace` here would leave BOTH versions
+-- present. A call that omits the new arguments would then be ambiguous, and
+-- PostgREST could resolve it to the old function, which knows nothing about
+-- audiences and would write every post as public. A private pin silently
+-- published is the worst outcome this feature can produce, so the old
+-- signature is removed outright rather than left to chance.
+-- ----------------------------------------------------------------------------
+drop function if exists public.create_post(
+  text, double precision, double precision, text, text,
+  double precision, double precision, integer
+);
+
 create or replace function public.create_post(
   p_category     text,
   p_lng          double precision,
@@ -565,8 +579,16 @@ grant execute on function public.can_see_post_as(uuid, uuid) to service_role;
 -- sourced from the viewer's own outbound follow edge, so it reflects how the
 -- VIEWER classifies each friend. It never exposes how the friend classifies
 -- the viewer, which is deliberately private.
+--
+-- The explicit DROP is required, not stylistic. `create or replace function`
+-- cannot change a function's return type, and adding a column to a
+-- `returns table (...)` signature is exactly that: Postgres rejects it with
+-- "cannot change return type of existing function" (42P13). Set-returning
+-- functions must be dropped and recreated when their row type changes.
 -- ----------------------------------------------------------------------------
-create or replace function public.friends_presence()
+drop function if exists public.friends_presence();
+
+create function public.friends_presence()
   returns table (
     user_id      uuid,
     handle       text,
