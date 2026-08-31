@@ -2,69 +2,33 @@
 * { box-sizing:border-box; }
 /*
  * html/body are pinned exactly to the viewport and never allowed to scroll.
- * Previously they only had min-height, which lets the outer document become
- * even fractionally taller than the visible viewport — from a zoom gesture,
- * a rounding difference between the layout and visual viewport, or a
- * focused input. iOS Safari's elastic rubber-band overscroll then bounces
- * that (normally invisible) sliver into view for a moment, painted with
- * whatever's under the document. That bounce settling is exactly what a
- * drag on the browser chrome was inadvertently forcing to resolve early —
- * which is why that gesture appeared to "fix" it. Locking the document so
- * there is nothing beyond the viewport for it to bounce into removes the
- * gap at the source rather than papering over its symptom.
- * `-webkit-overflow-scrolling` / `overscroll-behavior` alone are not
- * reliable enough for this on iOS Safari; `position:fixed` on the
- * document itself is the one technique that consistently holds there.
- * `.sheet-body`, `.people-frame` and `.filter-row` keep their own
- * `overflow` for internal scrolling — this only locks the OUTER page.
- * The app shell is stretched by all four edges instead of a `vh` unit. This
- * matters on iOS: a fixed element with `inset: 0` *and* `height: 100dvh` is
- * over-constrained, so WebKit may ignore its bottom edge and expose the
- * document background under the Home Indicator.
- */
-/*
- * The magenta diagnostic established that the strip is NOT the Leaflet
- * container (that would have shown magenta) — it is this document
- * background showing below a `position:fixed` body that is not spanning the
- * full visual viewport on iOS.
- *
- * `height:100%` rather than `min-height`: min-height lets the element grow
- * past the viewport but does not force it to fill it, so html could resolve
- * shorter than the visual viewport and leave its own background exposed at
- * the bottom. The fallback chain matters on iOS specifically — each later
- * declaration overrides the previous one only in browsers that understand
- * it, so this resolves to the largest unit each engine actually supports:
- *   100%                    - universal baseline
- *   -webkit-fill-available  - iOS Safari's own "fill the real viewport"
- *   100dvh                  - dynamic viewport unit
+ * `position:fixed` + `inset:0` (no vh/dvh height) stretches body to all four
+ * edges of the layout viewport, including the Home Indicator region unlocked
+ * by viewport-fit=cover. Do not also set height:100dvh: that over-constrains
+ * the box, WebKit may ignore the bottom edge, and 100dvh / visualViewport.height
+ * on iOS Home Screen often exclude the Home Indicator — the empty #bcd9d2 bar.
+ * `-webkit-fill-available` is last so it wins on iOS over 100dvh.
+ * `--app-top` / `--app-left` come from visualViewport.offset* in layout.tsx
+ * so a stuck visual-viewport offset (uncorrectable once zoom is locked) still
+ * keeps the shell aligned. `.sheet-body`, `.people-frame` and `.filter-row`
+ * keep their own overflow — this only locks the OUTER page.
  */
 html {
   height:100%;
-  height:-webkit-fill-available;
   height:100dvh;
+  height:-webkit-fill-available;
   background:#bcd9d2;
   overflow:hidden;
   overscroll-behavior:none;
 }
-/*
- * `inset:0` alone resolves a fixed element against the LAYOUT viewport,
- * which on iOS does not include the strip the home indicator sits over —
- * that is the gap. Explicit width/height using the same fallback chain as
- * html pins the body to the VISUAL viewport instead.
- *
- * The previous rule combined `inset:0` with `width:100%` and no height,
- * over-constraining the horizontal axis while leaving the vertical one
- * derived — the same class of over-constraint the .map-app comment below
- * warns about. Setting both axes explicitly removes the ambiguity.
- */
 body {
   position:fixed;
-  top:0;
-  left:0;
-  width:100%;
-  height:100%;
-  height:-webkit-fill-available;
-  height:100dvh;
+  top:var(--app-top, 0px);
+  left:var(--app-left, 0px);
+  right:0;
+  bottom:0;
+  width:auto;
+  height:auto;
   margin:0;
   overflow:hidden;
   overscroll-behavior:none;
@@ -72,44 +36,7 @@ body {
 }
 body { color:var(--ink); font-family:ui-rounded, "SF Pro Rounded", "Avenir Next", Arial, sans-serif; }
 button, input, textarea { font:inherit; } button { cursor:pointer; } button:focus-visible, input:focus-visible, textarea:focus-visible { outline:3px solid #ffd35d; outline-offset:3px; }
-/*
- * `--app-height` is set from `visualViewport.height` by the script in
- * layout.tsx and is authoritative when present: measured from what iOS
- * actually reports, rather than inferred from a CSS unit whose behaviour
- * differs between engines and launch states. The `100%` fallback applies
- * before that script runs and in browsers without `visualViewport`.
- */
-.map-app { position:absolute; top:0; left:0; width:100%; height:100%; height:var(--app-height, 100%); min-height:0; overflow:hidden; background:#bcd9d2; }
-
-/*
- * TEMPORARY DIAGNOSTIC — revert once the strip is resolved.
- *
- * Distinguishes "the previous fix isn't actually running" (a stale cached
- * PWA build) from "it's running but the gap is still there." This orange
- * dot cannot appear from any code that predates this change.
- *
- * - Dot visible, bottom still shows the teal .map-app colour  -> the fix IS
- *   running, and --app-height is still resolving short of the true visual
- *   viewport. A real, further bug — worth a fresh diagnostic pass, not a
- *   repeat of the last fix.
- * - Dot NOT visible at all                                    -> this build
- *   never loaded. Stale cache/service worker, not a code problem — try a
- *   hard reinstall (delete the Home Screen icon, revisit in Safari, re-add)
- *   before assuming any code here is still wrong.
- */
-.map-app::after {
-  content: "";
-  position: fixed;
-  bottom: max(6px, env(safe-area-inset-bottom));
-  right: 6px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #ff8c00;
-  border: 2px solid #fff;
-  z-index: 999999;
-  pointer-events: none;
-}
+.map-app { position:absolute; inset:0; min-height:0; overflow:hidden; background:#bcd9d2; }
 .map { position:absolute!important; inset:0; z-index:0; height:100%; width:100%; background:#bcd9d2; }
 .leaflet-control-attribution { background:rgba(255,255,255,.65)!important; font-size:9px!important; }.leaflet-container { font-family:inherit!important; }
 .map-header { position:absolute; z-index:10; top:0; left:0; right:0; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); display:flex; align-items:center; gap:8px; pointer-events:none; }.map-header > * { pointer-events:auto; }.map-header .brand { margin-right:auto; }

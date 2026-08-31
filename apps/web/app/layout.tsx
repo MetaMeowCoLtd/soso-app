@@ -57,46 +57,37 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <head>
         {/*
-          Pins the app shell to the height iOS actually reports, rather than
-          to a CSS unit.
+          Pins the fixed body to the visual viewport's offset (iOS can leave
+          offsetTop/offsetLeft non-zero after a cold PWA launch, and with
+          user-scalable=no the user can no longer drag to correct it).
 
-          Why this exists despite the CSS already using a 100% /
-          -webkit-fill-available / 100dvh fallback chain: those units are
-          resolved by the engine against ITS idea of the viewport, and on a
-          cold iOS PWA launch that idea is briefly wrong — the safe-area
-          insets settle after first paint, and nothing re-resolves a CSS unit
-          afterwards. `visualViewport.height` is the one value that reports
-          the real, current visible height, and it fires an event when that
-          changes. Setting a custom property from it means the layout follows
-          the actual viewport rather than a prediction of it.
-
-          Runs before hydration (inline in <head>) so the first painted frame
-          already has the correct height, rather than visibly correcting a
-          wrong one a moment later.
-
-          The `scroll` listener is not redundant with `resize`: iOS fires
-          scroll on the visual viewport when the keyboard opens or the page
-          is panned under a pinned element, without necessarily firing resize.
+          Do NOT size the shell from visualViewport.height: on iOS Home Screen
+          with viewport-fit=cover that value often excludes the Home Indicator,
+          which is exactly the empty background strip at the bottom. Height is
+          handled in CSS via inset:0 and -webkit-fill-available.
         */}
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){
-  function setAppHeight(){
+  function setAppOffset(){
     var vv = window.visualViewport;
-    var h = vv ? vv.height : window.innerHeight;
-    document.documentElement.style.setProperty('--app-height', h + 'px');
+    var top = vv ? vv.offsetTop : 0;
+    var left = vv ? vv.offsetLeft : 0;
+    document.documentElement.style.setProperty('--app-top', top + 'px');
+    document.documentElement.style.setProperty('--app-left', left + 'px');
+    if (top || left) window.scrollTo(0, 0);
   }
-  setAppHeight();
+  setAppOffset();
   if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', setAppHeight);
-    window.visualViewport.addEventListener('scroll', setAppHeight);
+    window.visualViewport.addEventListener('resize', setAppOffset);
+    window.visualViewport.addEventListener('scroll', setAppOffset);
   }
-  window.addEventListener('resize', setAppHeight);
+  window.addEventListener('resize', setAppOffset);
   window.addEventListener('orientationchange', function(){
-    setAppHeight();
-    setTimeout(setAppHeight, 300);
+    setAppOffset();
+    setTimeout(setAppOffset, 300);
   });
-  [100, 400, 1000].forEach(function(ms){ setTimeout(setAppHeight, ms); });
+  [100, 400, 1000].forEach(function(ms){ setTimeout(setAppOffset, ms); });
 })();`,
           }}
         />
