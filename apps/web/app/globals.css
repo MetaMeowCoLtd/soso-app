@@ -17,16 +17,16 @@
  * document itself is the one technique that consistently holds there.
  * `.sheet-body`, `.people-frame` and `.filter-row` keep their own
  * `overflow` for internal scrolling — this only locks the OUTER page.
- * `100dvh` covers the visible viewport in a standalone iOS app, including
- * its safe-area region when `viewport-fit=cover` is set. Do not replace it
- * with `visualViewport.height`: WebKit may report a height that excludes the
- * Home Indicator inset, which leaves the document background visible below
- * the map.
+ * The app shell is stretched by all four edges instead of a `vh` unit. This
+ * matters on iOS: a fixed element with `inset: 0` *and* `height: 100dvh` is
+ * over-constrained, so WebKit may ignore its bottom edge and expose the
+ * document background under the Home Indicator.
  */
-html, body { position:fixed; inset:0; width:100%; height:100vh; height:100dvh; margin:0; overflow:hidden; overscroll-behavior:none; background:#bcd9d2; }
+html { min-height:100%; background:#bcd9d2; }
+body { position:fixed; inset:0; width:100%; margin:0; overflow:hidden; overscroll-behavior:none; background:#bcd9d2; }
 body { color:var(--ink); font-family:ui-rounded, "SF Pro Rounded", "Avenir Next", Arial, sans-serif; }
 button, input, textarea { font:inherit; } button { cursor:pointer; } button:focus-visible, input:focus-visible, textarea:focus-visible { outline:3px solid #ffd35d; outline-offset:3px; }
-.map-app { height:100vh; height:100dvh; min-height:0; position:relative; overflow:hidden; background:#bcd9d2; }
+.map-app { position:absolute; inset:0; min-height:0; overflow:hidden; background:#bcd9d2; }
 .map { position:absolute!important; inset:0; z-index:0; height:100%; width:100%; background:#c7dcd4; }
 .leaflet-control-attribution { background:rgba(255,255,255,.65)!important; font-size:9px!important; }.leaflet-container { font-family:inherit!important; }
 .map-header { position:absolute; z-index:10; top:0; left:0; right:0; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); display:flex; align-items:center; gap:8px; pointer-events:none; }.map-header > * { pointer-events:auto; }.map-header .brand { margin-right:auto; }
@@ -126,7 +126,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    badge counter-rotates to stay upright. */
 .soso-pin-private::before { content:"\1F512"; position:absolute; top:-5px; right:-5px; display:grid; place-items:center; width:17px; height:17px; border-radius:50%; background:#fff; color:#41564f; font-size:.55rem; box-shadow:var(--e1); transform:rotate(45deg); z-index:2; }
 
-@media (max-width:600px) { .map-app { min-height:540px; }.brand { height:34px; padding:0 11px; font-size:1rem; }.notify-button, .people-button { width:34px; height:34px; }.notify-button svg, .people-button svg { width:18px; height:18px; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; }.people-frame { top:calc(max(14px, env(safe-area-inset-top)) + 34px + 14px + 8px); left:10px; width:min(210px, calc(100% - 20px)); max-height:min(55vh, 340px); padding:9px 10px; } }
+@media (max-width:600px) { .brand { height:34px; padding:0 11px; font-size:1rem; }.notify-button, .people-button { width:34px; height:34px; }.notify-button svg, .people-button svg { width:18px; height:18px; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; }.people-frame { top:calc(max(14px, env(safe-area-inset-top)) + 34px + 14px + 8px); left:10px; width:min(210px, calc(100% - 20px)); max-height:min(55vh, 340px); padding:9px 10px; } }
 
 /* --- Added for the Supabase-backed rewrite: subtype chips reuse .vibe-picker/
    .vibe-option above as-is. Everything below is new: the detail panel (tap a
