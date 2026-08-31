@@ -45,6 +45,7 @@ Supabase.
 | Polls | Modeled, disabled. Requires separate options/votes tables. |
 | Local news and official notices | Modeled, disabled |
 | Topic groups | Not implemented |
+| Presence and mutual-follow contacts | Implemented. Opt-in, off by default; see [Presence and people](#presence-and-people). |
 | Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
 | Photo uploads | Not implemented. The `post_media` table exists; nothing writes to it. |
 | Push notifications | Implemented, not verified end-to-end. See [Push notifications](#push-notifications). |
@@ -559,6 +560,80 @@ cell; `Unauthorized` means the webhook header is missing or does not match
 `PUSH_TRIGGER_SECRET`; `unexpected webhook payload` means it is not
 configured as an INSERT webhook on `public.posts`.
 
+## Presence and people
+
+Makes an area feel inhabited without publishing who is in it.
+
+### The model
+
+Two separate things, with deliberately different visibility:
+
+- **Area count.** A single number: how many people are currently active in a
+  coarse, roughly ward-sized cell. Visible to anyone. Names nobody, and
+  `area_presence_count` returns a bare integer, so it cannot be used to
+  enumerate users even by a caller crafting their own requests.
+- **Contact presence.** Named online status, visible only between two users who
+  follow each other in **both** directions. A one-way follow reveals nothing at
+  all. This is enforced by row level security on `public.presence` plus the
+  `friends_presence` function, not by the client.
+
+### Privacy properties
+
+These are design constraints, not incidental behaviour. Changing any of them
+changes what the feature discloses:
+
+- **Opt-in, off by default.** A user who never enables sharing has no row in
+  `presence`. They do not appear as offline; they do not appear. The client
+  performs no presence writes at all while the toggle is off.
+- **Coarse location only.** Presence records an area cell from
+  `soso.area_cell_of` (zoom 13, roughly 4 km across in Tokyo), never
+  coordinates. `packages/core/test/grid.test.ts` asserts that two points 1.5 km
+  apart share an area cell while occupying different post cells; if that test
+  ever fails, presence has become precise enough to place someone on a street.
+- **Contacts learn "near you", not "where".** `friends_presence` returns
+  `same_area` as a boolean rather than the area id itself.
+- **Presence expires.** Anything older than `soso.presence_window()`
+  (5 minutes) is not online. Nothing records that someone stopped sharing at a
+  particular time, so daily routines are not inferable from stale rows.
+- **Disabling deletes.** `stop_sharing_presence` removes the row rather than
+  setting a flag, leaving no record of where someone last was.
+- **Blocks are enforced server-side on every read path**, including the area
+  count: a blocked user does not contribute to a number the blocker sees.
+  Blocking also deletes follow edges in both directions, so unblocking does not
+  silently restore visibility.
+- **Discovery is by handle, never by proximity.** There is no "people near you"
+  list to follow from. Someone must give you their handle. This keeps the
+  social graph intentional rather than harvested from location.
+- **`follow_by_handle` returns the same error for "no such user" and "you are
+  blocked",** since distinguishing them tells a blocked party something they
+  can act on.
+
+### Grid collision hazard
+
+The presence grid packs area cells with the same function as the zoom-15 post
+grid, so an area cell id and a post cell id can be the same integer while
+referring to entirely different places. They are never interchangeable. Area
+cells appear only in `presence.area_cell` and presence APIs; post cells only in
+`posts.cell_id` and feed APIs. Never join or compare the two. `AREA_ZOOM` in
+`packages/core/src/domain/grid.ts` mirrors `soso.area_zoom()` and the two must
+stay in sync, as with `CELL_ZOOM`.
+
+### Not implemented
+
+- **No messaging.** Contacts can see each other's online status; there is no
+  way to send anything. Direct messaging between anonymous accounts in a
+  location-aware app is a significantly larger safety problem and is not
+  addressed here.
+- **No block list management UI.** Blocking works and is enforced, but there is
+  no screen listing who you have blocked or letting you unblock. `unblock_user`
+  exists and is reachable only via the API.
+- **Anonymous accounts remain the weak point.** Creating an account is free, so
+  nothing stops someone making several. The mutual-follow requirement limits
+  what that buys them, since an unwanted follower still sees nothing, but phone
+  verification remains a prerequisite for treating this as safe at scale.
+- **Demo mode reports zero, honestly.** With no backend there are no other
+  users, so the panel says so rather than inventing plausible activity.
+
 ## Known limitations
 
 - **The SQL schema has not been executed against a live Postgres
@@ -587,6 +662,9 @@ configured as an INSERT webhook on `public.posts`.
   updated together when category behavior changes.
 - **A backend outage occurring mid-session is not detected.** See [Demo
   mode](#demo-mode).
+- **Presence has no messaging, no block-list UI, and depends on anonymous
+  accounts.** See [Presence and people](#presence-and-people) for the full
+  list.
 - **No Japanese-language UI strings are implemented.** `label_ja` exists in
   the schema and is loaded into `CategoryConfig`, but the web client renders
   only `labelEn`. Bilingual support is a substantive requirement for this

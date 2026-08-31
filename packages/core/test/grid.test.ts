@@ -6,6 +6,7 @@ import {
   MAX_CELLS_PER_QUERY,
   cellBounds,
   cellCentre,
+  areaCellOf,
   cellOf,
   cellTopic,
   cellsForBounds,
@@ -104,5 +105,60 @@ describe('grid', () => {
   it('names FCM topics with the grid zoom so stale subscriptions cannot match', () => {
     const topic = cellTopic(cellOf(139.7671, 35.6812));
     assert.equal(topic, `cell_${CELL_ZOOM}_953725543`);
+  });
+});
+
+/**
+ * The presence grid. Values here must match `soso.area_cell_of` in migration
+ * 0009, the same way the zoom-15 tests match `soso.cell_of`. To check the
+ * database side:
+ *
+ *   select soso.area_cell_of(139.7671, 35.6812);
+ */
+describe('area grid (presence)', () => {
+  it('packs Tokyo Station into a known area cell', () => {
+    assert.equal(areaCellOf(139.7671, 35.6812), 238423193);
+  });
+
+  it('keeps area cell ids inside 30 bits, like post cells', () => {
+    for (const [lng, lat] of [
+      [-180, 85], [180, -85], [0, 0], [139.7671, 35.6812],
+    ] as [number, number][]) {
+      const cell = areaCellOf(lng, lat);
+      assert.ok(cell >= 0 && cell < 2 ** 30, `${lng},${lat} -> ${cell}`);
+      assert.equal(cell, cell | 0);
+    }
+  });
+
+  it('is far coarser than the post grid, which is the entire privacy point', () => {
+    // Two points ~1.5km apart: different post cells, same area cell. If this
+    // ever stops holding, presence has become precise enough to place someone
+    // on a street rather than in a ward.
+    const a = { lng: 139.7671, lat: 35.6812 };
+    const b = { lng: 139.7671, lat: 35.6947 };
+    assert.notEqual(cellOf(a.lng, a.lat), cellOf(b.lng, b.lat));
+    assert.equal(areaCellOf(a.lng, a.lat), areaCellOf(b.lng, b.lat));
+  });
+
+  it('gives roughly 4km cells in Tokyo', () => {
+    // Walk east until the area cell changes, to measure its real width.
+    const lat = 35.6812;
+    const start = areaCellOf(139.7671, lat);
+    let lng = 139.7671;
+    while (areaCellOf(lng, lat) === start && lng < 141) lng += 0.0005;
+    const widthM = (lng - 139.7671) * 111_320 * Math.cos((lat * Math.PI) / 180);
+    assert.ok(widthM > 500 && widthM < 4200, `area cell width ${Math.round(widthM)}m`);
+  });
+
+  it('documents that area and post cell ids can collide numerically', () => {
+    // Both grids use the same packing, so an id alone does not say which grid
+    // it came from. This is why presence.area_cell and posts.cell_id must
+    // never be compared. Asserting it here so the hazard is not forgotten.
+    const areaCell = areaCellOf(139.7671, 35.6812);
+    const somePostCell = cellOf(139.7671, 35.6812);
+    assert.equal(typeof areaCell, typeof somePostCell);
+    // They are different numbers for the same point, which is precisely why
+    // treating one as the other would silently look plausible.
+    assert.notEqual(areaCell, somePostCell);
   });
 });

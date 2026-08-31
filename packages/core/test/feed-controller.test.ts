@@ -46,8 +46,36 @@ class FakeGateway implements SosoGateway {
   }
   async votePost() {}
   async reportPost() {}
+  async setFriendTier() {}
+  async myZones() {
+    return [];
+  }
+  async createZone() {
+    return "zone-1";
+  }
+  async deleteZone() {}
   async subscribeToPush() {}
   async unsubscribeFromPush() {}
+
+  // Presence and social graph are irrelevant to the feed controller; these
+  // exist only to satisfy the interface.
+  async myProfile() {
+    return null;
+  }
+  async presenceHeartbeat() {}
+  async stopSharingPresence() {}
+  async areaPresenceCount() {
+    return 0;
+  }
+  async friendsPresence() {
+    return [];
+  }
+  async followByHandle(): Promise<never> {
+    throw new Error('not used');
+  }
+  async unfollowUser() {}
+  async blockUser() {}
+  async unblockUser() {}
 }
 
 const pin = (id: string, expiresAt = NOW_S + 3600): Pin => ({

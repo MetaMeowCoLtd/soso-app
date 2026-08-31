@@ -51,8 +51,9 @@ import {
   type NewPost,
   type Pin,
   type PostDetail,
+  type Zone,
 } from "soso-core";
-import type { FeedQuery, ReportReason, SosoGateway } from "soso-core";
+import type { FeedQuery, FollowResult, Friend, ReportReason, SosoGateway } from "soso-core";
 
 // ---------------------------------------------------------------------------
 // Category configuration, hand-mirrored from supabase/seed.sql's enabled rows.
@@ -535,5 +536,64 @@ export function createDemoGateway(): SosoGateway {
     async unsubscribeFromPush(): Promise<void> {
       // Nothing to unsubscribe from, since subscribing never succeeded here.
     },
+
+    // --- Social graph and presence -------------------------------------
+    //
+    // Demo mode is a single browser talking to its own localStorage. There
+    // are no other users, so anything that depends on other people existing
+    // reports that honestly rather than inventing plausible-looking fake
+    // friends: a fabricated "3 people nearby" would misrepresent what this
+    // mode can actually do, and a fake friends list would be worse.
+
+    async myProfile() {
+      return { id: getMe(), handle: 'demo_user', displayName: 'You (demo)' };
+    },
+
+    async presenceHeartbeat(): Promise<void> {
+      // Accepted and discarded. Nothing else can observe it.
+    },
+
+    async stopSharingPresence(): Promise<void> {
+      // Nothing stored, nothing to remove.
+    },
+
+    async areaPresenceCount(): Promise<number> {
+      // Zero, not a fabricated number. In demo mode nobody else is here,
+      // and the UI says so rather than showing invented activity.
+      return 0;
+    },
+
+    async friendsPresence(): Promise<Friend[]> {
+      return [];
+    },
+
+    async followByHandle(): Promise<FollowResult> {
+      throw new Error('Following people needs the real backend, not available in demo mode.');
+    },
+
+    async unfollowUser(): Promise<void> {},
+    async blockUser(): Promise<void> {},
+    async unblockUser(): Promise<void> {},
+
+    // Friend tiers and zones both depend on a real social graph, which demo
+    // mode has none of. These throw rather than silently succeeding, for the
+    // same reason subscribeToPush does: a control that appears to work but
+    // affects nothing is worse than one that says plainly it needs the real
+    // backend. Audience filtering itself is intentionally NOT simulated
+    // either, because in demo mode every post is your own, so every audience
+    // resolves to visible anyway.
+    async setFriendTier(): Promise<void> {
+      throw new Error('Friend lists need the real backend, not available in demo mode.');
+    },
+
+    async myZones(): Promise<Zone[]> {
+      return [];
+    },
+
+    async createZone(): Promise<string> {
+      throw new Error('Shared zones need the real backend, not available in demo mode.');
+    },
+
+    async deleteZone(): Promise<void> {},
   };
 }

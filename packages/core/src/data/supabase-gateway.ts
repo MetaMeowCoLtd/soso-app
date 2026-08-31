@@ -8,10 +8,12 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { MAX_CELLS_PER_QUERY, type CellId } from '../domain/grid';
+import { MAX_CELLS_PER_QUERY, type AreaCellId, type CellId } from '../domain/grid';
 import { SosoError, toSosoError } from '../domain/errors';
 import {
+  decodeZone,
   decodeFeedDelta,
+  decodeFriend,
   decodePin,
   decodePostDetail,
   type CategoryConfig,
@@ -20,9 +22,17 @@ import {
   type NewPost,
   type Pin,
   type PostDetail,
+  type FollowResult,
+  type Friend,
+  type MyProfile,
   type WireFeedDelta,
+  type WireFriend,
   type WirePin,
   type WirePostDetail,
+  type WireZone,
+  type Zone,
+  type NewZone,
+  type FriendTier,
 } from '../domain/types';
 import type { FeedQuery, PushEndpoint, ReportReason, SosoGateway } from './gateway';
 
@@ -136,6 +146,8 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_device_lng: input.device?.lng ?? null,
         p_device_lat: input.device?.lat ?? null,
         p_ttl_minutes: input.ttlMinutes ?? null,
+        p_audience: input.audience ?? null,
+        p_recipients: input.recipients ?? null,
       });
 
       if (error) throw toSosoError(error);
@@ -171,6 +183,96 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
 
     async unsubscribeFromPush(endpoint: string): Promise<void> {
       const { error } = await client.rpc('unsubscribe_from_push', { p_endpoint: endpoint });
+      if (error) throw toSosoError(error);
+    },
+
+    // --- Social graph and presence -------------------------------------
+
+    async myProfile(): Promise<MyProfile | null> {
+      const { data, error } = await client.rpc('my_profile');
+      if (error) throw toSosoError(error);
+      if (!data) return null;
+      const row = data as { id: string; handle: string; name: string };
+      return { id: row.id, handle: row.handle, displayName: row.name };
+    },
+
+    async presenceHeartbeat(at: { lng: number; lat: number }): Promise<void> {
+      const { error } = await client.rpc('presence_heartbeat', {
+        p_lng: at.lng,
+        p_lat: at.lat,
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    async stopSharingPresence(): Promise<void> {
+      const { error } = await client.rpc('stop_sharing_presence');
+      if (error) throw toSosoError(error);
+    },
+
+    async areaPresenceCount(areaCell: AreaCellId): Promise<number> {
+      const { data, error } = await client.rpc('area_presence_count', {
+        p_area_cell: areaCell,
+      });
+      if (error) throw toSosoError(error);
+      return typeof data === 'number' ? data : 0;
+    },
+
+    async friendsPresence(): Promise<Friend[]> {
+      const { data, error } = await client.rpc('friends_presence');
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WireFriend[]).map(decodeFriend);
+    },
+
+    async followByHandle(handle: string): Promise<FollowResult> {
+      const { data, error } = await client.rpc('follow_by_handle', { p_handle: handle });
+      if (error) throw toSosoError(error);
+      const row = data as { id: string; handle: string; name: string; mutual: boolean };
+      return { id: row.id, handle: row.handle, displayName: row.name, mutual: row.mutual };
+    },
+
+    async unfollowUser(userId: string): Promise<void> {
+      const { error } = await client.rpc('unfollow_user', { p_user_id: userId });
+      if (error) throw toSosoError(error);
+    },
+
+    async blockUser(userId: string): Promise<void> {
+      const { error } = await client.rpc('block_user', { p_user_id: userId });
+      if (error) throw toSosoError(error);
+    },
+
+    async unblockUser(userId: string): Promise<void> {
+      const { error } = await client.rpc('unblock_user', { p_user_id: userId });
+      if (error) throw toSosoError(error);
+    },
+    async setFriendTier(userId: string, tier: FriendTier): Promise<void> {
+      const { error } = await client.rpc('set_friend_tier', {
+        p_user_id: userId,
+        p_tier: tier,
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    async myZones(): Promise<Zone[]> {
+      const { data, error } = await client.rpc('my_zones');
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WireZone[]).map(decodeZone);
+    },
+
+    async createZone(zone: NewZone): Promise<string> {
+      const { data, error } = await client.rpc('create_zone', {
+        p_name: zone.name,
+        p_lng: zone.lng,
+        p_lat: zone.lat,
+        p_radius_m: zone.radiusM,
+        p_audience: zone.audience,
+        p_members: zone.memberIds ?? null,
+      });
+      if (error) throw toSosoError(error);
+      return data as string;
+    },
+
+    async deleteZone(zoneId: string): Promise<void> {
+      const { error } = await client.rpc('delete_zone', { p_zone_id: zoneId });
       if (error) throw toSosoError(error);
     },
   };

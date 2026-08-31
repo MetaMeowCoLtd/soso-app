@@ -155,3 +155,34 @@ export function viewMode(zoom: number): ViewMode {
 export function cellTopic(cell: CellId): string {
   return `cell_${CELL_ZOOM}_${cell}`;
 }
+
+// ---------------------------------------------------------------------------
+// The area grid (presence)
+// ---------------------------------------------------------------------------
+
+/**
+ * Coarse grid zoom used for presence only. Mirrors `soso.area_zoom()`.
+ *
+ * At zoom 13 a cell is roughly 4km x 4km in Tokyo (~16 km2), close to the size
+ * of a Tokyo special ward. That coarseness is the point: presence should say
+ * "somewhere in this ward", never "on this street".
+ *
+ * COLLISION HAZARD: this packs with the same `pack()` as CELL_ZOOM, so an area
+ * cell id and a post cell id can be the same integer while meaning entirely
+ * different places. They are never interchangeable. Area cells appear only in
+ * presence APIs; post cells only in feed APIs. Never compare or join the two.
+ */
+export const AREA_ZOOM = 13;
+
+/** An area cell id. Structurally a number, but not interchangeable with CellId. */
+export type AreaCellId = number;
+
+/** The area cell containing a point. Mirrors `soso.area_cell_of`. */
+export function areaCellOf(lng: number, lat: number): AreaCellId {
+  const n = 2 ** AREA_ZOOM;
+  const x = clamp(Math.floor(((lng + 180) / 360) * n), 0, n - 1);
+  const rad = (clamp(lat, -MAX_MERCATOR_LAT, MAX_MERCATOR_LAT) * Math.PI) / 180;
+  const merc = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2;
+  const y = clamp(Math.floor(merc * n), 0, n - 1);
+  return pack(x, y);
+}

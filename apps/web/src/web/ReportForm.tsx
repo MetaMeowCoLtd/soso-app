@@ -10,6 +10,7 @@ import {
 } from "soso-core";
 import { lookOf } from "./theme";
 import { toLngLat, type Coordinates } from "./region";
+import type { PostAudience } from "soso-core";
 
 /**
  * The report composer.
@@ -50,6 +51,9 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
   const [categoryKey, setCategoryKey] = useState<string | null>(null);
   const [subtypeKey, setSubtypeKey] = useState<string | null>(null);
   const [description, setDescription] = useState("");
+  // Defaults to public. A private default would be a surprising place to put
+  // a safety decision: someone reporting a hazard expects it to be seen.
+  const [audience, setAudience] = useState<PostAudience>("public");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,6 +137,7 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
         body: chosenCategory.allowsBody ? body.trim() || null : null,
         at: toLngLat(location),
         device: device ? toLngLat(device) : null,
+        audience,
       });
     } catch (err) {
       const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
@@ -233,6 +238,28 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
               />
             </label>
           )}
+
+          <div className="audience-picker" role="group" aria-label="Who can see this">
+            <span className="audience-label">Visible to</span>
+            <div className="audience-options">
+              {([
+                { key: "public", label: "Everyone", hint: "Anyone using Soso here" },
+                { key: "friends", label: "Friends", hint: "People you both follow" },
+                { key: "close_friends", label: "Close friends", hint: "Friends you marked close" },
+              ] as const).map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={`audience-option ${audience === option.key ? "selected" : ""}`}
+                  onClick={() => setAudience(option.key)}
+                  aria-pressed={audience === option.key}
+                  title={option.hint}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <p className="composer-meta">
             Visible for about <strong>{formatDuration(category.defaultTtlSeconds)}</strong>, then it disappears

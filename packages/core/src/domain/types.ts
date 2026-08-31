@@ -55,6 +55,15 @@ export interface SubtypeConfig {
  * fetched when the user taps a pin, which keeps the viewport response small
  * enough that polling is cheap.
  */
+/**
+ * Who can see a post.
+ *
+ * `close_friends` is governed by the AUTHOR's classification of the viewer,
+ * not the other way round: marking someone a close friend is a private
+ * judgement and is never surfaced to them.
+ */
+export type PostAudience = "public" | "friends" | "close_friends" | "custom";
+
 export interface Pin {
   id: string;
   category: string;
@@ -68,6 +77,8 @@ export interface Pin {
   /** confirm - dispute. Drives marker weight, never shown as a number. */
   net: number;
   hasMedia: boolean;
+  /** Absent for public posts, so the common case costs nothing on the wire. */
+  audience?: PostAudience;
 }
 
 /**
@@ -86,6 +97,7 @@ export interface WirePin {
   x: number;
   n: number;
   m: boolean;
+  a?: PostAudience | null;
 }
 
 export function decodePin(w: WirePin): Pin {
@@ -99,6 +111,7 @@ export function decodePin(w: WirePin): Pin {
     expiresAt: Number(w.x),
     net: w.n,
     hasMedia: w.m,
+    ...(w.a ? { audience: w.a } : {}),
   };
 }
 
@@ -182,6 +195,10 @@ export function decodePostDetail(w: WirePostDetail): PostDetail {
 // ---------------------------------------------------------------------------
 
 export interface NewPost {
+  /** Omit for the server default: the containing zone's audience, else public. */
+  audience?: PostAudience | null;
+  /** Required when audience is "custom". Non-friends are silently dropped server-side. */
+  recipients?: string[] | null;
   category: string;
   subtype?: string | null;
   body?: string | null;
@@ -194,4 +211,120 @@ export interface NewPost {
    */
   device?: { lng: number; lat: number } | null;
   ttlMinutes?: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Social graph and presence
+// ---------------------------------------------------------------------------
+
+/** Your own identity, mainly so you can share your handle with someone. */
+export interface MyProfile {
+  id: string;
+  handle: string;
+  displayName: string;
+}
+
+/**
+ * A mutual-follow contact and their presence.
+ *
+ * Only ever returned for reciprocal follows with no block on either side; the
+ * database enforces that, not the client. Note `sameArea` is a boolean rather
+ * than an area id: a friend learns "nearby or not", never which ward you are
+ * in.
+ */
+export type FriendTier = "close" | "standard";
+
+export interface Friend {
+  id: string;
+  handle: string;
+  displayName: string;
+  isOnline: boolean;
+  /** How YOU classify them. Private to you; never shown to the friend. */
+  tier: FriendTier;
+  /** Null unless currently online. Stale timestamps are not exposed. */
+  lastSeenAt: string | null;
+  sameArea: boolean;
+}
+
+export interface WireFriend {
+  user_id: string;
+  handle: string;
+  display_name: string;
+  is_online: boolean;
+  last_seen_at: string | null;
+  same_area: boolean;
+  tier: FriendTier;
+}
+
+export function decodeFriend(w: WireFriend): Friend {
+  return {
+    id: w.user_id,
+    handle: w.handle,
+    displayName: w.display_name,
+    isOnline: w.is_online,
+    lastSeenAt: w.last_seen_at,
+    sameArea: w.same_area,
+    tier: w.tier ?? "standard",
+  };
+}
+
+/** Result of following someone by handle. */
+export interface FollowResult {
+  id: string;
+  handle: string;
+  displayName: string;
+  /** True once they follow back. Presence only becomes visible when this is true. */
+  mutual: boolean;
+}
+
+
+/**
+ * A saved circular area whose pins are shared automatically.
+ *
+ * A circle rather than a polygon: a polygon editor is a significant piece of
+ * UI, and a centre plus radius covers "my neighbourhood" while remaining
+ * something a person can define with two gestures. The radius is capped
+ * server-side so a zone cannot be drawn around a whole city and quietly
+ * become a public feed.
+ */
+export interface Zone {
+  id: string;
+  name: string;
+  lng: number;
+  lat: number;
+  radiusM: number;
+  audience: PostAudience;
+  /** Number of explicitly named members. Meaningful only for "custom". */
+  members: number;
+}
+
+export interface WireZone {
+  id: string;
+  name: string;
+  lng: number;
+  lat: number;
+  radius_m: number;
+  audience: PostAudience;
+  members: number;
+}
+
+export function decodeZone(w: WireZone): Zone {
+  return {
+    id: w.id,
+    name: w.name,
+    lng: Number(w.lng),
+    lat: Number(w.lat),
+    radiusM: w.radius_m,
+    audience: w.audience,
+    members: w.members,
+  };
+}
+
+export interface NewZone {
+  name: string;
+  lng: number;
+  lat: number;
+  radiusM: number;
+  audience: PostAudience;
+  memberIds?: string[];
 }

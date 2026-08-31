@@ -286,7 +286,10 @@ function pinIcon(pin: Pin, nowSeconds: number, celebrate: boolean) {
 
   return L.divIcon({
     className: "soso-pin-shell",
-    html: `<span class="soso-pin${celebrate ? " soso-pin-pop" : ""}" style="${style}"><span>${look.icon}</span></span>`,
+    // A private pin gets a small lock marker. Without it, a friends-only post
+    // is visually identical to a public one, and the author has no way to
+    // confirm at a glance that what they shared narrowly stayed narrow.
+    html: `<span class="soso-pin${celebrate ? " soso-pin-pop" : ""}${pin.audience ? " soso-pin-private" : ""}" style="${style}"><span>${look.icon}</span></span>`,
     iconSize: [48, 48],
     iconAnchor: [24, 42],
   });

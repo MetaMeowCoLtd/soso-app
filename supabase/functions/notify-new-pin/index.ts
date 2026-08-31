@@ -49,6 +49,11 @@ interface PostPayload {
   cell_id: number;
   category_key: string;
   author_id: string;
+  /**
+   * Absent on payloads produced before the audience feature existed. Treated
+   * as "unknown" rather than "public": see the fail-closed default below.
+   */
+  audience?: string;
 }
 
 /** The body Supabase Database Webhooks send to an Edge Function. */
@@ -110,7 +115,19 @@ function parsePostPayload(value: unknown): PostPayload | null {
   // behaviour: only live posts result in an alert.
   if (isWebhook && source.status !== "live") return null;
 
-  return { post_id: postId, cell_id: cellId, category_key: categoryKey, author_id: authorId };
+  // Defaulting to "friends" rather than "public" when the field is missing is
+  // deliberate. An older or malformed payload should cause the visibility
+  // check to run, not be skipped: the cost of an unnecessary check is a query,
+  // the cost of a wrongly skipped one is a leaked private post.
+  const audience = typeof source.audience === "string" ? source.audience : "friends";
+
+  return {
+    post_id: postId,
+    cell_id: cellId,
+    category_key: categoryKey,
+    author_id: authorId,
+    audience,
+  };
 }
 
 function isAuthorized(req: Request): boolean {
@@ -178,9 +195,38 @@ Deno.serve(async (req: Request) => {
     return new Response("Internal error", { status: 500 });
   }
 
-  const userIds = (subs ?? [])
+  const categoryMatched = (subs ?? [])
     .filter((s) => s.categories.length === 0 || s.categories.includes(payload.category_key))
     .map((s) => s.user_id);
+
+  // Audience filter. A notification is a disclosure: telling someone "new
+  // Incident report nearby" reveals that a post exists at a location, which is
+  // exactly what a friends-only post is meant to withhold. This runs the same
+  // predicate the read paths use, per candidate recipient, rather than
+  // reimplementing the audience rules here where they could drift.
+  //
+  // Public posts skip the check entirely, which keeps the common case at zero
+  // extra queries.
+  let userIds = categoryMatched;
+  if (payload.audience && payload.audience !== "public") {
+    const checks = await Promise.all(
+      categoryMatched.map(async (userId) => {
+        const { data, error } = await supabase.rpc("can_see_post_as", {
+          p_viewer: userId,
+          p_post_id: payload.post_id,
+        });
+        if (error) {
+          // Fail closed. A visibility check that errored is not permission to
+          // notify; silently dropping one notification is far cheaper than
+          // leaking a private post to a stranger.
+          console.error("[notify-new-pin] visibility check failed:", error);
+          return null;
+        }
+        return data === true ? userId : null;
+      }),
+    );
+    userIds = checks.filter((id): id is string => id !== null);
+  }
 
   if (userIds.length === 0) {
     console.log("[notify-new-pin] no subscribers for cell", payload.cell_id);

@@ -6,7 +6,10 @@ import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-c
 import ReportDetail from "@/src/web/ReportDetail";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
+import PeoplePanel from "@/src/web/PeoplePanel";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
+import { usePresence } from "@/src/web/usePresence";
+import { lookOf } from "@/src/web/theme";
 import { useCategories, useFeed, useNowSeconds } from "@/src/web/hooks";
 import { DEFAULT_CENTER, distanceMetres, leafletBoundsToBounds, nearbyCells, type Coordinates } from "@/src/web/region";
 import {
@@ -141,6 +144,13 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
+  const [showPeople, setShowPeople] = useState(false);
+  // Presence tracks the map centre rather than the device's GPS: the area
+  // count answers "is where I'm looking busy", and tying it to the viewport
+  // means it works without a second location permission prompt.
+  const [presenceCentre, setPresenceCentre] = useState<{ lng: number; lat: number } | null>(null);
+  const presence = usePresence(gateway, mode === "supabase", presenceCentre);
+
   useEffect(() => {
     if (mode !== "supabase" || pushAvailability !== "available") return;
     void getExistingSubscription().then((sub) => setPushSubscribed(sub !== null));
@@ -214,9 +224,29 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
   const [focusAt, setFocusAt] = useState<Coordinates | null>(null);
 
-  const [notice, setNotice] = useState(
-    mode === "supabase" ? "Click anywhere to drop a pin ✨" : "Demo mode — pins stay on this device ✨",
-  );
+  // Transient feedback only. The old permanent "click anywhere to drop a pin"
+  // copy is gone: with a single unambiguous compose button, a standing
+  // instruction is redundant chrome sitting on top of the content it
+  // describes. Messages now appear in response to an action and clear
+  // themselves, so the map is uncovered at rest.
+  const [notice, setNotice] = useState("");
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(""), 4000);
+    return () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    };
+  }, [notice]);
+
+  const transientNotice = notice;
+
+  // The sheet's resting height, used to position the control rail above it so
+  // the two never overlap. Kept as one value rather than duplicated magic
+  // numbers in the CSS and the inline style.
+  const sheetOffset = showFeedDrawer ? "min(62vh, 460px)" : "132px";
 
   const handleViewportChange = useCallback(
     (bounds: ReturnType<typeof leafletBoundsToBounds>, zoom: number) => {
@@ -226,6 +256,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       };
       mapCenter.current = center;
       setViewport(bounds, zoom);
+      // Coarse by design: areaCellOf() buckets this into a ~4km ward-sized
+      // cell, so updating it on every pan reveals nothing finer than that.
+      setPresenceCentre({ lng: center.longitude, lat: center.latitude });
       // Only recomputed on moveend (once per pan/zoom gesture, not per
       // frame), which is what makes a state update here fine — it's the same
       // frequency setViewport itself already runs at.
@@ -338,13 +371,16 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           <span>so</span>so
         </a>
         <button
-          className="area-pill"
-          onClick={() =>
-            setNotice(mode === "supabase" ? "Tokyo · shared live ✦" : "Demo mode · saved on this device only")
-          }
+          className={`people-button ${presence.sharing ? "sharing" : ""}`}
+          onClick={() => setShowPeople(true)}
           type="button"
+          aria-label="People around here"
+          title="People around here"
         >
-          {mode === "supabase" ? "● shared live" : "✦ demo · this device"}
+          <span aria-hidden="true">☺</span>
+          {presence.areaCount !== null && presence.areaCount > 0 && (
+            <span className="people-count">{presence.areaCount}</span>
+          )}
         </button>
         {mode === "supabase" && pushAvailability !== "unsupported" && (
           <button
@@ -359,72 +395,97 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             {pushSubscribed ? "🔔" : "🔕"}
           </button>
         )}
-        <button className="drop-pin-button" onClick={beginPinAtCurrentView} type="button">
-          <span>+</span> Drop a pin
-        </button>
       </header>
 
-      <p className="map-notice" role="status">
-        {statusLabel ?? notice}
-      </p>
+      {(statusLabel ?? transientNotice) && (
+        <p className="map-notice" role="status">
+          {statusLabel ?? transientNotice}
+        </p>
+      )}
 
+      {/* Right-hand control rail. Grouping the map's secondary controls into a
+          single vertical stack, rather than scattering them to separate corners,
+          is what lets the primary action read as primary. Sits above the sheet
+          so it stays reachable as the sheet expands. */}
       {!showComposer && (
-        <button className="map-tap-hint" onClick={beginPinAtCurrentView} type="button">
-          <span>＋</span> Click map or start here
-        </button>
+        <div className="map-rail" style={{ bottom: `calc(${sheetOffset} + 18px)` }}>
+          <button
+            className={`rail-button ${isAtMyLocation ? "active" : ""} ${locating ? "locating" : ""}`}
+            onClick={locateMe}
+            type="button"
+            aria-label="Jump to current location"
+            aria-pressed={isAtMyLocation}
+          >
+            <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true">
+              <path d="M12 2.5 3.5 20.5l8.5-4 8.5 4z" fill="currentColor" />
+            </svg>
+          </button>
+
+          <button
+            className="fab"
+            onClick={beginPinAtCurrentView}
+            type="button"
+            aria-label="Drop a pin here"
+          >
+            <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
       )}
 
-      {!showComposer && !showFeedDrawer && (
+      {/* One anchored sheet holding both the filters and the feed, replacing a
+          floating filter dock and a separate corner drawer. Peek height shows
+          the filters; expanding reveals the list. */}
+      <section
+        className={`sheet ${showFeedDrawer ? "expanded" : ""}`}
+        aria-label="Local updates"
+      >
         <button
-          className={`locate-button ${isAtMyLocation ? "active" : ""} ${locating ? "locating" : ""}`}
-          onClick={locateMe}
+          className="sheet-grabber"
+          onClick={() => setShowFeedDrawer((open) => !open)}
           type="button"
-          aria-label="Jump to current location"
-          aria-pressed={isAtMyLocation}
+          aria-expanded={showFeedDrawer}
+          aria-label={showFeedDrawer ? "Collapse updates" : "Expand updates"}
         >
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <path d="M12 2.5 3.5 20.5l8.5-4 8.5 4z" fill="currentColor" />
-          </svg>
+          <span className="grabber-bar" />
         </button>
-      )}
 
-      <section className="filter-dock" aria-label="Filter local pins">
-        <p>Show me</p>
-        <div className="filter-list">
+        <div className="sheet-head">
+          <div className="sheet-title">
+            <h2>{view.pins.length} nearby</h2>
+            <span className={mode === "supabase" ? "live-dot" : "live-dot demo"}>
+              {mode === "supabase" ? "Live" : "On this device"}
+            </span>
+          </div>
+        </div>
+
+        <div className="filter-row" role="group" aria-label="Filter by category">
+          <button
+            className={activeFilters.length === 0 ? "chip active" : "chip"}
+            onClick={() => setActiveFilters([])}
+            type="button"
+            aria-pressed={activeFilters.length === 0}
+          >
+            All
+          </button>
           {categories.map((c) => (
             <button
-              className={activeFilters.includes(c.key) || activeFilters.length === 0 ? "filter active" : "filter"}
+              className={activeFilters.includes(c.key) ? "chip active" : "chip"}
               key={c.key}
               onClick={() => toggleFilter(c.key)}
               type="button"
               aria-pressed={activeFilters.includes(c.key)}
+              style={{ "--chip-color": lookOf(c.key).color } as React.CSSProperties}
             >
+              <span className="chip-dot" aria-hidden="true" />
               {c.labelEn}
             </button>
           ))}
         </div>
-      </section>
 
-      <aside className={`update-drawer ${showFeedDrawer ? "open" : ""}`} aria-label="Local updates">
-        <button
-          className="drawer-handle"
-          onClick={() => setShowFeedDrawer((open) => !open)}
-          type="button"
-          aria-expanded={showFeedDrawer}
-        >
-          <span className="handle-bar" />
-          <span>{showFeedDrawer ? "Hide updates" : `${view.pins.length} local updates`}</span>
-          <span>⌃</span>
-        </button>
         {showFeedDrawer && (
-          <div className="drawer-content">
-            <div className="drawer-title">
-              <div>
-                <p>THE NEIGHBOURHOOD IS TALKING</p>
-                <h2>Local buzz</h2>
-              </div>
-              <span>{mode === "supabase" ? "shared live" : "demo · local only"}</span>
-            </div>
+          <div className="sheet-body">
             <ReportList
               pins={view.pins}
               categories={categories}
@@ -434,7 +495,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             />
           </div>
         )}
-      </aside>
+      </section>
 
       {showComposer && draftAt && (
         <div className="composer-backdrop" role="presentation" onMouseDown={cancelComposer}>
@@ -447,6 +508,14 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             />
           </div>
         </div>
+      )}
+
+      {showPeople && (
+        <PeoplePanel
+          presence={presence}
+          demoMode={mode !== "supabase"}
+          onClose={() => setShowPeople(false)}
+        />
       )}
 
       {selectedPin && (
