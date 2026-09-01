@@ -134,11 +134,34 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .pin-preview-body { flex:1; min-height:0; overflow-y:auto; padding:8px clamp(14px,3vw,22px) 14px; -webkit-overflow-scrolling:touch; }
 .pin-preview-snippet { margin:0 0 10px; color:var(--ink); font-size:.86rem; line-height:1.4; }
 .pin-preview-meta { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 12px; }
+/* Compact icon-and-count vote buttons, replacing both the old read-only
+   count display and the old full-width pill buttons. Always visible, no
+   expand step — a vote is the lowest-stakes, most frequent action here and
+   should read that way at a glance. */
+.pin-preview-vote-buttons { display:flex; gap:6px; flex-shrink:0; }
+.pin-preview-vote-btn { display:flex; align-items:center; gap:4px; padding:5px 9px; border:1px solid var(--hairline); border-radius:999px; background:#fff; color:#5b706a; font-size:.76rem; font-weight:700; transition:background .16s, border-color .16s, color .16s, transform .16s; }
+.pin-preview-vote-btn:hover:not(:disabled) { background:#f5f8f7; border-color:#c2d2cc; }
+.pin-preview-vote-btn:active:not(:disabled) { transform:scale(.94); }
+.pin-preview-vote-btn.active { background:#00a78f; border-color:#00a78f; color:#fff; }
+.pin-preview-vote-btn-down.active { background:#dc2626; border-color:#dc2626; color:#fff; }
+.pin-preview-vote-btn:disabled { opacity:.5; }
+
+/* The prominent slot the vote buttons used to occupy — now the single most
+   likely reason someone opens a pin that isn't their own (is this still
+   here?) or is (I'm done with this, remove it). */
+.pin-preview-primary { margin:2px 0 4px; }
+.pin-preview-primary-label { margin:0 0 6px; color:var(--muted); font-size:.76rem; font-weight:600; }
+.pin-preview-primary-actions { display:flex; gap:8px; }
+.pin-preview-primary-action { flex:1; padding:11px 10px; border:0; border-radius:12px; background:var(--deep); color:#fff; font-size:.82rem; font-weight:700; transition:background .16s, transform .16s; }
+.pin-preview-primary-action:hover { background:#0a1d1a; }
+.pin-preview-primary-action:active { transform:scale(.97); }
+.pin-preview-primary-action-muted { background:#eef1ef; color:var(--deep); }
+.pin-preview-primary-action-muted:hover { background:#e2e7e4; }
+.pin-preview-remove-action { background:#c0392b; }
+.pin-preview-remove-action:hover { background:#a8301f; }
 .pin-preview-countdown, .pin-preview-corroboration { margin:0; }
 .pin-preview-address { margin:0 0 8px; }
-.pin-preview-vote-counts { display:flex; gap:10px; }
-.pin-preview-vote-counts .detail-vote-count { font-size:.8rem; }
-.pin-preview-actions { margin-top:2px; }
+
 .pin-preview-own { padding-top:2px; }
 /* The vote buttons and the "report" / "still relevant" links used to sit at
    the bottom of a tall standalone modal with room to breathe; in the more
@@ -170,7 +193,6 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .chip.active .chip-dot { box-shadow:0 0 0 2px rgba(255,255,255,.35); }
 
 .sheet-body { flex:1; min-height:0; overflow-y:auto; padding:0 clamp(14px,3vw,22px) 8px; -webkit-overflow-scrolling:touch; }
-
 
 /* --------------------------------------------------- audience & privacy */
 .audience-picker { margin-top:14px; }
@@ -215,12 +237,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .detail-own { margin:0 0 4px; color:var(--muted); font-size:.8rem; font-style:normal; }
 
 .detail-actions { display:flex; gap:9px; margin-bottom:8px; }
-.detail-vote { flex:1; padding:12px 8px; border:1px solid var(--teal); border-radius:12px; background:var(--teal); color:#fff; font-size:.84rem; font-weight:700; transition:background .16s, border-color .16s, color .16s, transform .16s; }.detail-vote:hover:not(:disabled) { background:#00937e; }.detail-vote:active:not(:disabled) { transform:scale(.97); }
-.detail-vote:hover:not(:disabled) { transform:translateY(-2px); }
-.detail-vote.active { background:#00a78f; color:white; }
-.detail-vote:disabled { opacity:.55; }
-.detail-vote-dispute { background:#fff; border-color:#e2e9e6; color:#7a8c86; }.detail-vote-dispute:hover:not(:disabled) { background:#fafbfa; border-color:#cfdad5; color:#5b706a; }
-.detail-vote-dispute.active { background:#dc2626; color:white; }
+
 .detail-vote-notice { margin:0 0 8px; color:#b52445; font-size:.78rem; font-weight:550; }
 
 .detail-report-link { padding:6px 0 0; border:0; background:transparent; color:var(--muted); font-size:.78rem; text-decoration:none; }.detail-report-link:hover { color:#5b706a; text-decoration:underline; }

@@ -17,23 +17,22 @@ import { lookOf } from "./theme";
  * directly in the map's own bottom sheet rather than a second, separate
  * modal window.
  *
- * This used to be two components: this one as a read-only glance, and
- * `ReportDetail` as a backdrop-blocking modal one "See more" tap away, on
- * the reasoning that voting/reporting are deliberate actions that shouldn't
- * happen by accident while someone's thumb is mid-pan. That reasoning still
- * applies to why nothing here fires on a bare tap — but the sheet the pin
- * lives in is already exactly as interactive as it always is, so a second,
- * separate blocking surface for the same pin's own actions was one more
- * window than the map needed. Everything from that modal now lives here
- * instead, in the same non-blocking sheet: the map behind it never loses
- * focus, and tapping a different pin just swaps this card's content.
+ * Redesigned around one idea: not every action here is equally common or
+ * equally weighty, and the layout should say so rather than presenting a
+ * flat list of buttons. A vote is the lowest-stakes, most frequent action —
+ * it's now two compact icon buttons that double as the count display,
+ * always visible on the right of the metadata row, rather than a full-width
+ * pair of pill buttons commanding the most visual space on the card. Flagging
+ * relevance (or, for the author, removing the post) is the thing someone
+ * opening a stale-looking pin is most likely here to do, so it now occupies
+ * the prominent slot the vote buttons used to hold. Reporting — rarer, more
+ * serious — stays a small, quiet link, unchanged.
  *
- * Corroboration is load-bearing, not decorative — see the original
- * ReportDetail's note on this, preserved: the client never pre-checks
- * whether this is the viewer's own post before offering vote/report/resolve
- * buttons; `mine` decides which set renders, and the server enforces the
- * actual rule (`vote_post` rejects self-votes) independent of what the
- * client shows.
+ * Corroboration is load-bearing, not decorative — the client never
+ * pre-checks whether this is the viewer's own post before deciding what to
+ * render; `mine` decides which set of actions shows, and the server enforces
+ * the actual rule (`vote_post` rejects self-votes, `flag_post_resolved`
+ * rejects self-flags) independent of what the client offers.
  */
 
 interface PinPreviewProps {
@@ -55,11 +54,6 @@ const REPORT_REASONS: { label: string; value: ReportReason }[] = [
   { label: "Spam", value: "spam" },
 ];
 
-const RESOLUTION_REASONS: { label: string; value: ResolutionReason }[] = [
-  { label: "Looks resolved", value: "resolved" },
-  { label: "Out of date", value: "out_of_date" },
-];
-
 export default function PinPreview({
   pin,
   detail,
@@ -76,7 +70,6 @@ export default function PinPreview({
   const [voteNotice, setVoteNotice] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reported, setReported] = useState(false);
-  const [resolutionOpen, setResolutionOpen] = useState(false);
   const [resolutionFlagged, setResolutionFlagged] = useState(false);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -108,7 +101,6 @@ export default function PinPreview({
   }
 
   async function flagResolved(reason: ResolutionReason) {
-    setResolutionOpen(false);
     await onFlagResolved(pin.id, reason);
     setResolutionFlagged(true);
   }
@@ -153,24 +145,48 @@ export default function PinPreview({
           <span className="detail-countdown pin-preview-countdown">
             Disappears in {formatCountdown(pin.expiresAt, nowSeconds)}
           </span>
-          {detail ? (
-            detail.confirmCount === 0 && detail.disputeCount === 0 ? (
-              <span className="detail-corroboration pin-preview-corroboration">No confirmations yet</span>
-            ) : (
-              <span className="pin-preview-vote-counts">
-                <span className="detail-vote-count detail-vote-count-up">👍 {detail.confirmCount}</span>
-                <span className="detail-vote-count detail-vote-count-down">👎 {detail.disputeCount}</span>
-              </span>
-            )
-          ) : (
-            <span className="detail-corroboration pin-preview-corroboration">Loading…</span>
-          )}
-        </div>
 
+          {/* Always visible, compact, on the right — the icon doubles as
+              the count display, so this replaces both the old read-only
+              numbers AND the old full-width "Still here" / "Not true"
+              pill buttons in one element. A vote is the lowest-stakes,
+              most frequent action here; it shouldn't command more visual
+              weight than flagging relevance or reporting, both rarer and
+              more deliberate. */}
+          <span className="pin-preview-vote-buttons" role="group" aria-label="Vote">
+            <button
+              type="button"
+              className={`pin-preview-vote-btn ${voted === 1 ? "active" : ""}`}
+              disabled={voting || voted !== null || Boolean(detail?.mine)}
+              onClick={() => void vote(1)}
+              aria-label="Still here"
+              title="Still here"
+            >
+              👍 {detail?.confirmCount ?? 0}
+            </button>
+            <button
+              type="button"
+              className={`pin-preview-vote-btn pin-preview-vote-btn-down ${voted === -1 ? "active" : ""}`}
+              disabled={voting || voted !== null || Boolean(detail?.mine)}
+              onClick={() => void vote(-1)}
+              aria-label="Not true"
+              title="Not true"
+            >
+              👎 {detail?.disputeCount ?? 0}
+            </button>
+          </span>
+        </div>
+        {voteNotice && <p className="detail-vote-notice">{voteNotice}</p>}
+
+        {/* The prominent slot — what the vote buttons used to occupy.
+            Whoever opens someone else's pin here is most likely doing so
+            either to glance at it or because something about it looks
+            stale; the author, meanwhile, has exactly one thing they'd come
+            here to do with their own post. Each gets that one thing,
+            immediately visible, rather than a menu of options. */}
         {detail?.mine ? (
           <div className="pin-preview-own">
             <p className="detail-own">You posted this.</p>
-
             {removed ? (
               <p className="detail-own">Removed — thanks for keeping the map current.</p>
             ) : removeConfirmOpen ? (
@@ -192,67 +208,57 @@ export default function PinPreview({
                 {removeError && <p className="detail-vote-notice">{removeError}</p>}
               </div>
             ) : (
-              <button className="detail-remove-link" type="button" onClick={() => setRemoveConfirmOpen(true)}>
+              <button
+                className="pin-preview-primary-action pin-preview-remove-action"
+                type="button"
+                onClick={() => setRemoveConfirmOpen(true)}
+              >
                 Remove this now
               </button>
             )}
           </div>
+        ) : resolutionFlagged ? (
+          <p className="detail-own">Thanks — we&rsquo;ve let the person who posted this know.</p>
         ) : (
-          <>
-            <div className="detail-actions pin-preview-actions">
+          <div className="pin-preview-primary">
+            <p className="pin-preview-primary-label">Is this still relevant?</p>
+            <div className="pin-preview-primary-actions">
               <button
                 type="button"
-                className={`detail-vote ${voted === 1 ? "active" : ""}`}
-                disabled={voting || voted !== null}
-                onClick={() => void vote(1)}
+                className="pin-preview-primary-action"
+                onClick={() => void flagResolved("resolved")}
               >
-                👀 Still here
+                ✅ Resolved
               </button>
               <button
                 type="button"
-                className={`detail-vote detail-vote-dispute ${voted === -1 ? "active" : ""}`}
-                disabled={voting || voted !== null}
-                onClick={() => void vote(-1)}
+                className="pin-preview-primary-action pin-preview-primary-action-muted"
+                onClick={() => void flagResolved("out_of_date")}
               >
-                Not true
+                📅 Out of date
               </button>
             </div>
-            {voteNotice && <p className="detail-vote-notice">{voteNotice}</p>}
+          </div>
+        )}
 
-            <div className="pin-preview-links">
-              {reported ? (
-                <p className="detail-own">Reported — thanks, we&rsquo;ll look at it.</p>
-              ) : reportOpen ? (
-                <div className="detail-report-reasons">
-                  {REPORT_REASONS.map((r) => (
-                    <button key={r.value} type="button" onClick={() => void report(r.value)}>
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <button className="detail-report-link" type="button" onClick={() => setReportOpen(true)}>
-                  Report this post
-                </button>
-              )}
-
-              {resolutionFlagged ? (
-                <p className="detail-own">Thanks — we&rsquo;ve let the person who posted this know.</p>
-              ) : resolutionOpen ? (
-                <div className="detail-report-reasons">
-                  {RESOLUTION_REASONS.map((r) => (
-                    <button key={r.value} type="button" onClick={() => void flagResolved(r.value)}>
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <button className="detail-report-link" type="button" onClick={() => setResolutionOpen(true)}>
-                  Is this still relevant?
-                </button>
-              )}
-            </div>
-          </>
+        {!detail?.mine && (
+          <div className="pin-preview-links">
+            {reported ? (
+              <p className="detail-own">Reported — thanks, we&rsquo;ll look at it.</p>
+            ) : reportOpen ? (
+              <div className="detail-report-reasons">
+                {REPORT_REASONS.map((r) => (
+                  <button key={r.value} type="button" onClick={() => void report(r.value)}>
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <button className="detail-report-link" type="button" onClick={() => setReportOpen(true)}>
+                Report this post
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
