@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  ERROR_MESSAGES_EN,
   formatAgo,
   formatCountdown,
   type CategoryConfig,
@@ -69,8 +70,11 @@ export default function PinPreview({
   const [voted, setVoted] = useState<1 | -1 | null>(null);
   const [voteNotice, setVoteNotice] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [reported, setReported] = useState(false);
   const [resolutionFlagged, setResolutionFlagged] = useState(false);
+  const [flagging, setFlagging] = useState(false);
+  const [resolutionError, setResolutionError] = useState<string | null>(null);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -96,13 +100,35 @@ export default function PinPreview({
 
   async function report(reason: ReportReason) {
     setReportOpen(false);
-    await onReport(pin.id, reason);
-    setReported(true);
+    setReportError(null);
+    try {
+      await onReport(pin.id, reason);
+      setReported(true);
+    } catch (err) {
+      const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
+      setReportError(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
+    }
   }
 
   async function flagResolved(reason: ResolutionReason) {
-    await onFlagResolved(pin.id, reason);
-    setResolutionFlagged(true);
+    setFlagging(true);
+    setResolutionError(null);
+    try {
+      await onFlagResolved(pin.id, reason);
+      setResolutionFlagged(true);
+    } catch (err) {
+      // This is deliberately specific rather than a generic "try again":
+      // this button was reported not to work at all on mobile with zero
+      // visible feedback, which turned out to be because these two actions
+      // had no error handling — any failure was silently discarded by the
+      // `void` on their onClick handlers. Showing the real mapped message
+      // here is what will reveal the actual cause next time this happens,
+      // rather than continuing to guess at it.
+      const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
+      setResolutionError(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
+    } finally {
+      setFlagging(false);
+    }
   }
 
   async function confirmRemove() {
@@ -226,6 +252,7 @@ export default function PinPreview({
               <button
                 type="button"
                 className="pin-preview-primary-action"
+                disabled={flagging}
                 onClick={() => void flagResolved("resolved")}
               >
                 ✅ Resolved
@@ -233,11 +260,13 @@ export default function PinPreview({
               <button
                 type="button"
                 className="pin-preview-primary-action pin-preview-primary-action-muted"
+                disabled={flagging}
                 onClick={() => void flagResolved("out_of_date")}
               >
                 📅 Out of date
               </button>
             </div>
+            {resolutionError && <p className="detail-vote-notice">{resolutionError}</p>}
           </div>
         )}
 
@@ -258,6 +287,7 @@ export default function PinPreview({
                 Report this post
               </button>
             )}
+            {reportError && <p className="detail-vote-notice">{reportError}</p>}
           </div>
         )}
       </div>
