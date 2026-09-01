@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NewPost, Pin, PostDetail, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
-import ReportDetail from "@/src/web/ReportDetail";
 import PinPreview from "@/src/web/PinPreview";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
@@ -269,11 +268,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
-  // Selecting a pin always starts in the compact, non-blocking preview —
-  // never straight into the full modal. Reaching the full modal (voting,
-  // reporting) is always one explicit "See more" tap away, never the
-  // default outcome of a quick tap meant only to glance at a pin.
-  const [detailExpanded, setDetailExpanded] = useState(false);
   const [focusAt, setFocusAt] = useState<Coordinates | null>(null);
 
   // Transient feedback only. The old permanent "click anywhere to drop a pin"
@@ -295,14 +289,32 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
   const transientNotice = notice;
 
-  // The sheet's resting height, used to position the control rail above it so
-  // the two never overlap. Kept as one value rather than duplicated magic
-  // numbers in the CSS and the inline style.
   // A pin preview takes visual priority over whatever browse state the
-  // sheet was already in — selecting a pin always shows its preview,
-  // regardless of whether the feed list happened to be expanded at the time.
-  const previewingPin = Boolean(selectedPin) && !detailExpanded;
-  const sheetOffset = previewingPin ? "272px" : showFeedDrawer ? "min(62vh, 460px)" : "132px";
+  // sheet was already in — selecting a pin always shows it, regardless of
+  // whether the feed list happened to be expanded at the time.
+  const previewingPin = Boolean(selectedPin);
+
+  // Measured, not guessed: the preview now holds everything that used to be
+  // a separate modal (voting, reporting, early resolution), so its height
+  // varies with which of those sub-flows is open, not just with which of
+  // the sheet's three coarse states is active. A hardcoded pixel guess per
+  // state — accurate before this section had any of that content — would
+  // silently drift out of sync with itself every time one of those
+  // sub-flows opens. Watching the actual rendered element sidesteps that
+  // entirely: whatever the sheet's real height is, this is it.
+  const sheetRef = useRef<HTMLElement>(null);
+  const [sheetHeight, setSheetHeight] = useState(132);
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setSheetHeight(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const sheetOffset = `${sheetHeight}px`;
 
   const handleViewportChange = useCallback(
     (bounds: ReturnType<typeof leafletBoundsToBounds>, zoom: number) => {
@@ -359,7 +371,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   function selectPin(pin: Pin) {
     setSelectedPin(pin);
     setSelectedDetail(null);
-    setDetailExpanded(false);
     setFocusAt({ latitude: pin.lat, longitude: pin.lng });
     void gateway
       .postDetail(pin.id)
@@ -367,11 +378,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       .catch(() => setSelectedDetail(null));
   }
 
-  /** Closing the preview, the full detail modal, or starting a new pin — every path that should drop the current selection. */
+  /** Closing the preview, or starting a new pin — every path that should drop the current selection. */
   function deselectPin() {
     setSelectedPin(null);
     setSelectedDetail(null);
-    setDetailExpanded(false);
   }
 
   /**
@@ -382,11 +392,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
    * postDetail's response is a strict superset of Pin (see PostDetail's own
    * definition), so the same object can seed both selectedPin and
    * selectedDetail at once rather than needing two different shapes.
-   *
-   * Goes straight to the full modal (detailExpanded: true), not the
-   * lightweight preview: tapping a notification is a deliberate return to a
-   * specific post, most likely to act on it (remove it, having been flagged),
-   * not a quick glance while panning past it.
    */
   async function openPostById(postId: string) {
     try {
@@ -394,7 +399,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       if (!detail) return; // gone, expired, or no longer visible to this viewer
       setSelectedPin(detail);
       setSelectedDetail(detail);
-      setDetailExpanded(true);
       setFocusAt({ latitude: detail.lat, longitude: detail.lng });
     } catch {
       // A stale, deleted, or inaccessible post from an old notification
@@ -577,6 +581,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           floating filter dock and a separate corner drawer. Peek height shows
           the filters; expanding reveals the list. */}
       <section
+        ref={sheetRef}
         className={`sheet ${previewingPin ? "previewing" : showFeedDrawer ? "expanded" : ""}`}
         aria-label={previewingPin ? "Pin preview" : "Local updates"}
       >
@@ -599,7 +604,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             categories={categories}
             nowSeconds={nowSeconds}
             onClose={deselectPin}
-            onExpand={() => setDetailExpanded(true)}
+            onVote={vote}
+            onReport={report}
+            onFlagResolved={flagResolved}
+            onResolve={resolve}
           />
         ) : (
           <>
@@ -673,20 +681,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         minimized={!showPeople}
         onMinimize={() => setShowPeople(false)}
       />
-
-      {selectedPin && detailExpanded && (
-        <ReportDetail
-          pin={selectedPin}
-          detail={selectedDetail}
-          categories={categories}
-          nowSeconds={nowSeconds}
-          onClose={deselectPin}
-          onVote={vote}
-          onReport={report}
-          onFlagResolved={flagResolved}
-          onResolve={resolve}
-        />
-      )}
     </main>
   );
 }

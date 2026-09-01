@@ -1,28 +1,39 @@
 "use client";
 
-import { formatAgo, formatCountdown, type CategoryConfig, type Pin, type PostDetail } from "soso-core";
+import { useState } from "react";
+import {
+  formatAgo,
+  formatCountdown,
+  type CategoryConfig,
+  type Pin,
+  type PostDetail,
+  type ReportReason,
+  type ResolutionReason,
+} from "soso-core";
 import { lookOf } from "./theme";
 
 /**
- * A quick, non-blocking overview of one pin, living inside the map's own
- * bottom sheet rather than a modal.
+ * The full pin detail — voting, reporting, early resolution — living
+ * directly in the map's own bottom sheet rather than a second, separate
+ * modal window.
  *
- * The full `ReportDetail` modal (voting, reporting) sits behind a backdrop
- * that captures every click, by design — voting and reporting are
- * deliberate actions that should not happen by accident while someone is
- * mid-pan. But that same backdrop makes it the wrong thing to show for
- * "I just want to see what this pin is while I keep looking around,"
- * which is a materially different, much more common interaction: tapping
- * pin after pin while panning between them. This is that lighter path —
- * the sheet stays exactly as interactive as it always is, the map behind
- * it never loses focus, and tapping a different pin just swaps this
- * card's content rather than requiring a close-then-reopen.
+ * This used to be two components: this one as a read-only glance, and
+ * `ReportDetail` as a backdrop-blocking modal one "See more" tap away, on
+ * the reasoning that voting/reporting are deliberate actions that shouldn't
+ * happen by accident while someone's thumb is mid-pan. That reasoning still
+ * applies to why nothing here fires on a bare tap — but the sheet the pin
+ * lives in is already exactly as interactive as it always is, so a second,
+ * separate blocking surface for the same pin's own actions was one more
+ * window than the map needed. Everything from that modal now lives here
+ * instead, in the same non-blocking sheet: the map behind it never loses
+ * focus, and tapping a different pin just swaps this card's content.
  *
- * Deliberately read-only. Voting and reporting stay behind the explicit
- * "See more" step into the full modal — not because they're technically
- * harder to add here, but because a non-blocking surface a thumb can
- * brush past while panning is the wrong place for an action that changes
- * something for the post's author.
+ * Corroboration is load-bearing, not decorative — see the original
+ * ReportDetail's note on this, preserved: the client never pre-checks
+ * whether this is the viewer's own post before offering vote/report/resolve
+ * buttons; `mine` decides which set renders, and the server enforces the
+ * actual rule (`vote_post` rejects self-votes) independent of what the
+ * client shows.
  */
 
 interface PinPreviewProps {
@@ -31,60 +42,219 @@ interface PinPreviewProps {
   categories: CategoryConfig[];
   nowSeconds: number;
   onClose: () => void;
-  onExpand: () => void;
+  onVote: (postId: string, vote: 1 | -1) => Promise<void>;
+  onReport: (postId: string, reason: ReportReason) => Promise<void>;
+  onFlagResolved: (postId: string, reason: ResolutionReason) => Promise<void>;
+  onResolve: (postId: string) => Promise<void>;
 }
 
-export default function PinPreview({ pin, detail, categories, nowSeconds, onClose, onExpand }: PinPreviewProps) {
+const REPORT_REASONS: { label: string; value: ReportReason }[] = [
+  { label: "Not true", value: "false_information" },
+  { label: "Harassment", value: "harassment" },
+  { label: "Privacy", value: "privacy" },
+  { label: "Spam", value: "spam" },
+];
+
+const RESOLUTION_REASONS: { label: string; value: ResolutionReason }[] = [
+  { label: "Looks resolved", value: "resolved" },
+  { label: "Out of date", value: "out_of_date" },
+];
+
+export default function PinPreview({
+  pin,
+  detail,
+  categories,
+  nowSeconds,
+  onClose,
+  onVote,
+  onReport,
+  onFlagResolved,
+  onResolve,
+}: PinPreviewProps) {
+  const [voting, setVoting] = useState(false);
+  const [voted, setVoted] = useState<1 | -1 | null>(null);
+  const [voteNotice, setVoteNotice] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reported, setReported] = useState(false);
+  const [resolutionOpen, setResolutionOpen] = useState(false);
+  const [resolutionFlagged, setResolutionFlagged] = useState(false);
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removed, setRemoved] = useState(false);
+
   const category = categories.find((c) => c.key === pin.category);
   const subtype = category?.subtypes.find((s) => s.key === pin.subtype);
   const look = lookOf(pin.category);
 
+  async function vote(value: 1 | -1) {
+    setVoting(true);
+    setVoteNotice(null);
+    try {
+      await onVote(pin.id, value);
+      setVoted(value);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      setVoteNotice(code === "soso/cannot_vote_own" ? "That's your own post." : "Couldn't send that — try again.");
+    } finally {
+      setVoting(false);
+    }
+  }
+
+  async function report(reason: ReportReason) {
+    setReportOpen(false);
+    await onReport(pin.id, reason);
+    setReported(true);
+  }
+
+  async function flagResolved(reason: ResolutionReason) {
+    setResolutionOpen(false);
+    await onFlagResolved(pin.id, reason);
+    setResolutionFlagged(true);
+  }
+
+  async function confirmRemove() {
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await onResolve(pin.id);
+      setRemoved(true);
+    } catch {
+      setRemoveError("Couldn't remove that — try again.");
+    } finally {
+      setRemoving(false);
+    }
+  }
+
   return (
     <div className="pin-preview">
       <div className="pin-preview-head">
-        <p className="composer-kicker pin-preview-kicker" style={{ color: look.color }}>
-          {look.icon} {subtype?.labelEn ?? category?.labelEn ?? pin.category}
-        </p>
+        <div>
+          <p className="composer-kicker pin-preview-kicker" style={{ color: look.color }}>
+            {look.icon} {subtype?.labelEn ?? category?.labelEn ?? pin.category}
+          </p>
+          <p className="detail-age pin-preview-age">{formatAgo(pin.createdAt, nowSeconds)}</p>
+        </div>
         <button className="pin-preview-close" onClick={onClose} aria-label="Close preview" type="button">
           ×
         </button>
       </div>
 
-      <p className="detail-age pin-preview-age">{formatAgo(pin.createdAt, nowSeconds)}</p>
+      <div className="pin-preview-body">
+        {/* Absent, not a loading state, whenever geocoding hasn't finished
+            yet or fails outright — an address is a nice-to-have added
+            asynchronously after the pin is posted, not something this view
+            waits on. */}
+        {detail?.address && <p className="detail-address pin-preview-address">📍 {detail.address}</p>}
 
-      {/* Genuine at-a-glance info, unlike voting/reporting below — knowing
-          roughly where something is belongs in a quick overview just as
-          much as when it happened. Absent, not a loading state, whenever
-          geocoding hasn't finished yet or failed outright; see the same
-          reasoning in ReportDetail. */}
-      {detail?.address && <p className="detail-address pin-preview-address">📍 {detail.address}</p>}
+        {detail?.body && <p className="pin-preview-snippet">{detail.body}</p>}
 
-      {/* Clamped rather than the full body: a glance shouldn't need
-          scrolling inside a card this small. "See more" is exactly that
-          escape hatch, not a redundant affordance. */}
-      {detail?.body && <p className="pin-preview-snippet">{detail.body}</p>}
-
-      <div className="pin-preview-meta">
-        <span className="detail-countdown pin-preview-countdown">
-          Disappears in {formatCountdown(pin.expiresAt, nowSeconds)}
-        </span>
-        {detail ? (
-          detail.confirmCount === 0 && detail.disputeCount === 0 ? (
-            <span className="detail-corroboration pin-preview-corroboration">No confirmations yet</span>
+        <div className="pin-preview-meta">
+          <span className="detail-countdown pin-preview-countdown">
+            Disappears in {formatCountdown(pin.expiresAt, nowSeconds)}
+          </span>
+          {detail ? (
+            detail.confirmCount === 0 && detail.disputeCount === 0 ? (
+              <span className="detail-corroboration pin-preview-corroboration">No confirmations yet</span>
+            ) : (
+              <span className="pin-preview-vote-counts">
+                <span className="detail-vote-count detail-vote-count-up">👍 {detail.confirmCount}</span>
+                <span className="detail-vote-count detail-vote-count-down">👎 {detail.disputeCount}</span>
+              </span>
+            )
           ) : (
-            <span className="pin-preview-vote-counts">
-              <span className="detail-vote-count detail-vote-count-up">👍 {detail.confirmCount}</span>
-              <span className="detail-vote-count detail-vote-count-down">👎 {detail.disputeCount}</span>
-            </span>
-          )
+            <span className="detail-corroboration pin-preview-corroboration">Loading…</span>
+          )}
+        </div>
+
+        {detail?.mine ? (
+          <div className="pin-preview-own">
+            <p className="detail-own">You posted this.</p>
+
+            {removed ? (
+              <p className="detail-own">Removed — thanks for keeping the map current.</p>
+            ) : removeConfirmOpen ? (
+              <div className="detail-remove-confirm">
+                <p>This removes your post immediately, before its normal expiry. This can't be undone.</p>
+                <div className="detail-remove-confirm-actions">
+                  <button type="button" onClick={() => setRemoveConfirmOpen(false)} disabled={removing}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="detail-remove-confirm-yes"
+                    onClick={() => void confirmRemove()}
+                    disabled={removing}
+                  >
+                    {removing ? "Removing…" : "Yes, remove it"}
+                  </button>
+                </div>
+                {removeError && <p className="detail-vote-notice">{removeError}</p>}
+              </div>
+            ) : (
+              <button className="detail-remove-link" type="button" onClick={() => setRemoveConfirmOpen(true)}>
+                Remove this now
+              </button>
+            )}
+          </div>
         ) : (
-          <span className="detail-corroboration pin-preview-corroboration">Loading…</span>
+          <>
+            <div className="detail-actions pin-preview-actions">
+              <button
+                type="button"
+                className={`detail-vote ${voted === 1 ? "active" : ""}`}
+                disabled={voting || voted !== null}
+                onClick={() => void vote(1)}
+              >
+                👀 Still here
+              </button>
+              <button
+                type="button"
+                className={`detail-vote detail-vote-dispute ${voted === -1 ? "active" : ""}`}
+                disabled={voting || voted !== null}
+                onClick={() => void vote(-1)}
+              >
+                Not true
+              </button>
+            </div>
+            {voteNotice && <p className="detail-vote-notice">{voteNotice}</p>}
+
+            <div className="pin-preview-links">
+              {reported ? (
+                <p className="detail-own">Reported — thanks, we&rsquo;ll look at it.</p>
+              ) : reportOpen ? (
+                <div className="detail-report-reasons">
+                  {REPORT_REASONS.map((r) => (
+                    <button key={r.value} type="button" onClick={() => void report(r.value)}>
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <button className="detail-report-link" type="button" onClick={() => setReportOpen(true)}>
+                  Report this post
+                </button>
+              )}
+
+              {resolutionFlagged ? (
+                <p className="detail-own">Thanks — we&rsquo;ve let the person who posted this know.</p>
+              ) : resolutionOpen ? (
+                <div className="detail-report-reasons">
+                  {RESOLUTION_REASONS.map((r) => (
+                    <button key={r.value} type="button" onClick={() => void flagResolved(r.value)}>
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <button className="detail-report-link" type="button" onClick={() => setResolutionOpen(true)}>
+                  Is this still relevant?
+                </button>
+              )}
+            </div>
+          </>
         )}
       </div>
-
-      <button className="pin-preview-expand" onClick={onExpand} type="button">
-        See more &amp; respond →
-      </button>
     </div>
   );
 }

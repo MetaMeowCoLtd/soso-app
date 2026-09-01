@@ -111,23 +111,40 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
  * is ever applied), so there is no real conflict between this and the
  * `.expanded` rule above to resolve — this exists as its own rule for
  * clarity, not because the cascade would otherwise pick the wrong one.
+ *
+ * Generous on purpose: this now holds everything that used to be a separate
+ * modal (voting, reporting, early resolution), so its natural content height
+ * varies with which of those sub-flows is open, not just with whose pin it
+ * is. `.pin-preview-body` below scrolls internally if content ever exceeds
+ * even this, so nothing is ever clipped — this cap is about not eating the
+ * whole screen on a short device, not about fitting every state exactly.
  */
-.sheet.previewing { max-height:272px; }
+.sheet.previewing { max-height:min(74vh, 580px); }
 
-.pin-preview { display:flex; flex-direction:column; padding:2px clamp(14px,3vw,22px) 14px; }
-.pin-preview-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+/* Same fixed-head/scrolling-body split as .sheet-head + .sheet-body above —
+   the header (category, age, close button) stays put; everything below it,
+   which is what actually grows with each sub-flow, scrolls in place rather
+   than pushing the close button off-screen. */
+.pin-preview { display:flex; flex-direction:column; min-height:0; flex:1; }
+.pin-preview-head { flex-shrink:0; display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:16px clamp(14px,3vw,22px) 4px; }
 .pin-preview-kicker { margin:0; }
 .pin-preview-close { flex-shrink:0; display:grid; place-items:center; width:26px; height:26px; border:0; border-radius:50%; background:#f1f4f2; color:#5b706a; font-size:1.2rem; line-height:1; transition:background .16s; }
 .pin-preview-close:hover { background:#e4e9e6; }
-.pin-preview-age { margin:1px 0 6px; }
-.pin-preview-snippet { margin:0 0 8px; color:var(--ink); font-size:.86rem; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-.pin-preview-meta { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 10px; }
+.pin-preview-age { margin:2px 0 0; }
+.pin-preview-body { flex:1; min-height:0; overflow-y:auto; padding:8px clamp(14px,3vw,22px) 14px; -webkit-overflow-scrolling:touch; }
+.pin-preview-snippet { margin:0 0 10px; color:var(--ink); font-size:.86rem; line-height:1.4; }
+.pin-preview-meta { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 12px; }
 .pin-preview-countdown, .pin-preview-corroboration { margin:0; }
-.pin-preview-address { margin:0 0 6px; }
+.pin-preview-address { margin:0 0 8px; }
 .pin-preview-vote-counts { display:flex; gap:10px; }
 .pin-preview-vote-counts .detail-vote-count { font-size:.8rem; }
-.pin-preview-expand { align-self:stretch; padding:10px 14px; border:0; border-radius:12px; background:var(--deep); color:#fff; font-size:.84rem; font-weight:700; transition:background .16s; }
-.pin-preview-expand:hover { background:#0a1d1a; }
+.pin-preview-actions { margin-top:2px; }
+.pin-preview-own { padding-top:2px; }
+/* The vote buttons and the "report" / "still relevant" links used to sit at
+   the bottom of a tall standalone modal with room to breathe; in the more
+   compact card they need a firmer separation from the actions above them so
+   they don't read as one run-on block. */
+.pin-preview-links { display:flex; flex-direction:column; gap:2px; margin-top:8px; padding-top:10px; border-top:1px solid var(--hairline); }
 .sheet-grabber { display:grid; place-items:center; width:100%; padding:9px 0 4px; border:0; background:transparent; }
 .grabber-bar { width:36px; height:4px; border-radius:99px; background:#cfdbd6; transition:background .18s; }
 .sheet-grabber:hover .grabber-bar { background:#aebfb8; }
@@ -177,7 +194,6 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .composer-meta { margin:12px 0 0; padding:11px 13px; border-radius:12px; background:#f5f8f7; color:#546a63; font-size:.76rem; line-height:1.5; }
 .composer-meta strong { color:#0f3b32; font-weight:900; }
 
-.detail-card { position:relative; padding:24px 22px 20px; background:#fff; border-radius:20px; }
 .detail-age { margin:2px 0 14px; color:var(--muted); font-size:.76rem; font-weight:500; text-transform:none; letter-spacing:0; }
 .detail-body { margin:0 0 16px; color:var(--ink); font-size:.94rem; line-height:1.55; }
 .detail-countdown { margin:0 0 6px; color:#276153; font-size:.78rem; font-weight:650; }
