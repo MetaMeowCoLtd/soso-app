@@ -36,12 +36,28 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  // Present on every notification this app sends — the new-post case, the
+  // resolution-flag case, both include it in their payload's `data` field.
+  const postId = event.notification.data?.postId ?? null;
+
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
       for (const client of windowClients) {
-        if ("focus" in client) return client.focus();
+        if ("focus" in client) {
+          // Focusing an already-open tab does not change what it's
+          // currently showing — a postMessage is how the tab itself learns
+          // which post to open. The page-side listener is what actually
+          // acts on this; see page.tsx's serviceWorker message handler.
+          if (postId) client.postMessage({ type: "open-post", postId });
+          return client.focus();
+        }
       }
-      if (self.clients.openWindow) return self.clients.openWindow("./");
+      if (self.clients.openWindow) {
+        // A relative URL, consistent with this file's own registration
+        // scope: resolves correctly under the GitHub Pages subpath rather
+        // than assuming the domain root.
+        return self.clients.openWindow(postId ? `./?post=${encodeURIComponent(postId)}` : "./");
+      }
     }),
   );
 });

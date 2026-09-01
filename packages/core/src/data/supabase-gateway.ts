@@ -34,7 +34,7 @@ import {
   type NewZone,
   type FriendTier,
 } from '../domain/types';
-import type { FeedQuery, PushEndpoint, ReportReason, SosoGateway } from './gateway';
+import type { FeedQuery, PushEndpoint, ReportReason, ResolutionReason, SosoGateway } from './gateway';
 
 interface WireCategoryRow {
   key: string;
@@ -168,6 +168,19 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_reason: reason,
         p_detail: detail ?? null,
       });
+      if (error) throw toSosoError(error);
+    },
+
+    async flagPostResolved(postId: string, reason: ResolutionReason): Promise<void> {
+      const { error } = await client.rpc('flag_post_resolved', {
+        p_post_id: postId,
+        p_reason: reason,
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    async resolvePost(postId: string): Promise<void> {
+      const { error } = await client.rpc('resolve_post', { p_post_id: postId });
       if (error) throw toSosoError(error);
     },
 

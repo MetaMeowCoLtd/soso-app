@@ -41,6 +41,7 @@ Supabase.
 | Server-side validation (proximity, rate limits, body length, subtype) | Implemented. Enforced in Postgres, not in the client. |
 | Corroboration ("still here" / "not true") with auto-hide on disputes | Implemented |
 | Post reporting (flagging for review) | Implemented. Reports are recorded; no moderator workflow exists yet. |
+| Reverse-geocoded addresses | Implemented, unverified end-to-end. Populated asynchronously after posting; see [Push notifications](#push-notifications) for why it shares that feature's Edge Function. |
 | Local demo mode (no backend required) | Implemented |
 | Polls | Modeled, disabled. Requires separate options/votes tables. |
 | Local news and official notices | Modeled, disabled |
@@ -49,7 +50,7 @@ Supabase.
 | Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
 | Photo uploads | Not implemented. The `post_media` table exists; nothing writes to it. |
 | Push notifications | Implemented, not verified end-to-end. See [Push notifications](#push-notifications). |
-| Early resolution (for example, marking seats full before TTL expiry) | Not implemented. All reports currently expire only via TTL. |
+| Early resolution (community-flagged, author-confirmed removal) | Implemented, not verified end-to-end. See [Early resolution](#early-resolution). |
 | Native iOS/Android application | Not present in this repository. See [Platforms](#platforms). |
 
 ## Platforms
@@ -506,6 +507,23 @@ None of the following occurs automatically from a `git push`.
    report produces one notification, not two. For an existing hosted project,
    apply that migration with `supabase db push` before testing.
 
+4b. **Create a second Database Webhook for early resolution.** Same function,
+    same header, different table — this is what notifies a post's author
+    when someone else flags it as resolved or out of date (see [Early
+    resolution](#early-resolution)):
+
+    - Name: `notify-resolution-flag`
+    - Table: `public.resolution_flags`
+    - Events: **Insert** only
+    - Type: **Supabase Edge Function**
+    - Edge Function: `notify-new-pin` (the same one — it routes internally
+      by table name)
+    - HTTP header: identical to step 4, `x-push-secret` with the same value
+
+    Nothing else needs configuring. The function already holds every secret
+    both webhooks need; this step exists purely to point a second table's
+    inserts at code that was already deployed in step 3.
+
 5. **Provide the client with the public key.** This value is safe to
    expose; that is the purpose of a VAPID public key. Add it to
    `apps/web/.env.local` for local development and as a repository variable
@@ -559,6 +577,64 @@ contains `processing post` and `delivery complete` with a nonzero `sent`.
 cell; `Unauthorized` means the webhook header is missing or does not match
 `PUSH_TRIGGER_SECRET`; `unexpected webhook payload` means it is not
 configured as an INSERT webhook on `public.posts`.
+
+## Early resolution
+
+Lets a report be removed before its normal expiry, without letting a
+stranger unilaterally kill someone else's post.
+
+**The shape, deliberately two steps, not one.** Anyone other than the
+author can flag a post as resolved or out of date
+(`flag_post_resolved`), which does exactly one thing: notify the author
+via push, using the same Edge Function and webhook mechanism as new-post
+notifications (see [Push notifications](#push-notifications) and setup
+step 4b above). The flag itself never removes anything. Only the author
+can actually remove their post early (`resolve_post`), from a "Remove this
+now" button that appears only on their own posts. A report that "looks
+resolved" to a passerby might not actually be — the person who posted a
+lost-item report is in a better position to know whether it is truly over
+than someone glancing at a pin, and this shape keeps that judgment with
+them.
+
+**Removal reuses the existing expiry mechanism** rather than adding a new
+post status: `resolve_post` sets `expires_at` to now. Every read path
+(`feed_delta`, `cell_counts`, `post_detail`) already excludes a post the
+instant its expiry passes, so an early-resolved post disappears through
+the identical mechanism a naturally-expired one does. Nothing downstream
+needed a new case added for this.
+
+**At most one notification per post**, not one per flag. The Edge
+Function checks whether a given flag is the first one recorded against
+that post before sending; five people flagging the same stale report
+produces one push to its author, not five.
+
+**Tapping the notification opens the flagged post directly**, on both
+platforms this app targets push notifications on: the service worker
+passes the post's id through as a URL parameter when opening a new window,
+and sends a `postMessage` to an already-open tab instead, since focusing a
+tab does not by itself change what it is showing. Once open, the app
+strips the parameter from the address bar immediately, so refreshing the
+page — or someone else opening a shared link — does not keep reopening
+the same post.
+
+### Limitations
+
+- **No cooldown or rate limit on flagging.** A single person can flag as
+  many different posts as they like. The one-flag-per-post-per-person
+  constraint (a database unique constraint) prevents repeated flags on the
+  *same* post from the *same* person, not a pattern of flagging across many
+  posts.
+- **A flag is not visible to the author as a persisted list.** The
+  notification is the only place the author learns their post was flagged;
+  there is no in-app inbox of past flags to revisit if the push is missed
+  or the notification is dismissed without being read.
+- **Self-flagging is rejected, not silently redirected.** Calling
+  `flag_post_resolved` on your own post returns
+  `soso/use_resolve_post_instead` rather than transparently calling
+  `resolve_post` on the caller's behalf — the client surfaces this as an
+  error rather than a seamless fallback, since the two functions have
+  different authorization checks and collapsing them silently would blur
+  that distinction.
 
 ## Presence and people
 
@@ -647,10 +723,12 @@ stay in sync, as with `CELL_ZOOM`.
   `create_post` currently constrain one account, not one person operating a
   script. Phone verification is required before using the Supabase-backed
   mode with untrusted users.
-- **No early resolution mechanism exists.** A `seats` report remains live
-  for its full 20-minute TTL even if the underlying condition changes
-  within minutes. There is no `resolve_post` RPC. Since `seats` is an
-  active feature, this is the most significant functional gap to address.
+- **Early resolution exists but has no automatic trigger for `seats`
+  specifically.** `resolve_post` lets an author remove any of their own
+  posts early, and a community flag can prompt them to, but nothing
+  detects on its own that a `seats` report's condition has changed (tables
+  filling up) the way, say, a sensor might. It is manual either way now,
+  just no longer impossible.
 - **Photo uploads are not implemented**, despite the `post_media` table
   existing in the schema.
 - **Push notifications are implemented but unverified end-to-end**, and

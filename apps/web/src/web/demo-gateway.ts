@@ -53,7 +53,7 @@ import {
   type PostDetail,
   type Zone,
 } from "soso-core";
-import type { FeedQuery, FollowResult, Friend, ReportReason, SosoGateway } from "soso-core";
+import type { FeedQuery, FollowResult, Friend, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
 
 // ---------------------------------------------------------------------------
 // Category configuration, hand-mirrored from supabase/seed.sql's enabled rows.
@@ -407,6 +407,10 @@ export function createDemoGateway(): SosoGateway {
         body: post.body,
         confirmCount: post.confirmCount,
         disputeCount: post.disputeCount,
+        // Demo mode has no server-side geocoding step to ever populate this —
+        // permanently null here, which is exactly the same "not available"
+        // meaning the real gateway uses while a post is still waiting on it.
+        address: null,
         mine: post.authorId === me,
         author: { id: post.authorId, handle: "demo", displayName: post.authorId === me ? "You" : "A neighbour" },
         media: [],
@@ -522,6 +526,34 @@ export function createDemoGateway(): SosoGateway {
       // Accepting it silently (rather than throwing) matches the real
       // gateway's contract closely enough for demo purposes: the person
       // gets the same "reported" confirmation either way.
+    },
+
+    async flagPostResolved(_postId: string, _reason: ResolutionReason): Promise<void> {
+      // In demo mode every post belongs to the one local user — there is no
+      // "someone else's post" to flag at all, since getMe() is the only
+      // author that ever exists here. That is exactly the case the real
+      // backend rejects (soso/use_resolve_post_instead), so mirroring that
+      // rejection is more honest than silently accepting a flag that could
+      // never have a different author to notify in the first place.
+      throw new SosoError("soso/use_resolve_post_instead");
+    },
+
+    async resolvePost(postId: string): Promise<void> {
+      // Unlike flagPostResolved above, this one genuinely works in demo
+      // mode: it needs no notification infrastructure at all, just marking
+      // your own post expired right now instead of later — something local
+      // storage can do exactly as the real resolve_post RPC does.
+      const posts = loadPosts();
+      const post = posts.find((p) => p.id === postId);
+      const now = nowSeconds();
+      const me = getMe();
+
+      if (!post || post.authorId !== me || post.status !== "live" || post.expiresAt <= now) {
+        throw new SosoError("soso/not_yours_or_already_gone");
+      }
+
+      post.expiresAt = now;
+      savePosts(posts);
     },
 
     async subscribeToPush(): Promise<void> {

@@ -34,6 +34,10 @@ export const SOSO_ERROR_CODES = [
   'soso/too_many_recipients',
   'soso/too_many_zones',
   'soso/invalid_zone_audience',
+  'soso/invalid_reason',
+  'soso/post_not_found',
+  'soso/use_resolve_post_instead',
+  'soso/not_yours_or_already_gone',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -98,5 +102,9 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/too_many_recipients': "That's too many people to share with at once.",
   'soso/too_many_zones': "You've reached the limit on saved areas.",
   'soso/invalid_zone_audience': 'Pick who this area is shared with.',
+  'soso/invalid_reason': 'Pick a valid reason.',
+  'soso/post_not_found': 'That post is no longer available.',
+  'soso/use_resolve_post_instead': "That's your own post — remove it directly instead of flagging it.",
+  'soso/not_yours_or_already_gone': "That post isn't yours, or it's already gone.",
   'soso/unknown': 'Something went wrong. Try again.',
 };

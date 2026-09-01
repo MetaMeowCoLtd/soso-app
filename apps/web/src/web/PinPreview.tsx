@@ -52,6 +52,13 @@ export default function PinPreview({ pin, detail, categories, nowSeconds, onClos
 
       <p className="detail-age pin-preview-age">{formatAgo(pin.createdAt, nowSeconds)}</p>
 
+      {/* Genuine at-a-glance info, unlike voting/reporting below — knowing
+          roughly where something is belongs in a quick overview just as
+          much as when it happened. Absent, not a loading state, whenever
+          geocoding hasn't finished yet or failed outright; see the same
+          reasoning in ReportDetail. */}
+      {detail?.address && <p className="detail-address pin-preview-address">📍 {detail.address}</p>}
+
       {/* Clamped rather than the full body: a glance shouldn't need
           scrolling inside a card this small. "See more" is exactly that
           escape hatch, not a redundant affordance. */}
@@ -61,13 +68,18 @@ export default function PinPreview({ pin, detail, categories, nowSeconds, onClos
         <span className="detail-countdown pin-preview-countdown">
           Disappears in {formatCountdown(pin.expiresAt, nowSeconds)}
         </span>
-        <span className="detail-corroboration pin-preview-corroboration">
-          {detail
-            ? detail.confirmCount === 0 && detail.disputeCount === 0
-              ? "No confirmations yet"
-              : `${detail.confirmCount} confirmed, ${detail.disputeCount} disputed`
-            : "Loading…"}
-        </span>
+        {detail ? (
+          detail.confirmCount === 0 && detail.disputeCount === 0 ? (
+            <span className="detail-corroboration pin-preview-corroboration">No confirmations yet</span>
+          ) : (
+            <span className="pin-preview-vote-counts">
+              <span className="detail-vote-count detail-vote-count-up">👍 {detail.confirmCount}</span>
+              <span className="detail-vote-count detail-vote-count-down">👎 {detail.disputeCount}</span>
+            </span>
+          )
+        ) : (
+          <span className="detail-corroboration pin-preview-corroboration">Loading…</span>
+        )}
       </div>
 
       <button className="pin-preview-expand" onClick={onExpand} type="button">

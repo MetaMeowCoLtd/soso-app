@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
+import type { NewPost, Pin, PostDetail, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
 import ReportDetail from "@/src/web/ReportDetail";
 import PinPreview from "@/src/web/PinPreview";
 import ReportForm from "@/src/web/ReportForm";
@@ -374,6 +374,62 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     setDetailExpanded(false);
   }
 
+  /**
+   * Opens a post directly by id, for a push notification's deep link — a
+   * different starting point than selectPin, which already has a full Pin
+   * on hand from the map or the feed list. This only ever has an id, so it
+   * has to fetch first and derive everything else from what comes back.
+   * postDetail's response is a strict superset of Pin (see PostDetail's own
+   * definition), so the same object can seed both selectedPin and
+   * selectedDetail at once rather than needing two different shapes.
+   *
+   * Goes straight to the full modal (detailExpanded: true), not the
+   * lightweight preview: tapping a notification is a deliberate return to a
+   * specific post, most likely to act on it (remove it, having been flagged),
+   * not a quick glance while panning past it.
+   */
+  async function openPostById(postId: string) {
+    try {
+      const detail = await gateway.postDetail(postId);
+      if (!detail) return; // gone, expired, or no longer visible to this viewer
+      setSelectedPin(detail);
+      setSelectedDetail(detail);
+      setDetailExpanded(true);
+      setFocusAt({ latitude: detail.lat, longitude: detail.lng });
+    } catch {
+      // A stale, deleted, or inaccessible post from an old notification
+      // shouldn't fail the whole app on load — it should just open nothing.
+    }
+  }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const postId = params.get("post");
+    if (postId) {
+      void openPostById(postId);
+      // Strip the param immediately rather than leaving it in the address
+      // bar — otherwise reloading the page (or sharing the URL) would keep
+      // reopening the same post indefinitely.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("post");
+      window.history.replaceState({}, "", url.toString());
+    }
+
+    // The already-open-tab case: notificationclick can't change a tab's
+    // state just by focusing it, so the service worker sends this instead.
+    function onMessage(event: MessageEvent) {
+      if (event.data?.type === "open-post" && typeof event.data.postId === "string") {
+        void openPostById(event.data.postId);
+      }
+    }
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMessage);
+    // Runs once on mount. gateway is resolved once for this component's
+    // whole lifetime (see resolveGateway in Home above) and never changes,
+    // so there is no real dependency being omitted here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function submitReport(input: NewPost): Promise<Pin> {
     const pin = await gateway.createPost(input);
     cancelComposer();
@@ -403,6 +459,19 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
   async function report(postId: string, reason: ReportReason) {
     await gateway.reportPost(postId, reason);
+  }
+
+  async function flagResolved(postId: string, reason: ResolutionReason) {
+    await gateway.flagPostResolved(postId, reason);
+  }
+
+  async function resolve(postId: string) {
+    await gateway.resolvePost(postId);
+    // The modal shows its own "removed" confirmation and stays open until
+    // the person closes it themselves; refreshing here means the pin is
+    // already gone from the map underneath by the time they do, rather than
+    // waiting for the next ordinary poll to notice the expiry.
+    refresh();
   }
 
   function toggleFilter(key: string) {
@@ -614,6 +683,8 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           onClose={deselectPin}
           onVote={vote}
           onReport={report}
+          onFlagResolved={flagResolved}
+          onResolve={resolve}
         />
       )}
     </main>

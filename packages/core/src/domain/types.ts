@@ -162,6 +162,14 @@ export interface PostDetail extends Pin {
   body: string | null;
   confirmCount: number;
   disputeCount: number;
+  /**
+   * Reverse-geocoded server-side, asynchronously, shortly after creation —
+   * not available at all for a post that was only just created. Absence
+   * means "not geocoded yet, or the request failed," not an error; the UI
+   * should simply omit an address line rather than show a loading state
+   * that might never resolve.
+   */
+  address: string | null;
   /** True when the signed-in user wrote it. Drives the edit/delete affordances. */
   mine: boolean;
   author: { id: string; handle: string; displayName: string };
@@ -173,6 +181,7 @@ export interface WirePostDetail extends WirePin {
   body: string | null;
   up: number;
   down: number;
+  address: string | null;
   mine: boolean;
   author: { id: string; handle: string; name: string };
   media: { key: string; w: number; h: number }[];
@@ -184,6 +193,7 @@ export function decodePostDetail(w: WirePostDetail): PostDetail {
     body: w.body,
     confirmCount: w.up,
     disputeCount: w.down,
+    address: w.address,
     mine: w.mine,
     author: { id: w.author.id, handle: w.author.handle, displayName: w.author.name },
     media: (w.media ?? []).map((m) => ({ objectKey: m.key, width: m.w, height: m.h })),

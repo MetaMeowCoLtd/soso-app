@@ -39,6 +39,16 @@ export type ReportReason =
   | 'illegal'
   | 'other';
 
+/**
+ * Distinct from ReportReason above: a report is a request for a moderator to
+ * review something, aimed at whoever eventually handles moderation_reports.
+ * A resolution reason is aimed at the post's OWN AUTHOR, asking whether
+ * something they posted is still current. Different recipient, different
+ * workflow, kept as a separate type even though both are "reasons a viewer
+ * gave for flagging a post."
+ */
+export type ResolutionReason = 'resolved' | 'out_of_date';
+
 export interface FeedQuery {
   cells: readonly CellId[];
   since?: string | null;
@@ -71,6 +81,22 @@ export interface SosoGateway {
   votePost(postId: string, vote: 1 | -1): Promise<void>;
 
   reportPost(postId: string, reason: ReportReason, detail?: string): Promise<void>;
+
+  /**
+   * Flags someone ELSE's post as resolved or out of date, notifying its
+   * author. Never removes the post itself — the author decides that,
+   * via resolvePost below. Rejected server-side if called on your own post;
+   * use resolvePost directly for that instead.
+   */
+  flagPostResolved(postId: string, reason: ResolutionReason): Promise<void>;
+
+  /**
+   * Removes your OWN post early, regardless of whether anyone has flagged
+   * it. Reuses the same expiry mechanism a post's natural TTL already goes
+   * through — this doesn't introduce a new state for anything downstream to
+   * special-case, the post just disappears the way an expired one always has.
+   */
+  resolvePost(postId: string): Promise<void>;
 
   /**
    * Registers a browser's push subscription and marks the given cells as
