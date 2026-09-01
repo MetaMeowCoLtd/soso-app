@@ -16,7 +16,6 @@
     "db:types": "supabase gen types typescript --local > packages/core/src/data/database.types.ts"
   },
   "dependencies": {
-    "leaflet-doubletapdrag": "^0.1.2",
     "leaflet-doubletapdragzoom": "^0.3.2"
   }
 }

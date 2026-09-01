@@ -13,7 +13,14 @@ import { DEFAULT_CENTER, DEFAULT_ZOOM, leafletBoundsToBounds, type Coordinates }
 // Side-effect imports: each registers itself onto the global `L` namespace,
 // the same way `@maplibre/maplibre-gl-leaflet` above does. Neither ships its
 // own TypeScript types, hence the module augmentation immediately below.
-import "leaflet-doubletapdrag";
+//
+// The first is a local, bug-fixed replacement for the `leaflet-doubletapdrag`
+// package (still listed in package.json history but no longer imported —
+// see doubleTapDrag.js for exactly what was wrong with it and why vendoring
+// beat patching node_modules). `leaflet-doubletapdragzoom` itself is
+// untouched: it only reacts to the `doubletapdrag*` events fired here, not
+// to who fires them.
+import "./doubleTapDrag";
 import "leaflet-doubletapdragzoom";
 
 declare module "leaflet" {
