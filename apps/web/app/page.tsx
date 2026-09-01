@@ -599,6 +599,16 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
         {previewingPin && selectedPin ? (
           <PinPreview
+            // Forces a full remount on every pin switch rather than reusing
+            // the same instance with new props. PinPreview owns a dozen-plus
+            // independent pieces of local state (vote status, resolution-flag
+            // status, the report-reason submenu, the remove confirmation,
+            // every error message) — resetting each of those by hand in an
+            // effect keyed on pin.id would be exactly the kind of thing that
+            // silently misses one the next time a field is added. A key
+            // makes "this is a fresh pin" the default instead of something
+            // that has to be remembered per field.
+            key={selectedPin.id}
             pin={selectedPin}
             detail={selectedDetail}
             categories={categories}
