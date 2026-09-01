@@ -774,6 +774,28 @@ export default function SosoMap({
       className="map"
       scrollWheelZoom
       zoomControl={false}
+      // Fixes a stutter-then-jump on releasing the one-handed zoom drag
+      // (and, less noticeably, two-finger pinch): during the drag,
+      // leaflet-doubletapdragzoom moves the view via `map._move(..., {round:
+      // false})`, i.e. the exact fractional zoom under the finger, every
+      // frame. On release it hands off to Leaflet's own `_limitZoom`, which
+      // — with the default `zoomSnap` of 1 — rounds that fractional value to
+      // the nearest whole zoom level (`Leaflet.DoubleTapDragZoom.js`'s
+      // `_onDoubleTapDragEnd`, mirroring stock Leaflet's `TouchZoom`
+      // `_onTouchEnd` almost verbatim; read directly from
+      // node_modules/leaflet/dist/leaflet-src.js, not guessed). Whatever the
+      // fractional value was when the finger lifted, the map then plays a
+      // ~250ms CSS transition (`_animateZoom`) from there to that rounded
+      // target — the "pause, then a jump to a slightly different position."
+      // `zoomSnap={0}` (a real Leaflet option, not the plugin's own) turns
+      // that rounding off entirely — `_limitZoom`'s `if (snap) { round }`
+      // becomes a no-op — so the view simply stays exactly where the drag
+      // left it. Vector tiles (CuteBaseLayer, the normal path) render at any
+      // fractional zoom natively; only the raster `<TileLayer>` fallback
+      // (used solely if OpenFreeMap's vector tiles fail to load) loses a
+      // little sharpness between whole zoom levels, same trade-off any app
+      // using continuous zoom accepts.
+      zoomSnap={0}
     >
       <CuteBaseLayer />
       <SafeAreaResizeFix />
