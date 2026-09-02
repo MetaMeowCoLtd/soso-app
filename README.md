@@ -730,12 +730,12 @@ canvas instead of a detail sheet. See `DRAWING_BOARDS_PLAN.md` for the full
 design (the vector-in-transit / raster-at-rest split, the concurrency model,
 access control, and the suggested build order).
 
-**Status: schema/tile-index/R2-signing (step 1) and the gateway (step 2) of
-that plan's build order.** Still missing — the canvas UI, the live
-Broadcast layer, and moderation tooling — so `board` stays shipped with
-`is_enabled = false` in `seed.sql`: everything below can be exercised
-directly (against the database, the Edge Function, or now the gateway),
-but nothing in the app itself can create or open a board yet.
+**Status: schema/tile-index/R2-signing (step 1), the gateway (step 2), and
+the single-player canvas UI (step 3 of the plan's build order: "canvas UI
+without live collab").** Still missing — the live Broadcast layer and
+moderation tooling — so `board` stays shipped with `is_enabled = false` in
+`seed.sql`. Demo mode enables the category locally so the canvas can be
+exercised without flipping the production kill switch.
 
 Verified by executing the full migration chain against a real PostgreSQL 16 +
 PostGIS instance (not just checked for syntax), then exercising every branch
@@ -805,6 +805,12 @@ regardless of the registration fix.
   for. `subscribeBoardStrokes` (live Broadcast) is deliberately not among
   them — that is its own later step in the plan's build order, not folded
   into this one.
+- `BoardCanvas` / `useBoardSession`: the full-screen drawing surface that
+  replaces the pin-preview sheet when a `board` pin is tapped. Viewport-
+  windowed tile loads, a local dirty-layer for zero-latency drawing, and
+  the idle/periodic flush (optimistic version, conflict refetch) — no
+  Broadcast. Canvas tiling lives in `packages/core/src/domain/board-grid.ts`,
+  independent of the geographic grid.
 
 ### Demo mode
 
@@ -824,10 +830,9 @@ only expose bytes that already exist. So `getBoardTileUploadUrls` returns a
 `demoStoreBoardTileBlob` (exported from `demo-gateway.ts`, deliberately
 **not** part of `SosoGateway` — this is the one place demo mode cannot
 pretend to be a drop-in swap for the real gateway) is what a caller must
-use instead once it recognises that prefix. Whichever step builds the
-actual canvas will need an `if (mode !== "supabase")` branch around its
-upload step for exactly this reason — a real, load-bearing fact about this
-feature's demo mode, not an implementation detail to hide. Downloads have
+use instead once it recognises that prefix. `useBoardSession` is that
+caller: it branches on the `demo-tile-upload:` prefix around the upload
+step, exactly as this seam requires. Downloads have
 no equivalent problem: `getBoardTileDownloadUrls` returns real `data:`
 URLs, genuinely fetchable, so nothing downstream needs to special-case
 reading a tile in demo mode at all.
@@ -862,8 +867,12 @@ None of the following occurs automatically from a `git push`.
 
 ### Limitations
 
-- **Still not usable from the app.** The gateway exists, but there is no
-  canvas UI and no way to create or open a board as an end user yet.
+- **Live collab is not in this step.** The canvas is single-player: your
+  strokes persist as raster tiles, but nobody else sees them until they
+  reopen the board (and even then, only after a flush). Broadcast is next.
+- **`seed.sql` still ships `board` disabled.** Demo mode enables it so the
+  canvas can be used locally; the production category flip waits on
+  moderation tooling.
 - **The Edge Function is unverified end-to-end**, for the same reason
   `notify-new-pin` is — see the Status paragraph above. `functions.invoke`'s
   actual request/response behaviour against a *deployed* function has

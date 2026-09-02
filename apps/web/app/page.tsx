@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
 import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
+import BoardCanvas from "@/src/web/BoardCanvas";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeoplePanel from "@/src/web/PeoplePanel";
@@ -337,7 +338,8 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // A pin preview takes visual priority over whatever browse state the
   // sheet was already in — selecting a pin always shows it, regardless of
   // whether the feed list happened to be expanded at the time.
-  const previewingPin = Boolean(selectedPin);
+  const previewingPin = selectedPin !== null && selectedPin.category !== "board";
+  const viewingBoard = selectedPin?.category === "board";
 
   // Measured, not guessed: the preview now holds everything that used to be
   // a separate modal (voting, reporting, early resolution), so its height
@@ -516,6 +518,11 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     void refreshCoinBalance();
     setNotice(mode === "supabase" ? "Your pin is live for everyone! ✨" : "Your pin is live on this device ✨");
 
+    if (pin.category === "board") {
+      setSelectedPin(pin);
+      setSelectedDetail(null);
+    }
+
     // A short celebratory pop once the new pin actually appears on the map —
     // see `pinIcon` in SosoMap.tsx. Cosmetic only: it never gates anything,
     // and clears itself even if this exact id somehow never shows up.
@@ -636,6 +643,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           <ChatIcon />
         </button>
       </header>
+
+      {viewingBoard && selectedPin && (
+        <BoardCanvas pin={selectedPin} gateway={gateway} onClose={deselectPin} />
+      )}
 
       {(statusLabel ?? transientNotice) && (
         <p className="map-notice" role="status">

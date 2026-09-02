@@ -175,6 +175,26 @@ const DEMO_CATEGORIES: CategoryConfig[] = [
       { key: "full", labelJa: "満席", labelEn: "Full", sortOrder: 30 },
     ],
   },
+  // Enabled here so the single-player canvas can be exercised in demo mode.
+  // seed.sql still ships `board` with is_enabled = false — flipping that is
+  // last in the plan's build order, after moderation exists.
+  {
+    key: "board",
+    labelJa: "お絵かきボード",
+    labelEn: "Board",
+    defaultTtlSeconds: 7 * 86400,
+    maxTtlSeconds: 180 * 86400,
+    locationPrecisionM: 0,
+    requiresProximity: false,
+    proximityRadiusM: 500,
+    allowsBody: true,
+    bodyMaxLength: 300,
+    allowsMedia: false,
+    minReputation: 0,
+    hourlyPostLimit: 5,
+    sortOrder: 90,
+    subtypes: [],
+  },
 ];
 
 const DISPUTE_THRESHOLD = 3; // mirrors soso.dispute_threshold()
@@ -677,6 +697,7 @@ export function createDemoGateway(): SosoGateway {
 
       savePosts([post, ...loadPosts()]);
       setCoinBalance(me, getCoinBalance(me) - POST_PIN_COST);
+      if (category.key === "board") ensureDemoBoard(post.id);
       return toPin(post);
     },
 
@@ -938,7 +959,9 @@ export function createDemoGateway(): SosoGateway {
     },
 
     async getBoard(boardId: string): Promise<Board | null> {
-      const board = loadDemoBoards()[boardId];
+      const post = loadPosts().find((p) => p.id === boardId);
+      if (post && post.category !== "board") return null;
+      const board = post?.category === "board" ? ensureDemoBoard(boardId) : loadDemoBoards()[boardId];
       if (!board) return null;
       const hasBbox = board.minTx !== null && board.minTy !== null && board.maxTx !== null && board.maxTy !== null;
       return {

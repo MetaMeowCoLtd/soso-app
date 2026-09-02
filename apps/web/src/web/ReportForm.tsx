@@ -218,7 +218,11 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
             {lookOf(category.key).icon} {category.labelEn}
           </p>
           <h2>Add a bit more?</h2>
-          <p className="composer-hint">Totally optional — post it as-is if you're in a hurry.</p>
+          <p className="composer-hint">
+            {category.key === "board"
+              ? "Optional name — tapping the pin opens a drawing canvas."
+              : "Totally optional — post it as-is if you're in a hurry."}
+          </p>
 
           {category.subtypes.length > 0 && (
             <div className="vibe-picker" style={{ marginBottom: 14 }}>
@@ -245,7 +249,11 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
                 onChange={(e) => setDescription(e.target.value)}
                 maxLength={category.bodyMaxLength}
                 rows={2}
-                placeholder="Keep it factual and free of personal details."
+                placeholder={
+                  category.key === "board"
+                    ? "A name for this board, if you want one."
+                    : "Keep it factual and free of personal details."
+                }
                 autoFocus
               />
             </label>
@@ -274,8 +282,10 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
           </div>
 
           <p className="composer-meta">
-            Visible for about <strong>{formatDuration(category.defaultTtlSeconds)}</strong>, then it disappears
-            on its own.
+            Visible for about <strong>{formatDuration(category.defaultTtlSeconds)}</strong>
+            {category.key === "board"
+              ? ", and drawing on it keeps it around."
+              : ", then it disappears on its own."}
             {category.locationPrecisionM > 0 &&
               ` Location is rounded to about ${category.locationPrecisionM} m so it can't point at one address.`}
           </p>

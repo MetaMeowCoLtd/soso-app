@@ -1,4 +1,5 @@
 export * from './grid';
+export * from './board-grid';
 export * from './types';
 export * from './errors';
 export * from './feed';

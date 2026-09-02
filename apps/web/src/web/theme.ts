@@ -33,6 +33,7 @@ const LOOK: Record<string, CategoryLook> = {
   // seed.sql change, not a client change too.
   poll: { icon: "🗳", color: "#d68fd0" },
   news: { icon: "📰", color: "#4fa89a" },
+  board: { icon: "🖌", color: "#e07a9a" },
 };
 
 const FALLBACK: CategoryLook = { icon: "•", color: "#a39a91" };
