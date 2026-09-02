@@ -686,6 +686,20 @@ export function createDemoGateway(): SosoGateway {
       return { coinsEarned, balance };
     },
 
+    // Demo mode skips the 3-per-24-hours rate limit the real backend
+    // enforces: the whole reason that limit exists is to cap how much a
+    // debug tool can undermine the coin economy for OTHER accounts on a
+    // shared server, and there is no such thing in a single-device local
+    // demo — the only balance being "abused" is your own, on your own
+    // device.
+    async debugGrantCoins(): Promise<{ balance: number; granted: number }> {
+      const me = getMe();
+      const granted = 200;
+      const balance = getCoinBalance(me) + granted;
+      setCoinBalance(me, balance);
+      return { balance, granted };
+    },
+
     async presenceHeartbeat(): Promise<void> {
       // Accepted and discarded. Nothing else can observe it.
     },

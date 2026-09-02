@@ -147,6 +147,18 @@ export interface SosoGateway {
   recordWalk(distanceMetres: number, elapsedSeconds: number): Promise<WalkResult>;
 
   /**
+   * A development aid, not a real feature — grants a fixed 200 coins, up to
+   * 3 times per rolling 24 hours per account, entirely to make manual
+   * testing possible without needing the Supabase SQL editor. See the
+   * migration's own comment for why this is a genuine abuse surface that
+   * must be removed or locked down before this app has real users: the
+   * whole point of a coin cost is to be a rate limiter that costs
+   * something to bypass, and a function granting coins on demand defeats
+   * that for anyone who finds it.
+   */
+  debugGrantCoins(): Promise<{ balance: number; granted: number }>;
+
+  /**
    * Opts in to presence and refreshes it. Called on an interval only while the
    * user has sharing enabled. Stopping the calls is sufficient to go stale.
    */

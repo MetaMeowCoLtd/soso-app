@@ -233,6 +233,13 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return decodeWalkResult(data as WireWalkResult);
     },
 
+    async debugGrantCoins(): Promise<{ balance: number; granted: number }> {
+      const { data, error } = await client.rpc('debug_grant_coins');
+      if (error) throw toSosoError(error);
+      const result = data as { balance: number; granted: number };
+      return { balance: result.balance, granted: result.granted };
+    },
+
     async presenceHeartbeat(at: { lng: number; lat: number }): Promise<void> {
       const { error } = await client.rpc('presence_heartbeat', {
         p_lng: at.lng,

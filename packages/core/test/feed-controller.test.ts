@@ -56,6 +56,9 @@ class FakeGateway implements SosoGateway {
   async deleteZone() {}
   async flagPostResolved() {}
   async resolvePost() {}
+  async debugGrantCoins() {
+    return { balance: 0, granted: 0 };
+  }
   async sendChatMessage() {
     return {} as never;
   }

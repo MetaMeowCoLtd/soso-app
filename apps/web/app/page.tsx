@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NewPost, Pin, PostDetail, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
+import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
@@ -198,6 +199,43 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // work directly against the compactness this feature was specifically
   // asked to keep.
   const [showChat, setShowChat] = useState(false);
+  // null while loading, distinct from 0 — ReportForm treats null as "don't
+  // block on this yet" rather than falsely showing "you can't afford this"
+  // before the real balance has even loaded.
+  const [coinBalance, setCoinBalance] = useState<number | null>(null);
+  const [debugGranting, setDebugGranting] = useState(false);
+
+  async function refreshCoinBalance() {
+    try {
+      setCoinBalance(await gateway.myCoinBalance());
+    } catch {
+      // Leaves whatever was last known showing rather than clearing it —
+      // a stale balance is a far better failure mode here than the
+      // compose flow suddenly looking like it has no idea what you can
+      // afford.
+    }
+  }
+
+  async function debugGrantCoins() {
+    setDebugGranting(true);
+    try {
+      const result = await gateway.debugGrantCoins();
+      setCoinBalance(result.balance);
+      setNotice(`+${result.granted} coins (debug) — balance now ${result.balance}`);
+    } catch (err) {
+      const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
+      setNotice(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
+    } finally {
+      setDebugGranting(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshCoinBalance();
+    // Runs once on mount. gateway is resolved once for the whole session
+    // and never changes (see resolveGateway in Home above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Presence tracks the map centre rather than the device's GPS: the area
   // count answers "is where I'm looking busy", and tying it to the viewport
   // means it works without a second location permission prompt.
@@ -448,6 +486,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     // the coordinates server-side, so the authoritative pin is whatever the
     // next delta returns, not the one the client sent.
     refresh();
+    void refreshCoinBalance();
     setNotice(mode === "supabase" ? "Your pin is live for everyone! ✨" : "Your pin is live on this device ✨");
 
     // A short celebratory pop once the new pin actually appears on the map —
@@ -516,9 +555,27 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       />
 
       <header className="map-header">
-        <a className="brand" href="#top" aria-label="Soso home">
-          <span>so</span>so
-        </a>
+        <div className="header-left">
+          <a className="brand" href="#top" aria-label="Soso home">
+            <span>so</span>so
+          </a>
+          <div className="coin-badge" title="Coins — spent posting, earned by walking">
+            <span className="coin-badge-amount">🪙 {coinBalance ?? "…"}</span>
+            {/* DEV TOOL, not a real feature — see the migration and gateway
+                comments on debug_grant_coins for why this needs to be
+                removed or locked down before this app has real users. */}
+            <button
+              className="coin-debug-button"
+              type="button"
+              onClick={() => void debugGrantCoins()}
+              disabled={debugGranting}
+              title="DEBUG: grant 200 coins (dev only, max 3/day)"
+              aria-label="Debug: grant coins"
+            >
+              +
+            </button>
+          </div>
+        </div>
         <button
           className={`people-button ${presence.sharing ? "sharing" : ""} ${showPeople ? "active" : ""}`}
           onClick={() => setShowPeople((v) => !v)}
@@ -692,6 +749,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             <ReportForm
               categories={categories}
               location={draftAt}
+              coinBalance={coinBalance}
               onCancel={cancelComposer}
               onSubmit={submitReport}
             />
