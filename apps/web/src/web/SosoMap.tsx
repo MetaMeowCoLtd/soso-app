@@ -21,6 +21,7 @@ import { DEFAULT_CENTER, DEFAULT_ZOOM, leafletBoundsToBounds, type Coordinates }
 // untouched: it only reacts to the `doubletapdrag*` events fired here, not
 // to who fires them.
 import "./doubleTapDrag";
+import "./smoothWheelZoom";
 import "leaflet-doubletapdragzoom";
 
 declare module "leaflet" {
@@ -800,6 +801,11 @@ export default function SosoMap({
       zoom={DEFAULT_ZOOM}
       className="map"
       scrollWheelZoom
+      // 0 rather than Leaflet's 40ms default: with animation off (see
+      // smoothWheelZoom.js) there is nothing to debounce against, and a
+      // non-zero wait is what made a trackpad pinch feel like it was
+      // catching up in lumps.
+      wheelDebounceTime={0}
       zoomControl={false}
       // Fixes a stutter-then-jump on releasing the one-handed zoom drag
       // (and, less noticeably, two-finger pinch): during the drag,
@@ -822,6 +828,11 @@ export default function SosoMap({
       // (used solely if OpenFreeMap's vector tiles fail to load) loses a
       // little sharpness between whole zoom levels, same trade-off any app
       // using continuous zoom accepts.
+      //
+      // Wheel/trackpad zoom is a separate path: with snap off, Leaflet's
+      // default *animated* setZoom drops most pinch events (see
+      // smoothWheelZoom.js). Keep snap at 0 for the drag-zoom fix above;
+      // do not "fix" trackpad smoothness by turning snap back on.
       zoomSnap={0}
     >
       <CuteBaseLayer />
