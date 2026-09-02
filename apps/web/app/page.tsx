@@ -381,11 +381,18 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   );
 
   function beginPin(at: Coordinates) {
-    if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
-    // A resolved tap on empty map space reasonably means "I'm done looking
-    // at that other pin" — dismiss any open preview alongside starting the
-    // compose flow, rather than leaving a stale preview showing underneath.
+    // Tidies up any open widget regardless of which caller reached here (a
+    // genuine map tap via handleMapTap below, or the explicit "+" button) —
+    // starting the compose flow with another panel still open would just be
+    // visually cluttered, not a reason to skip creating the pin. This is
+    // never the thing that decides whether a pin gets created; that
+    // decision belongs to handleMapTap for the ambiguous map-tap case, and
+    // is never in question at all for an explicit button press.
     deselectPin();
+    setShowPeople(false);
+    setShowChat(false);
+
+    if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
     // The draft marker appears — and the map stops accepting further clicks
     // (see `placing` below) — the instant a location is chosen, so the drop
     // animation plays immediately. The category picker itself is deliberately
@@ -396,6 +403,26 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     setShowComposer(false);
     setNotice("Pin placed — now give it a type!");
     dropTimeoutRef.current = setTimeout(() => setShowComposer(true), PIN_DROP_ANIMATION_MS);
+  }
+
+  /**
+   * The map's own tap handler — deliberately distinct from beginPin, because
+   * a tap ON THE MAP is ambiguous in a way an explicit "+" tap never is: it
+   * might mean "create a pin here," or it might just mean "make this open
+   * widget go away." Only once nothing is open does the tap resolve to the
+   * former; otherwise it's read as the latter, and no pin gets created —
+   * closing something and creating a pin were competing for the same
+   * gesture, and creating a pin was winning even when the tap only meant
+   * "make this go away."
+   */
+  function handleMapTap(at: Coordinates) {
+    if (selectedPin || showPeople || showChat) {
+      deselectPin();
+      setShowPeople(false);
+      setShowChat(false);
+      return;
+    }
+    beginPin(at);
   }
 
   /** Closing the composer for any reason — cancel, backdrop tap, or a completed submit. */
@@ -548,7 +575,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         flyToSignal={flyToSignal}
         celebrateId={celebrateId}
         onViewportChange={handleViewportChange}
-        onMapClick={beginPin}
+        onMapClick={handleMapTap}
         onPinClick={selectPin}
         selectedId={selectedPin?.id}
         myLocation={myLocation}
