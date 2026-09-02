@@ -26,8 +26,14 @@
 -- ----------------------------------------------------------------------------
 -- Balance column
 -- ----------------------------------------------------------------------------
+-- 500 is the starting grant for every account — existing rows are backfilled
+-- to it by this ADD COLUMN ... DEFAULT, and it becomes the default for every
+-- row inserted afterwards too. Chosen to be generous enough that a new user
+-- can post several pins (50 coins) before ever having to walk, so the coin
+-- requirement doesn't block early usage while the habit of earning them
+-- through walking is still forming.
 alter table public.profiles
-  add column coin_balance integer not null default 0 check (coin_balance >= 0);
+  add column coin_balance integer not null default 500 check (coin_balance >= 0);
 
 -- Same protection as `reputation`: readable like any other profile field
 -- (see `profiles_read`, migration 0004), writable only through the

@@ -371,10 +371,9 @@ function saveChatMessages(messages: DemoChatMessage[]): void {
   writeJSON(CHAT_KEY, messages);
 }
 
-// New accounts start with enough to post a couple of pins without having to
-// walk first — an empty-balance first run would make the feature look
-// broken rather than earned.
-const STARTING_COIN_BALANCE = 20;
+// Mirrors the 500-coin starting grant every profile gets from
+// `coin_balance`'s column default in migration 0016.
+const STARTING_COIN_BALANCE = 500;
 
 function getCoinBalance(userId: string): number {
   const balances = readJSON<Record<string, number>>(COINS_KEY, {});
