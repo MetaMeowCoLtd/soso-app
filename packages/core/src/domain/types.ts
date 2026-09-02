@@ -338,3 +338,44 @@ export interface NewZone {
   audience: PostAudience;
   memberIds?: string[];
 }
+
+/**
+ * One message in the shared chat.
+ *
+ * Global, not scoped to an area — a departure from the location-bound
+ * model everything else in this file follows. `mine` is computed
+ * server-side (matching PostDetail's own `mine`), so the client never has
+ * to compare `authorId` against its own session id to decide whether to
+ * show a delete affordance.
+ */
+export interface ChatMessage {
+  id: string;
+  body: string;
+  createdAt: string;
+  authorId: string;
+  authorHandle: string;
+  authorName: string;
+  mine: boolean;
+}
+
+export interface WireChatMessage {
+  id: string;
+  body: string;
+  created_at: string;
+  author_id: string;
+  author_handle: string;
+  author_name: string;
+  mine: boolean;
+}
+
+export function decodeChatMessage(w: WireChatMessage): ChatMessage {
+  return {
+    id: w.id,
+    body: w.body,
+    createdAt: w.created_at,
+    authorId: w.author_id,
+    authorHandle: w.author_handle,
+    authorName: w.author_name,
+    mine: w.mine,
+  };
+}

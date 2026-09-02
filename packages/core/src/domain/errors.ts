@@ -38,6 +38,8 @@ export const SOSO_ERROR_CODES = [
   'soso/post_not_found',
   'soso/use_resolve_post_instead',
   'soso/not_yours_or_already_gone',
+  'soso/empty_message',
+  'soso/message_too_long',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -106,5 +108,7 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/post_not_found': 'That post is no longer available.',
   'soso/use_resolve_post_instead': "That's your own post — remove it directly instead of flagging it.",
   'soso/not_yours_or_already_gone': "That post isn't yours, or it's already gone.",
+  'soso/empty_message': "Type something first.",
+  'soso/message_too_long': "That's too long — keep it under 500 characters.",
   'soso/unknown': 'Something went wrong. Try again.',
 };

@@ -17,6 +17,7 @@
 
 import type { AreaCellId, CellId } from '../domain/grid';
 import type {
+  ChatMessage,
   FriendTier,
   NewZone,
   Zone,
@@ -177,4 +178,23 @@ export interface SosoGateway {
 
   /** Fires when any follows row involving the caller changes. */
   subscribeFollowsChanged(onChange: () => void): () => void;
+
+  // --- Shared chat --------------------------------------------------------
+  // One global room, not scoped per area — see the migration's own comment
+  // on why this is a deliberate departure from the hyperlocal model
+  // everything else in this interface follows.
+
+  /** Sends a message and returns it (server-assigned id/timestamp/author fields, mine: true). */
+  sendChatMessage(body: string): Promise<ChatMessage>;
+
+  /** Most recent messages, oldest first. Pass a prior page's oldest `createdAt` to page further back. */
+  listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]>;
+
+  /** Removes your own message. No-op, not an error, if it's already gone. */
+  deleteChatMessage(messageId: string): Promise<void>;
+
+  reportChatMessage(messageId: string, reason: string): Promise<void>;
+
+  /** Fires when any chat_messages row changes — same signal-then-refetch contract as the other subscribe* methods. */
+  subscribeChatMessagesChanged(onChange: () => void): () => void;
 }

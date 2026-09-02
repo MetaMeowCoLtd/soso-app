@@ -67,3 +67,29 @@ export function BellIcon({ className, muted }: BellIconProps) {
     </svg>
   );
 }
+
+/**
+ * A speech bubble, following the exact same convention as PeopleIcon and
+ * BellIcon above: 20x20, stroke-only, currentColor, 1.8 stroke weight,
+ * rounded caps and joins. Deliberately not a filled/solid glyph — every
+ * other header icon here is stroke-based, and a solid chat bubble would be
+ * the one visually heavier element among them.
+ */
+export function ChatIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.5 6.6c0-1.66 1.34-3 3-3h9c1.66 0 3 1.34 3 3v5.3c0 1.66-1.34 3-3 3H8.4l-3.9 3.1v-3.1H5.5c-1.66 0-3-1.34-3-3V6.6Z" />
+    </svg>
+  );
+}

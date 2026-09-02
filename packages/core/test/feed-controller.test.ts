@@ -56,6 +56,17 @@ class FakeGateway implements SosoGateway {
   async deleteZone() {}
   async flagPostResolved() {}
   async resolvePost() {}
+  async sendChatMessage() {
+    return {} as never;
+  }
+  async listRecentChatMessages() {
+    return [];
+  }
+  async deleteChatMessage() {}
+  async reportChatMessage() {}
+  subscribeChatMessagesChanged() {
+    return () => {};
+  }
   async subscribeToPush() {}
   async unsubscribeFromPush() {}
   subscribePostsChanged() {

@@ -16,6 +16,7 @@ import {
   decodeFriend,
   decodePin,
   decodePostDetail,
+  decodeChatMessage,
   type CategoryConfig,
   type CellCount,
   type FeedDelta,
@@ -33,6 +34,8 @@ import {
   type Zone,
   type NewZone,
   type FriendTier,
+  type ChatMessage,
+  type WireChatMessage,
 } from '../domain/types';
 import type { FeedQuery, PushEndpoint, ReportReason, ResolutionReason, SosoGateway } from './gateway';
 
@@ -317,6 +320,45 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       const channel = client
         .channel(`follows-changed-${Math.random().toString(36).slice(2)}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'follows' }, () => onChange())
+        .subscribe();
+
+      return () => {
+        void client.removeChannel(channel);
+      };
+    },
+
+    async sendChatMessage(body: string): Promise<ChatMessage> {
+      const { data, error } = await client.rpc('send_chat_message', { p_body: body });
+      if (error) throw toSosoError(error);
+      return decodeChatMessage(data as WireChatMessage);
+    },
+
+    async listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]> {
+      const { data, error } = await client.rpc('list_recent_chat_messages', {
+        p_before: before ?? null,
+        p_limit: limit ?? null,
+      });
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WireChatMessage[]).map(decodeChatMessage);
+    },
+
+    async deleteChatMessage(messageId: string): Promise<void> {
+      const { error } = await client.rpc('delete_chat_message', { p_message_id: messageId });
+      if (error) throw toSosoError(error);
+    },
+
+    async reportChatMessage(messageId: string, reason: string): Promise<void> {
+      const { error } = await client.rpc('report_chat_message', {
+        p_message_id: messageId,
+        p_reason: reason,
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    subscribeChatMessagesChanged(onChange: () => void): () => void {
+      const channel = client
+        .channel(`chat-changed-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => onChange())
         .subscribe();
 
       return () => {

@@ -53,7 +53,7 @@ import {
   type PostDetail,
   type Zone,
 } from "soso-core";
-import type { FeedQuery, FollowResult, Friend, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
+import type { ChatMessage, FeedQuery, FollowResult, Friend, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
 
 // ---------------------------------------------------------------------------
 // Category configuration, hand-mirrored from supabase/seed.sql's enabled rows.
@@ -194,6 +194,7 @@ interface DemoVote {
 const POSTS_KEY = "soso-demo:posts:v1";
 const VOTES_KEY = "soso-demo:votes:v1";
 const ME_KEY = "soso-demo:me:v1";
+const CHAT_KEY = "soso-demo:chat:v1";
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -336,6 +337,21 @@ function loadVotes(): DemoVote[] {
 
 function saveVotes(votes: DemoVote[]): void {
   writeJSON(VOTES_KEY, votes);
+}
+
+interface DemoChatMessage {
+  id: string;
+  body: string;
+  createdAt: string;
+  authorId: string;
+}
+
+function loadChatMessages(): DemoChatMessage[] {
+  return readJSON<DemoChatMessage[]>(CHAT_KEY, []);
+}
+
+function saveChatMessages(messages: DemoChatMessage[]): void {
+  writeJSON(CHAT_KEY, messages);
 }
 
 // ---------------------------------------------------------------------------
@@ -637,6 +653,67 @@ export function createDemoGateway(): SosoGateway {
     },
 
     subscribeFollowsChanged(): () => void {
+      return () => {};
+    },
+
+    // Chat in demo mode is genuinely just talking to yourself: there is no
+    // other user to receive anything, so this is a local echo persisted to
+    // this browser's storage, not a stub that throws. It gives an honest
+    // sense of the UI without pretending to share anything. Rate limiting
+    // and reporting exist server-side for real accounts; neither applies
+    // when the only participant is you.
+    async sendChatMessage(body: string): Promise<ChatMessage> {
+      const trimmed = body.trim();
+      if (trimmed.length === 0) throw new SosoError("soso/empty_message");
+      if (trimmed.length > 500) throw new SosoError("soso/message_too_long");
+
+      const me = getMe();
+      const message: DemoChatMessage = {
+        id: crypto.randomUUID(),
+        body: trimmed,
+        createdAt: new Date().toISOString(),
+        authorId: me,
+      };
+      saveChatMessages([...loadChatMessages(), message]);
+
+      return {
+        id: message.id,
+        body: message.body,
+        createdAt: message.createdAt,
+        authorId: me,
+        authorHandle: "you",
+        authorName: "You",
+        mine: true,
+      };
+    },
+
+    async listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]> {
+      const me = getMe();
+      const cap = Math.min(Math.max(limit ?? 50, 1), 100);
+      let messages = loadChatMessages();
+      if (before) messages = messages.filter((m) => m.createdAt < before);
+      return messages
+        .slice(-cap)
+        .map((m) => ({
+          id: m.id,
+          body: m.body,
+          createdAt: m.createdAt,
+          authorId: m.authorId,
+          authorHandle: "you",
+          authorName: "You",
+          mine: m.authorId === me,
+        }));
+    },
+
+    async deleteChatMessage(messageId: string): Promise<void> {
+      saveChatMessages(loadChatMessages().filter((m) => m.id !== messageId));
+    },
+
+    async reportChatMessage(): Promise<void> {
+      // Nobody else's message ever appears in demo mode to report.
+    },
+
+    subscribeChatMessagesChanged(): () => void {
       return () => {};
     },
   };

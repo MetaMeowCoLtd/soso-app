@@ -7,7 +7,8 @@ import PinPreview from "@/src/web/PinPreview";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeoplePanel from "@/src/web/PeoplePanel";
-import { PeopleIcon, BellIcon } from "@/src/web/icons";
+import ChatPanel from "@/src/web/ChatPanel";
+import { PeopleIcon, BellIcon, ChatIcon } from "@/src/web/icons";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { usePresence } from "@/src/web/usePresence";
 import { lookOf } from "@/src/web/theme";
@@ -191,6 +192,12 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [pushBusy, setPushBusy] = useState(false);
 
   const [showPeople, setShowPeople] = useState(true);
+  // Starts minimized, unlike People: this is an opt-in extra, not something
+  // serving the map's own core "is this area alive" purpose the way
+  // presence does, and opening two panels by default on first load would
+  // work directly against the compactness this feature was specifically
+  // asked to keep.
+  const [showChat, setShowChat] = useState(false);
   // Presence tracks the map centre rather than the device's GPS: the area
   // count answers "is where I'm looking busy", and tying it to the viewport
   // means it works without a second location permission prompt.
@@ -538,6 +545,16 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             <BellIcon muted={!pushSubscribed} />
           </button>
         )}
+        <button
+          className={`chat-button ${showChat ? "active" : ""}`}
+          onClick={() => setShowChat((v) => !v)}
+          type="button"
+          aria-label="Chat"
+          aria-pressed={showChat}
+          title="Chat"
+        >
+          <ChatIcon />
+        </button>
       </header>
 
       {(statusLabel ?? transientNotice) && (
@@ -690,6 +707,12 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         demoMode={mode !== "supabase"}
         minimized={!showPeople}
         onMinimize={() => setShowPeople(false)}
+      />
+      <ChatPanel
+        gateway={gateway}
+        demoMode={mode !== "supabase"}
+        minimized={!showChat}
+        onMinimize={() => setShowChat(false)}
       />
     </main>
   );
