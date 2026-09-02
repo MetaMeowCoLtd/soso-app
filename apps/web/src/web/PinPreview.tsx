@@ -9,7 +9,6 @@ import {
   type Pin,
   type PostDetail,
   type ReportReason,
-  type ResolutionReason,
 } from "soso-core";
 import { lookOf } from "./theme";
 
@@ -21,19 +20,25 @@ import { lookOf } from "./theme";
  * Redesigned around one idea: not every action here is equally common or
  * equally weighty, and the layout should say so rather than presenting a
  * flat list of buttons. A vote is the lowest-stakes, most frequent action —
- * it's now two compact icon buttons that double as the count display,
- * always visible on the right of the metadata row, rather than a full-width
- * pair of pill buttons commanding the most visual space on the card. Flagging
- * relevance (or, for the author, removing the post) is the thing someone
- * opening a stale-looking pin is most likely here to do, so it now occupies
- * the prominent slot the vote buttons used to hold. Reporting — rarer, more
- * serious — stays a small, quiet link, unchanged.
+ * it's two compact icon buttons that double as the count display, always
+ * visible on the right of the metadata row, rather than a full-width pair
+ * of pill buttons commanding the most visual space on the card.
+ *
+ * As of `20260902000020_validity_voting.sql`, that vote is also the ONLY
+ * validity signal — there used to be a second, separate one here ("Is this
+ * still relevant? ✅ Resolved / 📅 Out of date", notifying the post's
+ * author and leaving removal up to them). That's gone: a strong enough run
+ * of 👎 now fades a pin's rendered strength (see SosoMap's use of
+ * `pinStrength`) and, past a threshold, expires the post outright — the
+ * same way the author's own "Remove this now" already does. Reporting —
+ * rarer, aimed at a moderator rather than at the post's own validity —
+ * stays a small, quiet link, unchanged.
  *
  * Corroboration is load-bearing, not decorative — the client never
  * pre-checks whether this is the viewer's own post before deciding what to
- * render; `mine` decides which set of actions shows, and the server enforces
- * the actual rule (`vote_post` rejects self-votes, `flag_post_resolved`
- * rejects self-flags) independent of what the client offers.
+ * render; `mine` decides which set of actions shows, and the server
+ * enforces the actual rule (`vote_post` rejects self-votes) independent of
+ * what the client offers.
  */
 
 interface PinPreviewProps {
@@ -44,7 +49,6 @@ interface PinPreviewProps {
   onClose: () => void;
   onVote: (postId: string, vote: 1 | -1) => Promise<void>;
   onReport: (postId: string, reason: ReportReason) => Promise<void>;
-  onFlagResolved: (postId: string, reason: ResolutionReason) => Promise<void>;
   onResolve: (postId: string) => Promise<void>;
 }
 
@@ -63,7 +67,6 @@ export default function PinPreview({
   onClose,
   onVote,
   onReport,
-  onFlagResolved,
   onResolve,
 }: PinPreviewProps) {
   const [voting, setVoting] = useState(false);
@@ -72,9 +75,6 @@ export default function PinPreview({
   const [reportOpen, setReportOpen] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reported, setReported] = useState(false);
-  const [resolutionFlagged, setResolutionFlagged] = useState(false);
-  const [flagging, setFlagging] = useState(false);
-  const [resolutionError, setResolutionError] = useState<string | null>(null);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -107,27 +107,6 @@ export default function PinPreview({
     } catch (err) {
       const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
       setReportError(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
-    }
-  }
-
-  async function flagResolved(reason: ResolutionReason) {
-    setFlagging(true);
-    setResolutionError(null);
-    try {
-      await onFlagResolved(pin.id, reason);
-      setResolutionFlagged(true);
-    } catch (err) {
-      // This is deliberately specific rather than a generic "try again":
-      // this button was reported not to work at all on mobile with zero
-      // visible feedback, which turned out to be because these two actions
-      // had no error handling — any failure was silently discarded by the
-      // `void` on their onClick handlers. Showing the real mapped message
-      // here is what will reveal the actual cause next time this happens,
-      // rather than continuing to guess at it.
-      const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
-      setResolutionError(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
-    } finally {
-      setFlagging(false);
     }
   }
 
@@ -177,16 +156,17 @@ export default function PinPreview({
               numbers AND the old full-width "Still here" / "Not true"
               pill buttons in one element. A vote is the lowest-stakes,
               most frequent action here; it shouldn't command more visual
-              weight than flagging relevance or reporting, both rarer and
-              more deliberate. */}
+              weight than reporting, which is rarer and more deliberate —
+              even though, as of validity voting, a vote can now do more
+              than it used to (see the module doc above). */}
           <span className="pin-preview-vote-buttons" role="group" aria-label="Vote">
             <button
               type="button"
               className={`pin-preview-vote-btn ${voted === 1 ? "active" : ""}`}
               disabled={voting || voted !== null || Boolean(detail?.mine)}
               onClick={() => void vote(1)}
-              aria-label="Still here"
-              title="Still here"
+              aria-label="Still valid"
+              title="Still valid"
             >
               👍 {detail?.confirmCount ?? 0}
             </button>
@@ -195,8 +175,8 @@ export default function PinPreview({
               className={`pin-preview-vote-btn pin-preview-vote-btn-down ${voted === -1 ? "active" : ""}`}
               disabled={voting || voted !== null || Boolean(detail?.mine)}
               onClick={() => void vote(-1)}
-              aria-label="Not true"
-              title="Not true"
+              aria-label="No longer valid"
+              title="No longer valid — enough of these will remove the pin"
             >
               👎 {detail?.disputeCount ?? 0}
             </button>
@@ -204,13 +184,12 @@ export default function PinPreview({
         </div>
         {voteNotice && <p className="detail-vote-notice">{voteNotice}</p>}
 
-        {/* The prominent slot — what the vote buttons used to occupy.
-            Whoever opens someone else's pin here is most likely doing so
-            either to glance at it or because something about it looks
-            stale; the author, meanwhile, has exactly one thing they'd come
-            here to do with their own post. Each gets that one thing,
-            immediately visible, rather than a menu of options. */}
-        {detail?.mine ? (
+        {/* The prominent slot the vote buttons used to share with a second,
+            now-removed signal. Only the author has a deliberate action to
+            take here — everyone else's validity signal is the vote buttons
+            above, which is the whole point of this migration: one signal,
+            not two competing for the same "is this still good" question. */}
+        {detail?.mine && (
           <div className="pin-preview-own">
             <p className="detail-own">You posted this.</p>
             {removed ? (
@@ -242,31 +221,6 @@ export default function PinPreview({
                 Remove this now
               </button>
             )}
-          </div>
-        ) : resolutionFlagged ? (
-          <p className="detail-own">Thanks — we&rsquo;ve let the person who posted this know.</p>
-        ) : (
-          <div className="pin-preview-primary">
-            <p className="pin-preview-primary-label">Is this still relevant?</p>
-            <div className="pin-preview-primary-actions">
-              <button
-                type="button"
-                className="pin-preview-primary-action"
-                disabled={flagging}
-                onClick={() => void flagResolved("resolved")}
-              >
-                ✅ Resolved
-              </button>
-              <button
-                type="button"
-                className="pin-preview-primary-action pin-preview-primary-action-muted"
-                disabled={flagging}
-                onClick={() => void flagResolved("out_of_date")}
-              >
-                📅 Out of date
-              </button>
-            </div>
-            {resolutionError && <p className="detail-vote-notice">{resolutionError}</p>}
           </div>
         )}
 

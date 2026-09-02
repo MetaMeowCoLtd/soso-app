@@ -33,6 +33,13 @@ import type {
   WalkResult,
 } from '../domain/types';
 
+/**
+ * Distinct from a resolution flow that used to exist (`ResolutionReason`,
+ * removed alongside `flagPostResolved` — see `votePost`'s doc comment): a
+ * report is a request for a MODERATOR to review something, aimed at
+ * whoever eventually handles `moderation_reports`, not at the post's author
+ * and not something that affects the post's own visibility on its own.
+ */
 export type ReportReason =
   | 'false_information'
   | 'harassment'
@@ -40,16 +47,6 @@ export type ReportReason =
   | 'spam'
   | 'illegal'
   | 'other';
-
-/**
- * Distinct from ReportReason above: a report is a request for a moderator to
- * review something, aimed at whoever eventually handles moderation_reports.
- * A resolution reason is aimed at the post's OWN AUTHOR, asking whether
- * something they posted is still current. Different recipient, different
- * workflow, kept as a separate type even though both are "reasons a viewer
- * gave for flagging a post."
- */
-export type ResolutionReason = 'resolved' | 'out_of_date';
 
 export interface FeedQuery {
   cells: readonly CellId[];
@@ -79,18 +76,20 @@ export interface SosoGateway {
 
   createPost(input: NewPost): Promise<Pin>;
 
-  /** +1 corroborate, -1 dispute. */
+  /**
+   * +1 corroborate ("still valid"), -1 dispute ("no longer valid").
+   *
+   * As of `20260902000020_validity_voting.sql`, this is the ONLY validity
+   * signal — there used to be a second, separate one (`flagPostResolved`,
+   * removed) that notified the post's author and left removal up to them.
+   * Now a vote does two things itself: it moves `Pin.net`, which
+   * `pinStrength` (packages/core/src/domain/validity.ts) turns into how
+   * strongly the pin's marker renders, and enough net-negative votes expire
+   * the post outright — see `soso.tg_votes_recount` in that migration.
+   */
   votePost(postId: string, vote: 1 | -1): Promise<void>;
 
   reportPost(postId: string, reason: ReportReason, detail?: string): Promise<void>;
-
-  /**
-   * Flags someone ELSE's post as resolved or out of date, notifying its
-   * author. Never removes the post itself — the author decides that,
-   * via resolvePost below. Rejected server-side if called on your own post;
-   * use resolvePost directly for that instead.
-   */
-  flagPostResolved(postId: string, reason: ResolutionReason): Promise<void>;
 
   /**
    * Removes your OWN post early, regardless of whether anyone has flagged

@@ -57,7 +57,7 @@ import {
   type WalkResult,
   type Zone,
 } from "soso-core";
-import type { ChatMessage, FeedQuery, FollowResult, Friend, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
+import type { ChatMessage, FeedQuery, FollowResult, Friend, ReportReason, SosoGateway } from "soso-core";
 
 // ---------------------------------------------------------------------------
 // Category configuration, hand-mirrored from supabase/seed.sql's enabled rows.
@@ -592,21 +592,11 @@ export function createDemoGateway(): SosoGateway {
       // gets the same "reported" confirmation either way.
     },
 
-    async flagPostResolved(_postId: string, _reason: ResolutionReason): Promise<void> {
-      // In demo mode every post belongs to the one local user — there is no
-      // "someone else's post" to flag at all, since getMe() is the only
-      // author that ever exists here. That is exactly the case the real
-      // backend rejects (soso/use_resolve_post_instead), so mirroring that
-      // rejection is more honest than silently accepting a flag that could
-      // never have a different author to notify in the first place.
-      throw new SosoError("soso/use_resolve_post_instead");
-    },
-
     async resolvePost(postId: string): Promise<void> {
-      // Unlike flagPostResolved above, this one genuinely works in demo
-      // mode: it needs no notification infrastructure at all, just marking
-      // your own post expired right now instead of later — something local
-      // storage can do exactly as the real resolve_post RPC does.
+      // This genuinely works in demo mode: it needs no notification
+      // infrastructure at all, just marking your own post expired right now
+      // instead of later — something local storage can do exactly as the
+      // real resolve_post RPC does.
       const posts = loadPosts();
       const post = posts.find((p) => p.id === postId);
       const now = nowSeconds();

@@ -5,7 +5,7 @@ import L from "leaflet";
 import { setWorkerUrl } from "maplibre-gl";
 import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
 import { Circle, MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
-import { cellCentre, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
+import { cellCentre, pinStrength, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
 import { lookOf } from "./theme";
 import { loadCuteMapStyle } from "./mapStyle";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, leafletBoundsToBounds, type Coordinates } from "./region";
@@ -571,11 +571,28 @@ function pinFreshness(pin: Pin, nowSeconds: number): number {
 /**
  * Builds a pin's `L.divIcon`. Deliberately takes nothing that changes on a
  * clock tick or a viewport refetch — only things that change when the pin
- * itself meaningfully changes (its category, privacy, or celebrate state).
- * Callers must cache the result (see `getPinIcon`) rather than calling this
- * fresh on every render, or the DOM-node-swap problem above comes right back.
+ * itself meaningfully changes (its category, privacy, celebrate state, or
+ * validity strength). Callers must cache the result (see `getPinIcon`)
+ * rather than calling this fresh on every render, or the DOM-node-swap
+ * problem above comes right back.
+ *
+ * `strength` is `pinStrength(pin.net)` (see `packages/core/src/domain/
+ * validity.ts`), passed in already computed rather than derived from `pin`
+ * here — `getPinIcon` below needs that same value for its cache key, and
+ * computing it once and sharing it guarantees the key and the rendered
+ * result can never disagree with each other.
+ *
+ * This is independent of, and composes with, `pinFreshness` above: that one
+ * is Leaflet's own marker-level `opacity`, mutated in place via
+ * `setOpacity()` so it never touches this icon's DOM node; this one is a CSS
+ * custom property baked into the icon's own `style`, read by `.soso-pin`'s
+ * own `opacity` and `filter:saturate()`. Nested CSS opacities multiply, so a
+ * pin that is both old (low freshness) and heavily disputed (low strength)
+ * ends up visibly weaker than either factor alone — which is the point: two
+ * independent reasons a pin might be on its way out should compound, not
+ * silently override one another.
  */
-function pinIcon(pin: Pin, celebrate: boolean) {
+function pinIcon(pin: Pin, celebrate: boolean, strength: number) {
   const look = lookOf(pin.category);
 
   // Scatter the idle bob so pins do not all rise and fall in lockstep.
@@ -602,6 +619,7 @@ function pinIcon(pin: Pin, celebrate: boolean) {
     `--bob-duration:${bobDuration.toFixed(2)}s`,
     `--bob-delay:${bobDelay.toFixed(2)}s`,
     `--bob-rise:${bobRise.toFixed(1)}px`,
+    `--pin-strength:${strength.toFixed(2)}`,
   ].join(";");
 
   return L.divIcon({
@@ -713,17 +731,25 @@ export default function SosoMap({
   // produce a visually different icon. A viewport refetch (moveend) or a
   // `nowSeconds` tick hands us a brand-new `feed.pins` array — often full of
   // brand-new `Pin` objects for the exact same underlying reports — but as
-  // long as a given pin's id/category/privacy/celebrate state are unchanged,
-  // this returns the SAME `L.divIcon` instance every time. Same object
-  // reference means React-Leaflet's `<Marker icon={...}>` never calls
+  // long as a given pin's id/category/privacy/celebrate/strength state are
+  // unchanged, this returns the SAME `L.divIcon` instance every time. Same
+  // object reference means React-Leaflet's `<Marker icon={...}>` never calls
   // `marker.setIcon()`, so the DOM node the bob animation runs on is never
   // swapped out and the animation just keeps playing through a pan.
+  //
+  // The strength component of the key is `pinStrength(pin.net)` itself, not
+  // the raw `net` — deriving the key from the rendered value rather than the
+  // underlying score means two different net scores that clamp to the same
+  // strength (e.g. net=10 and net=100, both already at MAX_STRENGTH) share
+  // one cache entry instead of needlessly rebuilding for a change that
+  // would not actually look any different.
   const iconCache = useRef(new Map<string, L.DivIcon>());
   const getPinIcon = useCallback((pin: Pin, celebrate: boolean) => {
-    const key = `${pin.id}|${pin.category}|${pin.audience ? 1 : 0}|${celebrate ? 1 : 0}`;
+    const strength = pinStrength(pin.net);
+    const key = `${pin.id}|${pin.category}|${pin.audience ? 1 : 0}|${celebrate ? 1 : 0}|${strength.toFixed(2)}`;
     const cached = iconCache.current.get(key);
     if (cached) return cached;
-    const icon = pinIcon(pin, celebrate);
+    const icon = pinIcon(pin, celebrate, strength);
     iconCache.current.set(key, icon);
     return icon;
   }, []);

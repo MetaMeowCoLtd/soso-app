@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NewPost, Pin, PostDetail, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
+import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
 import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
 import ReportForm from "@/src/web/ReportForm";
@@ -538,10 +538,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     await gateway.reportPost(postId, reason);
   }
 
-  async function flagResolved(postId: string, reason: ResolutionReason) {
-    await gateway.flagPostResolved(postId, reason);
-  }
-
   async function resolve(postId: string) {
     await gateway.resolvePost(postId);
     // The modal shows its own "removed" confirmation and stays open until
@@ -717,7 +713,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             onClose={deselectPin}
             onVote={vote}
             onReport={report}
-            onFlagResolved={flagResolved}
             onResolve={resolve}
           />
         ) : (

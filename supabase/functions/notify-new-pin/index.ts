@@ -1,27 +1,23 @@
 // Edge Function: notify-new-pin
 //
-// Two Database Webhooks now call this, distinguished by the `table` field
-// every webhook payload carries:
-//
-//   posts INSERT             -> looks up who's subscribed to the post's cell
-//                                and pushes to each of them, then separately
-//                                (and independently — a failure here must
-//                                never affect the other) reverse-geocodes
-//                                the post's location into posts.address.
-//   resolution_flags INSERT  -> a single-recipient push to the FLAGGED
-//                                POST'S AUTHOR, asking whether they want to
-//                                remove it. Only sent once per post (the
-//                                first flag), not once per flag, so five
-//                                people flagging the same stale post does
-//                                not mean five separate pushes to its author.
-//
-// Kept as one function rather than two: both are "an Edge Function reacts
-// to a table INSERT by sending a push," sharing every piece of
-// infrastructure (VAPID keys, the shared secret, stale-endpoint cleanup) —
-// splitting them would mean duplicating all of that for no real benefit.
+// One Database Webhook calls this, for INSERTs on public.posts: looks up who's
+// subscribed to the post's cell and pushes to each of them, then separately
+// (and independently — a failure here must never affect the other)
+// reverse-geocodes the post's location into posts.address.
 //
 // It also accepts the older direct-trigger payload for posts so an existing
 // deployment can be migrated without breaking delivery mid-release.
+//
+// Used to also handle a second source — INSERTs on resolution_flags, a
+// single-recipient push to a flagged post's author asking whether they
+// wanted to remove it. That table and its notify path were removed in
+// migration 0020 (see that migration for why: votes now fade a post's color
+// and eventually expire it outright, rather than a stranger's flag prompting
+// the author to decide). If you're looking for handleResolutionFlag or
+// parseResolutionFlagPayload, they no longer exist — this function only
+// reacts to posts INSERTs now, and only needs the one Database Webhook set
+// up in the README's step 3, not the second one an older version of this
+// comment described.
 //
 // UNVERIFIED — READ THIS FIRST
 // -----------------------------
@@ -57,9 +53,6 @@
 //   2. supabase functions deploy notify-new-pin --no-verify-jwt
 //   3. Create a Database Webhook for INSERTs on public.posts which invokes
 //      this function and has "Add auth header with service key" enabled.
-//   4. Create a SECOND Database Webhook, same function, same auth setting,
-//      this time for INSERTs on public.resolution_flags.
-//      The README contains the complete, UI-specific walkthrough for both.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3";
@@ -86,42 +79,7 @@ interface DatabaseWebhookPayload {
     category_key?: unknown;
     author_id?: unknown;
     status?: unknown;
-    post_id?: unknown;
-    flagged_by?: unknown;
-    reason?: unknown;
   };
-}
-
-interface ResolutionFlagPayload {
-  flag_id: string;
-  post_id: string;
-  flagged_by: string;
-  reason: string;
-}
-
-/**
- * A resolution_flags INSERT, distinguished from a posts INSERT by the
- * webhook's own `table` field rather than by guessing from which fields
- * happen to be present — the two payload shapes share no fields at all
- * (post_id/flagged_by/reason vs cell_id/category_key/author_id), but
- * relying on that overlap-free shape to distinguish them would break the
- * moment either table's columns changed.
- */
-function parseResolutionFlagPayload(value: unknown): ResolutionFlagPayload | null {
-  if (!isRecord(value) || value.table !== "resolution_flags" || value.type !== "INSERT") return null;
-  if (!isRecord(value.record)) return null;
-
-  const { id, post_id, flagged_by, reason } = value.record;
-  if (
-    typeof id !== "string" ||
-    typeof post_id !== "string" ||
-    typeof flagged_by !== "string" ||
-    typeof reason !== "string"
-  ) {
-    return null;
-  }
-
-  return { flag_id: id, post_id, flagged_by, reason };
 }
 
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
@@ -238,9 +196,7 @@ async function geocodePostAddress(
 
 /**
  * Sends one push payload to every given endpoint, cleaning up any the push
- * service reports as permanently gone (404/410). Shared by both the
- * cell-fanout path (many recipients) and the resolution-flag path (one
- * recipient) so this cleanup logic exists in exactly one place.
+ * service reports as permanently gone (404/410).
  */
 async function sendPushToEndpoints(
   supabase: ReturnType<typeof createClient>,
@@ -276,82 +232,6 @@ async function sendPushToEndpoints(
   return { sent, stale: staleEndpoints.length };
 }
 
-/**
- * A single-recipient push to a post's author, prompted by someone else
- * flagging it as resolved or out of date. Deliberately not routed through
- * cell_subscriptions or can_see_post_as at all: the recipient is the post's
- * own author, who by definition can already see their own post, and this is
- * a direct notification to one specific known person, not an area fan-out.
- *
- * Sends at most once per post, on the FIRST flag against it — checked by
- * counting existing resolution_flags rows for that post rather than, say, a
- * boolean column, so this needs no schema beyond the table already required
- * to record flags at all.
- */
-async function handleResolutionFlag(
-  supabase: ReturnType<typeof createClient>,
-  flag: ResolutionFlagPayload,
-): Promise<Response> {
-  const { count, error: countError } = await supabase
-    .from("resolution_flags")
-    .select("id", { count: "exact", head: true })
-    .eq("post_id", flag.post_id);
-
-  if (countError) {
-    console.error("[notify-new-pin] resolution_flags count failed:", countError);
-    return new Response("Internal error", { status: 500 });
-  }
-  if ((count ?? 0) > 1) {
-    return new Response(JSON.stringify({ sent: 0, reason: "not the first flag on this post" }), { status: 200 });
-  }
-
-  const { data: post, error: postError } = await supabase
-    .from("posts")
-    .select("author_id, category_key")
-    .eq("id", flag.post_id)
-    .maybeSingle();
-
-  if (postError) {
-    console.error("[notify-new-pin] post lookup failed:", postError);
-    return new Response("Internal error", { status: 500 });
-  }
-  if (!post || post.author_id === flag.flagged_by) {
-    // Self-flagging is already rejected by flag_post_resolved at the
-    // database level; this is defense in depth, not the primary guard.
-    return new Response(JSON.stringify({ sent: 0, reason: "no eligible recipient" }), { status: 200 });
-  }
-
-  const { data: endpoints, error: endpointsError } = await supabase
-    .from("push_endpoints")
-    .select("endpoint, p256dh, auth")
-    .eq("user_id", post.author_id);
-
-  if (endpointsError) {
-    console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
-    return new Response("Internal error", { status: 500 });
-  }
-  if (!endpoints || endpoints.length === 0) {
-    return new Response(JSON.stringify({ sent: 0, reason: "author has no push endpoints" }), { status: 200 });
-  }
-
-  const { data: category } = await supabase
-    .from("post_categories")
-    .select("label_en")
-    .eq("key", post.category_key)
-    .maybeSingle();
-
-  const reasonText = flag.reason === "out_of_date" ? "out of date" : "resolved";
-  const notificationBody = JSON.stringify({
-    title: "Soso",
-    body: `Someone marked your ${category?.label_en ?? post.category_key} report as ${reasonText}. Tap to review.`,
-    postId: flag.post_id,
-  });
-
-  const result = await sendPushToEndpoints(supabase, endpoints, notificationBody);
-  console.log("[notify-new-pin] resolution flag notified author", { postId: flag.post_id, ...result });
-  return new Response(JSON.stringify(result), { status: 200 });
-}
-
 function isAuthorized(req: Request): boolean {
   const triggerSecret = req.headers.get("x-push-secret");
   const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -383,19 +263,6 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const vapidConfigured = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
-
-  // The VAPID check used to gate the entire function before the payload was
-  // even parsed, which meant geocoding never ran at all if push simply
-  // hadn't been configured yet — the two are supposed to be independent
-  // side effects of the same event, not one gated behind the other. Now
-  // checked individually, right before each path actually needs to send.
-  const resolutionFlag = parseResolutionFlagPayload(rawPayload);
-  if (resolutionFlag) {
-    if (!vapidConfigured) {
-      return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
-    }
-    return await handleResolutionFlag(supabase, resolutionFlag);
-  }
 
   const payload = parsePostPayload(rawPayload);
   if (!payload) {
