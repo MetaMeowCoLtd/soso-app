@@ -89,8 +89,8 @@ export interface SosoGateway {
    * signal — there used to be a second, separate one (`flagPostResolved`,
    * removed) that notified the post's author and left removal up to them.
    * Now a vote does two things itself: it moves `Pin.net`, which
-   * `pinStrength` (packages/core/src/domain/validity.ts) turns into how
-   * strongly the pin's marker renders, and enough net-negative votes expire
+   * `pinOpacity` / `pinSaturation` (packages/core/src/domain/validity.ts)
+   * turn into how the pin's marker renders, and enough net-negative votes expire
    * the post outright — see `soso.tg_votes_recount` in that migration.
    */
   votePost(postId: string, vote: 1 | -1): Promise<void>;

@@ -600,11 +600,12 @@ does two things a vote never used to:
 **It drives how strongly a pin renders.** `net` (`confirm_count -
 dispute_count`) was already computed by `soso.tg_votes_recount` and
 already sent on every pin as `Pin.net` — nothing rendered it before this.
-`pinStrength(net)` (`packages/core/src/domain/validity.ts`) maps that
-score to an opacity-and-saturation value the map bakes into each pin
-marker's own CSS (`--pin-strength`), so a heavily-disputed pin visibly
-fades and desaturates rather than sitting at full strength until the
-moment it disappears.
+`pinOpacity(net)` and `pinSaturation(net)` (`packages/core/src/domain/validity.ts`)
+map that score onto two CSS custom properties (`--pin-opacity`,
+`--pin-saturate`) the map bakes into each pin marker. An unvoted pin
+(`net = 0`) is fully opaque at the category's true colour; upvotes raise
+saturation; downvotes drain saturation first, then fade opacity, rather
+than sitting at full strength until the moment the post disappears.
 
 **Independent of, and composed with, the map's existing freshness fade.**
 Pins already faded with age via Leaflet's own marker-level `opacity`
@@ -625,11 +626,11 @@ have a case for.
 ### Limitations
 
 - **The exact curve is a guess at feel, not validated against real usage.**
-  `pinStrength`'s two thresholds (`DELETE_NET_THRESHOLD = -3`,
-  `MAX_STRENGTH_NET = 6`) and its floor (`MIN_STRENGTH = 0.35`) were chosen
-  to mirror the previous dispute-based auto-hide threshold conceptually,
-  not measured against how it actually feels with real votes at real
-  volume.
+  The vote-to-look curve (`DELETE_NET_THRESHOLD = -3`,
+  `DESATURATE_NET = -2`, `MAX_STRENGTH_NET = 6`, `MIN_OPACITY = 0.35`,
+  `MAX_SATURATION = 1.8`) was chosen to mirror the previous dispute-based
+  auto-hide threshold conceptually, not measured against how it actually
+  feels with real votes at real volume.
 - **No automated sync between the TypeScript constant and its SQL
   counterpart.** `DELETE_NET_THRESHOLD` in `validity.ts` must be hand-kept
   equal to `-soso.dispute_threshold()`; nothing enforces this, and nothing

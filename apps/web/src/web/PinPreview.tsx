@@ -28,8 +28,8 @@ import { lookOf } from "./theme";
  * validity signal — there used to be a second, separate one here ("Is this
  * still relevant? ✅ Resolved / 📅 Out of date", notifying the post's
  * author and leaving removal up to them). That's gone: a strong enough run
- * of 👎 now fades a pin's rendered strength (see SosoMap's use of
- * `pinStrength`) and, past a threshold, expires the post outright — the
+ * of 👎 now drains a pin's colour and then fades it (see SosoMap's use of
+ * `pinOpacity` / `pinSaturation`) and, past a threshold, expires the post outright — the
  * same way the author's own "Remove this now" already does. Reporting —
  * rarer, aimed at a moderator rather than at the post's own validity —
  * stays a small, quiet link, unchanged.
