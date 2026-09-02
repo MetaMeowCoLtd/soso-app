@@ -91,7 +91,36 @@ insert into public.post_categories (
  interval '6 hours', interval '12 hours',
  250, true, 300,
  false, 0, false,
- 10, 2, false, 80);
+ 10, 2, false, 80),
+
+-- --------------------------------------------------------------------------
+-- Drawing boards. SHIPPED DISABLED.
+-- --------------------------------------------------------------------------
+-- Schema-only at this point (migration 0018): boards/board_tiles, the
+-- optimistic-concurrency flush RPC, and R2 tile signing exist and can be
+-- exercised directly, but no gateway, canvas UI, or live Broadcast layer
+-- calls any of it yet. Flip is_enabled once the rest of the plan in
+-- DRAWING_BOARDS_PLAN.md lands -- deliberately last in that plan's build
+-- order, same as every other category shipped disabled here: the tooling to
+-- act on a bad board (moderation_reports support, the locked flag's UI) does
+-- not exist until then.
+--
+-- TTL matches construction: long-lived by default, because a board is meant
+-- to be a standing, revisitable canvas rather than a single ephemeral report.
+-- Unlike every other category, that default expiry is not really where a
+-- board's life ends -- flush_board_tile bumps expires_at forward on every
+-- flush, so an actively-drawn board effectively never expires and only a
+-- genuinely abandoned one ages out on the schedule below.
+--
+-- allows_media is false because a board's content lives in board_tiles/R2,
+-- not post_media -- the two are deliberately kept from overlapping so a
+-- board's drawing surface and a normal photo attachment are never confused.
+-- --------------------------------------------------------------------------
+('board', 'お絵かきボード', 'Board',
+ interval '7 days', interval '180 days',
+ 0, false, 500,
+ true, 300, false,
+ 0, 5, false, 90);
 
 
 insert into public.post_subtypes (category_key, key, label_ja, label_en, sort_order) values

@@ -52,6 +52,7 @@ Supabase.
 | Push notifications | Implemented, not verified end-to-end. See [Push notifications](#push-notifications). |
 | Early resolution (community-flagged, author-confirmed removal) | Implemented, not verified end-to-end. See [Early resolution](#early-resolution). |
 | Native iOS/Android application | Not present in this repository. See [Platforms](#platforms). |
+| Drawing boards (shared canvas per pin) | Schema and tile-signing scaffolding only, shipped disabled. See [Drawing boards](#drawing-boards). |
 
 ## Platforms
 
@@ -710,13 +711,123 @@ stay in sync, as with `CELL_ZOOM`.
 - **Demo mode reports zero, honestly.** With no backend there are no other
   users, so the panel says so rather than inventing plausible activity.
 
+## Drawing boards
+
+A `board` is a post category like any other — it gets a pin, an audience,
+and an expiry — except tapping it is meant to open a dedicated infinite
+canvas instead of a detail sheet. See `DRAWING_BOARDS_PLAN.md` for the full
+design (the vector-in-transit / raster-at-rest split, the concurrency model,
+access control, and the suggested build order).
+
+**Status: schema, tile index, and R2 tile signing only (step 1 of that
+plan's build order).** Nothing else — the gateway, the canvas UI, the live
+Broadcast layer, and moderation tooling — is wired up. `board` ships with
+`is_enabled = false` in `seed.sql` for exactly that reason: the schema below
+can be exercised directly against the database or the Edge Function, but
+nothing in the app itself can create or open a board yet.
+
+Verified by executing the full migration chain against a real PostgreSQL 16 +
+PostGIS instance (not just checked for syntax), then exercising every branch
+by hand: creating a board post via `create_post` with zero special-casing,
+confirming the `boards` row is created automatically by trigger, flushing a
+tile, flushing it again with a stale version (rejected as
+`soso/board_tile_conflict`) and then with the correct version (accepted,
+bounding box unchanged on a re-flush of an existing coordinate), confirming
+the TTL bump on `posts.expires_at`, confirming a stranger is denied by RLS
+once the post is set to `friends` audience, confirming `flush_board_tile`
+itself denies the same stranger even though it is `SECURITY DEFINER` and
+bypasses their RLS view, and confirming a locked board rejects a flush even
+from its own author. The `board-tile-urls` Edge Function has the same
+verification gap `notify-new-pin` does: nothing in this sandbox can deploy an
+Edge Function or perform a real signed request against R2, so that half is
+confirmed for internal consistency only. See its own header comment for
+specifics.
+
+Testing this also surfaced a real, pre-existing bug in `soso.fail`,
+unrelated to boards: the single-argument form (used by most call sites
+across the whole app, not just this feature) raised `RAISE statement option
+cannot be null` instead of the intended error, because PL/pgSQL does not
+allow a `RAISE ... USING` option to be set to `NULL`. This was found
+independently while writing `flush_board_tile`'s own no-hint calls and
+would have hit the same bug immediately; by the time this feature landed,
+it had already been fixed upstream in migration 0017 (`fix_soso_fail_null_hint`),
+so this feature's migration (0018) relies on that fix rather than
+duplicating it.
+
+### Components
+
+- `boards` / `board_tiles`: the schema. A board is keyed 1:1 to its post row;
+  `board_tiles` is an index into R2 — `object_key`, not pixel data — with a
+  `version` column used both as an optimistic-concurrency guard and, baked
+  into the object key by convention, to make every tile URL immutable and
+  therefore cacheable forever.
+- `soso.tg_posts_create_board`: fires on every post insert and creates the
+  matching `boards` row when `category_key = 'board'`. This is what lets
+  `create_post` stay completely generic — it has no idea boards exist.
+- `flush_board_tile`: the confirm-and-upsert RPC a client calls after it has
+  already PUT a rasterised tile to R2. A single atomic
+  `INSERT ... ON CONFLICT DO UPDATE ... WHERE board_tiles.version = ...`
+  statement decides same-tile races: the loser gets
+  `soso/board_tile_conflict` and is expected to refetch, recomposite its
+  unflushed strokes on the new base, and retry.
+- `supabase/functions/board-tile-urls/`: mints short-lived presigned R2 GET
+  (read) or PUT (write) URLs after checking `can_see_post_as` for the
+  caller — the same audience predicate every other read path in the app
+  uses. This is the piece that has no precedent elsewhere in the codebase;
+  `post_media` stores an `object_key` too but nothing signs a URL for it.
+
+### Setup
+
+None of the following occurs automatically from a `git push`.
+
+1. **A Cloudflare R2 bucket and API token**, scoped to that bucket.
+2. **Secrets:**
+   ```
+   supabase secrets set R2_ACCOUNT_ID=<cloudflare account id>
+   supabase secrets set R2_ACCESS_KEY_ID=<R2 token access key>
+   supabase secrets set R2_SECRET_ACCESS_KEY=<R2 token secret>
+   supabase secrets set R2_BUCKET=<bucket name>
+   ```
+3. **Deploy the function, verifying the JWT (the default — do not pass
+   `--no-verify-jwt`, unlike `notify-new-pin`):**
+   ```
+   supabase functions deploy board-tile-urls
+   ```
+4. **Flip the category on** once the rest of the plan's build order is
+   complete: `update post_categories set is_enabled = true where key =
+   'board';`
+
+### Limitations
+
+- **Not usable yet.** This is schema and one Edge Function; there is no
+  gateway method, no canvas UI, and no way to create or view a board from
+  the app.
+- **The Edge Function is unverified end-to-end**, for the same reason
+  `notify-new-pin` is — see the Status paragraph above.
+- **No live drawing layer yet.** The plan's Broadcast-based ephemeral layer
+  (what makes drawing feel instant for the person drawing and live for
+  everyone else watching) is a later step, not part of this one.
+- **No moderation tooling yet.** `boards.locked` exists and is enforced by
+  `flush_board_tile`, but nothing sets it — `moderation_reports` does not
+  yet accept a board as a target.
+
 ## Known limitations
 
-- **The SQL schema has not been executed against a live Postgres
-  instance.** Every migration and `seed.sql` is validated for syntax using
-  a Postgres parser during development; this is the extent of pre-deployment
-  verification. Running `npm run db:reset` against a real project is the
-  first execution of this schema.
+- **The SQL schema has been executed against a real PostgreSQL 16 + PostGIS
+  instance, but not against actual Supabase infrastructure.** As of the
+  drawing-boards migration (0018), every migration and `seed.sql` was run
+  end to end against a real local Postgres — not just checked for syntax —
+  with `pg_net`, `auth.users`, the `anon`/`authenticated`/`service_role`
+  roles, and the `supabase_realtime` publication stubbed in place of the
+  real Supabase platform, since none of that is available outside it. This
+  caught one previously-undetected bug (`soso.fail`'s single-argument form;
+  see [Drawing boards](#drawing-boards)) that a syntax check alone could not
+  have found, since the statement is syntactically valid and only fails at
+  runtime when `hint` evaluates to `NULL`. What remains unverified is
+  everything specific to the real platform: actual `pg_net` HTTP delivery,
+  Vault-backed secrets, and Realtime's actual filtering behavior. Running
+  `npm run db:reset` against a real Supabase project is still the first time
+  those specifically are exercised.
 - **Anonymous sign-in is a development convenience, not a production
   authentication model.** Creating an anonymous Supabase account has no
   cost, so the per-user rate limit and reputation floor enforced by
