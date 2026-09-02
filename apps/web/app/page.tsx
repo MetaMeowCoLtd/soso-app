@@ -645,7 +645,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       </header>
 
       {viewingBoard && selectedPin && (
-        <BoardCanvas pin={selectedPin} gateway={gateway} onClose={deselectPin} />
+        <BoardCanvas pin={selectedPin} title={selectedDetail?.body} gateway={gateway} onClose={deselectPin} />
       )}
 
       {(statusLabel ?? transientNotice) && (

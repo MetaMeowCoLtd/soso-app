@@ -533,3 +533,46 @@ export interface WireFlushedBoardTile {
 export function decodeFlushedBoardTile(w: WireFlushedBoardTile): FlushedBoardTile {
   return { tx: w.tx, ty: w.ty, version: w.version, objectKey: w.objectKey };
 }
+
+/**
+ * A short batch of recently-drawn points, broadcast over a board's live
+ * channel — never written to Postgres, per the plan's own "vector in
+ * transit, raster at rest" split. This is the wire payload for exactly
+ * one `channel.send()`/`channel.on('broadcast', ...)` round trip, not a
+ * persisted record of anything.
+ */
+export interface BoardStrokePoint {
+  x: number;
+  y: number;
+}
+
+export interface BoardStrokeBatch {
+  color: string;
+  size: number;
+  points: BoardStrokePoint[];
+}
+
+/**
+ * Runtime validation for a broadcast payload, not a decode from a known-good
+ * wire shape the way `decodeXxx` elsewhere in this file are — a Broadcast
+ * message is arbitrary JSON from another client, not a value this app's own
+ * server produced and can trust the shape of. Returns null for anything
+ * that doesn't match rather than throwing, so one malformed message from a
+ * misbehaving client can't take down a receiver's whole session.
+ */
+export function parseBoardStrokeBatch(value: unknown): BoardStrokeBatch | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.color !== 'string' || typeof v.size !== 'number' || !Number.isFinite(v.size)) return null;
+  if (!Array.isArray(v.points) || v.points.length === 0) return null;
+  const points: BoardStrokePoint[] = [];
+  for (const p of v.points) {
+    if (typeof p !== 'object' || p === null) return null;
+    const point = p as Record<string, unknown>;
+    if (typeof point.x !== 'number' || typeof point.y !== 'number' || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      return null;
+    }
+    points.push({ x: point.x, y: point.y });
+  }
+  return { color: v.color, size: v.size, points };
+}

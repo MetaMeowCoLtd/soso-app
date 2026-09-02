@@ -6,7 +6,7 @@
  * into `SosoError`.
  */
 
-import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js';
+import { FunctionsHttpError, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 
 import { MAX_CELLS_PER_QUERY, type AreaCellId, type CellId } from '../domain/grid';
 import { SosoError, toSosoError } from '../domain/errors';
@@ -44,7 +44,9 @@ import {
   decodeBoard,
   decodeBoardTileMeta,
   decodeFlushedBoardTile,
+  parseBoardStrokeBatch,
   type Board,
+  type BoardStrokeBatch,
   type WireBoard,
   type BoardTileMeta,
   type WireBoardTileMeta,
@@ -97,6 +99,34 @@ async function toEdgeFunctionError(error: unknown): Promise<SosoError> {
   }
   return toSosoError(error);
 }
+
+/**
+ * A board's live channel, shared between `subscribeBoardStrokes` and
+ * `publishBoardStroke` rather than the fresh-channel-per-call pattern
+ * `subscribePostsChanged` and every other `subscribe*` method here use —
+ * those are typically called once per component mount, but
+ * `publishBoardStroke` runs on a short throttle timer for the whole
+ * duration someone is drawing, and creating a new WebSocket-backed channel
+ * object dozens of times a minute would be real, avoidable overhead their
+ * pattern was never meant to carry.
+ *
+ * Deliberately NOT reference-counted, unlike an earlier version of this:
+ * that design needed a way to detach one specific listener from a shared
+ * channel without tearing the whole thing down, and this codebase could
+ * not confirm supabase-js's `RealtimeChannel` actually exposes a working
+ * per-listener `.off()` for that — `removeChannel`/`unsubscribe` (whole-
+ * channel teardown) are the only operations confirmed across Supabase's
+ * own current documentation. Rather than depend on an API this could not
+ * verify, `subscribeBoardStrokes` is the sole owner of a channel's
+ * lifecycle and always fully removes it on cleanup — safe because exactly
+ * one `BoardCanvas` is ever open at a time in this app (a full-screen,
+ * exclusive view), so more than one live subscriber to the same board
+ * simply does not happen in practice. If it ever did (a fast double-open),
+ * the failure mode is a second, redundant channel object briefly existing
+ * — wasteful, not broken — rather than a crash on a method call that may
+ * not exist.
+ */
+const boardChannels = new Map<string, RealtimeChannel>();
 
 function decodeCategory(row: WireCategoryRow): CategoryConfig {
   return {
@@ -483,6 +513,43 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       });
       if (error) throw toSosoError(error);
       return decodeFlushedBoardTile(data as WireFlushedBoardTile);
+    },
+
+    publishBoardStroke(boardId: string, stroke: BoardStrokeBatch): void {
+      const channel = boardChannels.get(boardId);
+      // Nothing subscribed to this board yet (or not anymore) — dropped
+      // silently rather than queued or errored, matching this method's own
+      // documented fire-and-forget contract. In the real call order
+      // (useBoardSession subscribes on mount, before any drawing can
+      // happen) this branch should essentially never run; it exists for
+      // the rare race, not the normal path.
+      if (!channel) return;
+      void channel.send({ type: 'broadcast', event: 'stroke', payload: stroke });
+    },
+
+    subscribeBoardStrokes(boardId: string, onStroke: (stroke: BoardStrokeBatch) => void): () => void {
+      // self: false is the documented default (Supabase does not echo a
+      // sender's own broadcasts back to them) — stated explicitly here
+      // rather than left implicit, since a receiver double-rendering its
+      // own strokes is exactly the kind of bug that only shows up once
+      // someone is actually drawing, not in anything that typechecks or
+      // unit-tests cleanly.
+      const channel = client.channel(`board:${boardId}`, { config: { broadcast: { self: false } } });
+      channel.on('broadcast', { event: 'stroke' }, ({ payload }: { payload: unknown }) => {
+        const stroke = parseBoardStrokeBatch(payload);
+        // A malformed payload from a misbehaving client is dropped, not
+        // thrown — one bad message from someone else's browser must not
+        // take down this receiver's whole session over a channel that, as
+        // documented on the interface itself, is not yet access-controlled.
+        if (stroke) onStroke(stroke);
+      });
+      channel.subscribe();
+      boardChannels.set(boardId, channel);
+
+      return () => {
+        boardChannels.delete(boardId);
+        void client.removeChannel(channel);
+      };
     },
   };
 }

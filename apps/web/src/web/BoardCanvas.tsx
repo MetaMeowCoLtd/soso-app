@@ -20,11 +20,18 @@ import {
 
 interface BoardCanvasProps {
   pin: Pin;
+  /**
+   * The post's body, used as the board's display title — not on `Pin`
+   * itself (only `PostDetail` carries it), and not guaranteed to be loaded
+   * yet when this first opens (`selectedDetail` starts null and arrives
+   * asynchronously), hence optional rather than required.
+   */
+  title?: string | null;
   gateway: SosoGateway;
   onClose: () => void;
 }
 
-export default function BoardCanvas({ pin, gateway, onClose }: BoardCanvasProps) {
+export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
@@ -177,16 +184,16 @@ export default function BoardCanvas({ pin, gateway, onClose }: BoardCanvasProps)
     drawing.current = null;
   }
 
-  const title = pin.body?.trim() || "Board";
+  const displayTitle = title?.trim() || "Board";
 
   return (
-    <div className="board-canvas-root" ref={rootRef} role="dialog" aria-modal="true" aria-label={title}>
+    <div className="board-canvas-root" ref={rootRef} role="dialog" aria-modal="true" aria-label={displayTitle}>
       <header className="board-canvas-bar">
         <button type="button" className="board-canvas-close" onClick={onClose} aria-label="Close board">
           ← Map
         </button>
         <div className="board-canvas-title">
-          <strong>{title}</strong>
+          <strong>{displayTitle}</strong>
           {session.locked && <span className="board-canvas-locked">Locked</span>}
           {session.saving && <span className="board-canvas-saving">Saving</span>}
         </div>

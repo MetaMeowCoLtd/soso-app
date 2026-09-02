@@ -73,6 +73,10 @@ class FakeGateway implements SosoGateway {
   async flushBoardTile() {
     return {} as never;
   }
+  publishBoardStroke() {}
+  subscribeBoardStrokes() {
+    return () => {};
+  }
   async sendChatMessage() {
     return {} as never;
   }

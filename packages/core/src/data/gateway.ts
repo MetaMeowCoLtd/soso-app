@@ -18,6 +18,7 @@
 import type { AreaCellId, CellId } from '../domain/grid';
 import type {
   Board,
+  BoardStrokeBatch,
   BoardTileGetRequest,
   BoardTileMeta,
   BoardTilePutRequest,
@@ -286,4 +287,36 @@ export interface SosoGateway {
     baseVersion: number,
     objectKey: string,
   ): Promise<FlushedBoardTile>;
+
+  /**
+   * Publishes a short batch of recently-drawn points over this board's live
+   * channel. Fire-and-forget on purpose: a publish failing — the channel
+   * hasn't finished subscribing yet, a brief network hiccup — must never
+   * interrupt local drawing, which the plan's own concurrency model
+   * requires to stay completely independent of anything happening over the
+   * network ("zero-latency for the person drawing").
+   */
+  publishBoardStroke(boardId: string, stroke: BoardStrokeBatch): void;
+
+  /**
+   * Live strokes from everyone else currently viewing this board. Same
+   * "returns an unsubscribe function" shape as every other `subscribe*`
+   * method here, but NOT the same signal-then-refetch contract those use —
+   * there is no row to refetch a stroke from, the payload itself is the
+   * thing to render.
+   *
+   * A KNOWN, NOT-YET-CLOSED SECURITY GAP: this channel is currently public
+   * — Supabase's client-created channels are public by default, and
+   * nothing here restricts who may subscribe or publish to
+   * `board:{boardId}` beyond needing the id itself. Tile access control
+   * (signed URLs behind `can_see_post_as`) was built in step 1; this
+   * channel's own authorization is the plan's explicit, separate
+   * "access control on tiles/channel" step, deliberately not part of this
+   * one. This MUST land — a private board's Realtime `channels` table needs
+   * an RLS policy wired to the same audience check — before `board` is
+   * ever enabled for real users. Anyone who knows or guesses a board's id
+   * can currently watch (and inject into) its live strokes regardless of
+   * that post's own audience setting.
+   */
+  subscribeBoardStrokes(boardId: string, onStroke: (stroke: BoardStrokeBatch) => void): () => void;
 }

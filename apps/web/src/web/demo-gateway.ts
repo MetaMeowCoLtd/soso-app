@@ -1061,5 +1061,15 @@ export function createDemoGateway(): SosoGateway {
       saveDemoBoardTiles(tiles);
       return { tx: flushed.tx, ty: flushed.ty, version: flushed.version, objectKey: flushed.objectKey };
     },
+
+    // No live layer in demo mode: there is nobody else to be live WITH — a
+    // single-device local demo has no second party for a broadcast to
+    // reach. Matches the existing no-op precedent for every other realtime
+    // subscription in this file (subscribePostsChanged, subscribeChatMessagesChanged,
+    // and so on), not something new invented for boards specifically.
+    publishBoardStroke(): void {},
+    subscribeBoardStrokes(): () => void {
+      return () => {};
+    },
   };
 }

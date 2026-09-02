@@ -255,12 +255,22 @@ export function useBoardSession(
     return canvas.getContext("2d");
   };
 
-  const stampSegment = useCallback(
-    (x0: number, y0: number, x1: number, y1: number) => {
+  /**
+   * The actual tile-painting work, extracted so both a locally-drawn
+   * segment and an incoming remote one go through the identical code path
+   * — the only difference between "I drew this" and "someone else drew
+   * this" is where the color/size/points came from, never how they get
+   * rasterised onto the dirty layer. This is also what makes a remote
+   * stroke fully participate in this same client's own flush lifecycle:
+   * a tile a remote stroke touched is just as "dirty" here as one the
+   * local user touched, so whichever client happens to flush first
+   * persists it — matching the plan's own "any client can do this, there
+   * is no central compositor" concurrency model.
+   */
+  const paintSegment = useCallback(
+    (x0: number, y0: number, x1: number, y1: number, color: string, size: number) => {
       const currentBoard = boardRef.current;
       if (!currentBoard || currentBoard.locked) return;
-      const size = toolRef.current.size;
-      const color = toolRef.current.color;
       const tileSize = currentBoard.tileSizePx;
       const tiles = tilesTouchedByStroke(
         [
@@ -281,11 +291,66 @@ export function useBoardSession(
     [bump],
   );
 
+  // The in-progress LOCAL stroke's not-yet-published tail. Publishing is
+  // throttled (see the interval below) rather than sent per pointer-move
+  // event — the plan's own "batches recent points into short polylines...
+  // throttled to something like every 40-80ms" — so points accumulate
+  // here between publishes. The last point of one published batch is kept
+  // as the first point of the next (see the interval below) so a receiver
+  // sees one continuous line across batch boundaries, not a series of
+  // disconnected short segments.
+  const outgoing = useRef<{ color: string; size: number; points: { x: number; y: number }[] } | null>(null);
+  const PUBLISH_THROTTLE_MS = 60;
+
+  const stampSegment = useCallback(
+    (x0: number, y0: number, x1: number, y1: number) => {
+      const currentBoard = boardRef.current;
+      if (!currentBoard || currentBoard.locked) return;
+      const { color, size } = toolRef.current;
+      paintSegment(x0, y0, x1, y1, color, size);
+
+      const pending = outgoing.current;
+      if (pending && pending.color === color && pending.size === size) {
+        pending.points.push({ x: x1, y: y1 });
+      } else {
+        // A fresh accumulator either because nothing was pending yet, or
+        // because the tool changed mid-stroke — starting a new batch
+        // rather than mixing two colours/sizes into one publish is
+        // simpler than trying to represent a colour change within a
+        // single BoardStrokeBatch, and a tool change mid-drag is rare
+        // enough that a receiver seeing two short batches instead of one
+        // is not a noticeable cost.
+        outgoing.current = { color, size, points: [{ x: x0, y: y0 }, { x: x1, y: y1 }] };
+      }
+    },
+    [paintSegment],
+  );
+
   const stampDot = useCallback(
     (x: number, y: number) => {
       stampSegment(x, y, x, y);
     },
     [stampSegment],
+  );
+
+  /**
+   * Applies a stroke received from someone else — same tile-painting code
+   * as a local stroke (see `paintSegment`'s own comment), just walking the
+   * batch's points as consecutive segments instead of a single pointer
+   * move. Never re-publishes what it paints: only `stampSegment` (a
+   * genuinely local draw) feeds the outgoing accumulator, or every
+   * receiver would immediately re-broadcast what it just received.
+   */
+  const applyRemoteStroke = useCallback(
+    (stroke: { color: string; size: number; points: { x: number; y: number }[] }) => {
+      for (let i = 1; i < stroke.points.length; i++) {
+        const prev = stroke.points[i - 1];
+        const curr = stroke.points[i];
+        if (!prev || !curr) continue;
+        paintSegment(prev.x, prev.y, curr.x, curr.y, stroke.color, stroke.size);
+      }
+    },
+    [paintSegment],
   );
 
   const loadVisibleTiles = useCallback(async () => {
@@ -473,6 +538,43 @@ export function useBoardSession(
       cancelled.current = true;
     };
   }, [boardId, gateway, loadVisibleTiles]);
+
+  // Subscribed for the entire lifetime of this board session, alongside the
+  // tile index above — not gated on `status === "ready"`, since there is no
+  // reason to wait: a stroke arriving before the tile index has even loaded
+  // just paints onto a dirty tile that will exist once needed, exactly the
+  // same as a local stroke drawn before the base image finished loading
+  // already does.
+  useEffect(() => {
+    const unsubscribe = gateway.subscribeBoardStrokes(boardId, (stroke) => {
+      if (cancelled.current) return;
+      applyRemoteStroke(stroke);
+    });
+    return unsubscribe;
+  }, [boardId, gateway, applyRemoteStroke]);
+
+  // The throttled outgoing publish — the plan's own "batches recent points
+  // into short polylines... throttled to something like every 40-80ms
+  // rather than per pointer event". Runs continuously for the session's
+  // whole lifetime rather than only while actively drawing, matching how
+  // FLUSH_INTERVAL_MS below is also always running and simply finds
+  // nothing to do when there is nothing dirty — one steady interval is
+  // simpler to reason about than starting and stopping a timer around
+  // every individual stroke.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const pending = outgoing.current;
+      if (!pending || pending.points.length === 0) return;
+      gateway.publishBoardStroke(boardId, { color: pending.color, size: pending.size, points: pending.points });
+      // The last point seeds the next batch, not an empty reset — a
+      // receiver should see one continuous line across batch boundaries,
+      // not a series of visibly disconnected short segments each time the
+      // throttle fires.
+      const last = pending.points[pending.points.length - 1];
+      outgoing.current = last ? { color: pending.color, size: pending.size, points: [last] } : null;
+    }, PUBLISH_THROTTLE_MS);
+    return () => clearInterval(id);
+  }, [boardId, gateway]);
 
   useEffect(() => {
     if (status !== "ready" || !boardRef.current) return;
