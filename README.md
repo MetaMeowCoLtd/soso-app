@@ -729,12 +729,12 @@ canvas instead of a detail sheet. See `DRAWING_BOARDS_PLAN.md` for the full
 design (the vector-in-transit / raster-at-rest split, the concurrency model,
 access control, and the suggested build order).
 
-**Status: schema, tile index, and R2 tile signing only (step 1 of that
-plan's build order).** Nothing else — the gateway, the canvas UI, the live
-Broadcast layer, and moderation tooling — is wired up. `board` ships with
-`is_enabled = false` in `seed.sql` for exactly that reason: the schema below
-can be exercised directly against the database or the Edge Function, but
-nothing in the app itself can create or open a board yet.
+**Status: schema/tile-index/R2-signing (step 1) and the gateway (step 2) of
+that plan's build order.** Still missing — the canvas UI, the live
+Broadcast layer, and moderation tooling — so `board` stays shipped with
+`is_enabled = false` in `seed.sql`: everything below can be exercised
+directly (against the database, the Edge Function, or now the gateway),
+but nothing in the app itself can create or open a board yet.
 
 Verified by executing the full migration chain against a real PostgreSQL 16 +
 PostGIS instance (not just checked for syntax), then exercising every branch
@@ -764,6 +764,19 @@ it had already been fixed upstream in migration 0017 (`fix_soso_fail_null_hint`)
 so this feature's migration (0018) relies on that fix rather than
 duplicating it.
 
+**The gateway step surfaced its own version of that same class of bug**:
+every error code the schema and Edge Function introduce
+(`soso/board_locked`, `soso/board_tile_conflict`, `soso/forbidden`, and
+five others) was completely unregistered on the client — none of them
+would have shown their real message, only the generic fallback. Registered
+all eight while building `SosoGateway`'s board methods, since there would
+have been no honest way to claim the gateway surfaces these errors
+otherwise. Separately: `toSosoError` never reads a Postgres error's `hint`
+field at all, only its bare message — so `flush_board_tile`'s own hint text
+(the conflict-recovery instructions) had to be folded into the static
+`ERROR_MESSAGES_EN` entry by hand, or it would have been silently dropped
+regardless of the registration fix.
+
 ### Components
 
 - `boards` / `board_tiles`: the schema. A board is keyed 1:1 to its post row;
@@ -785,6 +798,45 @@ duplicating it.
   caller — the same audience predicate every other read path in the app
   uses. This is the piece that has no precedent elsewhere in the codebase;
   `post_media` stores an `object_key` too but nothing signs a URL for it.
+- `SosoGateway`'s board methods (`getBoard`, `listBoardTiles`,
+  `getBoardTileDownloadUrls`, `getBoardTileUploadUrls`, `flushBoardTile`):
+  the tile-index-and-persistence half of the gateway surface the plan calls
+  for. `subscribeBoardStrokes` (live Broadcast) is deliberately not among
+  them — that is its own later step in the plan's build order, not folded
+  into this one.
+
+### Demo mode
+
+`getBoard`/`listBoardTiles` are genuinely functional — real,
+`localStorage`-backed metadata and tile index, surviving a reload exactly
+like the real backend would. Tile pixel data does not persist across a
+reload: a module-level `Map`, not `localStorage`, since real PNG bytes
+would bloat it fast and the plan's own wording ("in memory, or
+localStorage") leaves the choice open.
+
+**One genuine seam, not papered over.** A real tile upload is "PUT bytes to
+a signed URL" — no gateway method ever carries the pixel data itself, the
+browser talks to R2 directly. Demo mode has no server to PUT to locally,
+and neither a `blob:` nor a `data:` URL can *receive* a PUT — either can
+only expose bytes that already exist. So `getBoardTileUploadUrls` returns a
+`demo-tile-upload:`-prefixed URL that a real `fetch()` cannot use, and
+`demoStoreBoardTileBlob` (exported from `demo-gateway.ts`, deliberately
+**not** part of `SosoGateway` — this is the one place demo mode cannot
+pretend to be a drop-in swap for the real gateway) is what a caller must
+use instead once it recognises that prefix. Whichever step builds the
+actual canvas will need an `if (mode !== "supabase")` branch around its
+upload step for exactly this reason — a real, load-bearing fact about this
+feature's demo mode, not an implementation detail to hide. Downloads have
+no equivalent problem: `getBoardTileDownloadUrls` returns real `data:`
+URLs, genuinely fetchable, so nothing downstream needs to special-case
+reading a tile in demo mode at all.
+
+The concurrency semantics (a brand-new tile always succeeds regardless of
+`baseVersion`; only an *existing* tile's version is checked; the bounding
+box only moves the first time a coordinate is painted, never on a
+re-flush) were verified against a standalone simulation of the actual
+logic, checked case by case against what the real SQL trigger does — not
+merely assumed to match because the code looks similar.
 
 ### Setup
 
@@ -809,17 +861,24 @@ None of the following occurs automatically from a `git push`.
 
 ### Limitations
 
-- **Not usable yet.** This is schema and one Edge Function; there is no
-  gateway method, no canvas UI, and no way to create or view a board from
-  the app.
+- **Still not usable from the app.** The gateway exists, but there is no
+  canvas UI and no way to create or open a board as an end user yet.
 - **The Edge Function is unverified end-to-end**, for the same reason
-  `notify-new-pin` is — see the Status paragraph above.
+  `notify-new-pin` is — see the Status paragraph above. `functions.invoke`'s
+  actual request/response behaviour against a *deployed* function has
+  never been exercised, only checked against Supabase's own current
+  documentation for how the client library shapes that call.
 - **No live drawing layer yet.** The plan's Broadcast-based ephemeral layer
   (what makes drawing feel instant for the person drawing and live for
   everyone else watching) is a later step, not part of this one.
 - **No moderation tooling yet.** `boards.locked` exists and is enforced by
   `flush_board_tile`, but nothing sets it — `moderation_reports` does not
   yet accept a board as a target.
+- **Demo mode's upload path is not a drop-in swap for the real gateway.**
+  See the seam described above — this is the first (and so far only)
+  place demo mode requires caller-side awareness of which mode it's
+  running in, rather than being fully interchangeable behind the
+  `SosoGateway` interface.
 
 ## Known limitations
 

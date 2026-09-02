@@ -57,7 +57,20 @@ import {
   type WalkResult,
   type Zone,
 } from "soso-core";
-import type { ChatMessage, FeedQuery, FollowResult, Friend, ReportReason, SosoGateway } from "soso-core";
+import type {
+  Board,
+  BoardTileGetRequest,
+  BoardTileMeta,
+  BoardTilePutRequest,
+  ChatMessage,
+  FeedQuery,
+  FlushedBoardTile,
+  FollowResult,
+  Friend,
+  ReportReason,
+  SignedBoardTileUrl,
+  SosoGateway,
+} from "soso-core";
 
 // ---------------------------------------------------------------------------
 // Category configuration, hand-mirrored from supabase/seed.sql's enabled rows.
@@ -201,6 +214,8 @@ const ME_KEY = "soso-demo:me:v1";
 const CHAT_KEY = "soso-demo:chat:v1";
 const COINS_KEY = "soso-demo:coins:v1";
 const WALKS_KEY = "soso-demo:walks:v1";
+const BOARDS_KEY = "soso-demo:boards:v1";
+const BOARD_TILES_KEY = "soso-demo:board-tiles:v1";
 
 // Same ceiling record_walk enforces server-side (migration 0016): how many
 // coins one user can earn from walking per hour, regardless of how many
@@ -392,6 +407,118 @@ function loadWalks(): DemoWalk[] {
 
 function saveWalks(walks: DemoWalk[]): void {
   writeJSON(WALKS_KEY, walks);
+}
+
+/**
+ * Demo drawing boards.
+ *
+ * `boards`/`board_tiles` metadata is genuinely persisted (localStorage,
+ * same as everything else here) — a board's tile size, lock state, and
+ * bounding box, and the tile index itself, survive a reload exactly like
+ * they would against the real backend.
+ *
+ * Pixel data does not persist across reloads, deliberately: the plan's own
+ * wording ("in memory, or localStorage") leaves this open, and localStorage
+ * bloats fast once real PNG bytes are involved — a module-level Map is
+ * enough for exploring the feature within one session.
+ *
+ * THE ONE GENUINE SEAM, NOT PAPERED OVER
+ * -------------------------------------------------------------------
+ * A real tile upload is "PUT bytes to a signed URL" — no gateway method
+ * ever carries the pixel data itself, the browser talks to R2 directly.
+ * Demo mode has no server to PUT to locally, and a `blob:`/`data:` URL
+ * cannot receive a PUT — it can only expose bytes that already exist. So
+ * `getBoardTileUploadUrls` below returns a URL using a `demo-tile-upload:`
+ * scheme that is deliberately NOT fetchable by a real `fetch()` call, and
+ * `demoStoreBoardTileBlob` (exported, but NOT part of `SosoGateway` — this
+ * is the one place demo mode cannot pretend to be a drop-in swap for the
+ * real gateway) is what a caller must use instead when it detects it is
+ * running against this URL scheme. Whichever stage builds the actual
+ * canvas will need an `if (mode !== "supabase")` branch around its upload
+ * step for exactly this reason — that is a real, load-bearing fact about
+ * this feature's demo mode, not an implementation detail to hide.
+ *
+ * Downloads have no such problem: `getBoardTileDownloadUrls` returns real
+ * `data:` URLs, which genuinely are fetchable, so nothing downstream needs
+ * to special-case reading a tile in demo mode at all.
+ */
+interface DemoBoard {
+  id: string;
+  tileSizePx: number;
+  locked: boolean;
+  minTx: number | null;
+  minTy: number | null;
+  maxTx: number | null;
+  maxTy: number | null;
+}
+
+interface DemoBoardTile {
+  boardId: string;
+  tx: number;
+  ty: number;
+  version: number;
+  objectKey: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+/** objectKey -> a base64 data: URL. Never persisted — see the module comment above. */
+const demoTileBlobs = new Map<string, string>();
+
+function demoObjectKeyFor(boardId: string, tx: number, ty: number, version: number): string {
+  return `boards/${boardId}/${tx}_${ty}/v${version}.png`;
+}
+
+function loadDemoBoards(): Record<string, DemoBoard> {
+  return readJSON<Record<string, DemoBoard>>(BOARDS_KEY, {});
+}
+
+function saveDemoBoards(boards: Record<string, DemoBoard>): void {
+  writeJSON(BOARDS_KEY, boards);
+}
+
+function loadDemoBoardTiles(): DemoBoardTile[] {
+  return readJSON<DemoBoardTile[]>(BOARD_TILES_KEY, []);
+}
+
+function saveDemoBoardTiles(tiles: DemoBoardTile[]): void {
+  writeJSON(BOARD_TILES_KEY, tiles);
+}
+
+/**
+ * A board row is created lazily, on first touch, rather than when the post
+ * itself is created — demo mode's `createPost` (see below) has no
+ * equivalent of the real schema's `soso.tg_posts_create_board` trigger, and
+ * duplicating that trigger's exact semantics here for a single category
+ * felt like more machinery than this fallback is worth. The practical
+ * effect is the same either way: by the time anything asks for a board's
+ * tiles, a row exists.
+ */
+function ensureDemoBoard(boardId: string): DemoBoard {
+  const boards = loadDemoBoards();
+  const existing = boards[boardId];
+  if (existing) return existing;
+  const created: DemoBoard = { id: boardId, tileSizePx: 256, locked: false, minTx: null, minTy: null, maxTx: null, maxTy: null };
+  boards[boardId] = created;
+  saveDemoBoards(boards);
+  return created;
+}
+
+/**
+ * A caller must use this instead of `fetch(url, { method: "PUT", body })`
+ * when `getBoardTileUploadUrls` returned a `demo-tile-upload:` URL — see
+ * the module comment above for why a real PUT has no local equivalent.
+ */
+export async function demoStoreBoardTileBlob(uploadUrl: string, blob: Blob): Promise<void> {
+  if (!uploadUrl.startsWith("demo-tile-upload:")) return;
+  const objectKey = uploadUrl.slice("demo-tile-upload:".length);
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  demoTileBlobs.set(objectKey, dataUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +935,108 @@ export function createDemoGateway(): SosoGateway {
 
     subscribeChatMessagesChanged(): () => void {
       return () => {};
+    },
+
+    async getBoard(boardId: string): Promise<Board | null> {
+      const board = loadDemoBoards()[boardId];
+      if (!board) return null;
+      const hasBbox = board.minTx !== null && board.minTy !== null && board.maxTx !== null && board.maxTy !== null;
+      return {
+        id: board.id,
+        tileSizePx: board.tileSizePx,
+        locked: board.locked,
+        bbox: hasBbox
+          ? { minTx: board.minTx as number, minTy: board.minTy as number, maxTx: board.maxTx as number, maxTy: board.maxTy as number }
+          : null,
+      };
+    },
+
+    async listBoardTiles(boardId: string): Promise<BoardTileMeta[]> {
+      return loadDemoBoardTiles()
+        .filter((t) => t.boardId === boardId)
+        .map((t) => ({ tx: t.tx, ty: t.ty, version: t.version, objectKey: t.objectKey, updatedAt: t.updatedAt }));
+    },
+
+    async getBoardTileDownloadUrls(
+      boardId: string,
+      tiles: BoardTileGetRequest[],
+    ): Promise<SignedBoardTileUrl[]> {
+      return tiles.map((t) => {
+        const objectKey = demoObjectKeyFor(boardId, t.tx, t.ty, t.version);
+        const url = demoTileBlobs.get(objectKey);
+        if (!url) throw new SosoError("soso/board_not_found");
+        return { tx: t.tx, ty: t.ty, version: t.version, objectKey, url };
+      });
+    },
+
+    async getBoardTileUploadUrls(
+      boardId: string,
+      tiles: BoardTilePutRequest[],
+    ): Promise<SignedBoardTileUrl[]> {
+      ensureDemoBoard(boardId);
+      return tiles.map((t) => {
+        const version = t.baseVersion + 1;
+        const objectKey = demoObjectKeyFor(boardId, t.tx, t.ty, version);
+        // Not fetchable by a real fetch() PUT — see demoStoreBoardTileBlob's
+        // doc comment for why, and what a caller must do instead.
+        return { tx: t.tx, ty: t.ty, version, objectKey, url: `demo-tile-upload:${objectKey}` };
+      });
+    },
+
+    async flushBoardTile(
+      boardId: string,
+      tx: number,
+      ty: number,
+      baseVersion: number,
+      objectKey: string,
+    ): Promise<FlushedBoardTile> {
+      const board = loadDemoBoards()[boardId];
+      if (!board) throw new SosoError("soso/board_not_found");
+      if (board.locked) throw new SosoError("soso/board_locked");
+      if (!demoTileBlobs.has(objectKey)) throw new SosoError("soso/invalid_tile");
+
+      const tiles = loadDemoBoardTiles();
+      const existing = tiles.find((t) => t.boardId === boardId && t.tx === tx && t.ty === ty);
+      const me = getMe();
+      const now = new Date().toISOString();
+
+      let flushed: DemoBoardTile;
+      if (existing) {
+        // Matches flush_board_tile's own guard exactly: an EXISTING tile's
+        // version must match what the caller started from, or this is the
+        // same same-tile race the real backend guards against.
+        if (existing.version !== baseVersion) throw new SosoError("soso/board_tile_conflict");
+        existing.version += 1;
+        existing.objectKey = objectKey;
+        existing.updatedAt = now;
+        existing.updatedBy = me;
+        flushed = existing;
+      } else {
+        // A brand-new tile always succeeds regardless of baseVersion —
+        // there is no prior row for the version check to apply against,
+        // exactly like the real INSERT ... ON CONFLICT DO UPDATE, where the
+        // WHERE clause only ever gates the CONFLICT branch, never a fresh
+        // insert.
+        flushed = { boardId, tx, ty, version: 1, objectKey, updatedAt: now, updatedBy: me };
+        tiles.push(flushed);
+
+        const boards = loadDemoBoards();
+        const b = boards[boardId];
+        if (b) {
+          // AFTER-INSERT-only, matching soso.tg_board_tiles_bbox: the
+          // bounding box only needs to move the first time a given tile
+          // coordinate is ever painted, not on every re-flush of one
+          // already inside it.
+          b.minTx = b.minTx === null ? tx : Math.min(b.minTx, tx);
+          b.minTy = b.minTy === null ? ty : Math.min(b.minTy, ty);
+          b.maxTx = b.maxTx === null ? tx : Math.max(b.maxTx, tx);
+          b.maxTy = b.maxTy === null ? ty : Math.max(b.maxTy, ty);
+          saveDemoBoards(boards);
+        }
+      }
+
+      saveDemoBoardTiles(tiles);
+      return { tx: flushed.tx, ty: flushed.ty, version: flushed.version, objectKey: flushed.objectKey };
     },
   };
 }
