@@ -6,7 +6,7 @@
  * into `SosoError`.
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js';
 
 import { MAX_CELLS_PER_QUERY, type AreaCellId, type CellId } from '../domain/grid';
 import { SosoError, toSosoError } from '../domain/errors';
@@ -41,6 +41,18 @@ import {
   type FriendTier,
   type ChatMessage,
   type WireChatMessage,
+  decodeBoard,
+  decodeBoardTileMeta,
+  decodeFlushedBoardTile,
+  type Board,
+  type WireBoard,
+  type BoardTileMeta,
+  type WireBoardTileMeta,
+  type BoardTileGetRequest,
+  type BoardTilePutRequest,
+  type SignedBoardTileUrl,
+  type FlushedBoardTile,
+  type WireFlushedBoardTile,
 } from '../domain/types';
 import type { FeedQuery, PushEndpoint, ReportReason, SosoGateway } from './gateway';
 
@@ -60,6 +72,30 @@ interface WireCategoryRow {
   hourly_post_limit: number;
   sort_order: number;
   subtypes: { key: string; label_ja: string; label_en: string; sort_order: number }[];
+}
+
+/**
+ * Edge Functions arrive as a genuinely different error shape than an RPC
+ * call — `functions.invoke()` sets `data` to `null` on any non-2xx
+ * response and never auto-parses the JSON body into it (confirmed against
+ * Supabase's own current docs, not assumed), so the `{ error: "soso/xxx" }`
+ * body board-tile-urls actually returns has to be pulled out by hand via
+ * `error.context.json()` after narrowing to `FunctionsHttpError`. Once
+ * extracted, this hands the code to `toSosoError` rather than
+ * re-implementing its "is this a known code" check a second time here.
+ */
+async function toEdgeFunctionError(error: unknown): Promise<SosoError> {
+  if (error instanceof FunctionsHttpError) {
+    try {
+      const body = (await error.context.json()) as { error?: unknown };
+      if (typeof body.error === 'string') return toSosoError({ message: body.error });
+    } catch {
+      // The body wasn't JSON, or reading it failed outright — fall through
+      // to soso/unknown below rather than let a parsing failure here mask
+      // itself as something more specific than it is.
+    }
+  }
+  return toSosoError(error);
 }
 
 function decodeCategory(row: WireCategoryRow): CategoryConfig {
@@ -384,6 +420,69 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return () => {
         void client.removeChannel(channel);
       };
+    },
+
+    async getBoard(boardId: string): Promise<Board | null> {
+      const { data, error } = await client.from('boards').select('*').eq('id', boardId).maybeSingle();
+      if (error) throw toSosoError(error);
+      return data ? decodeBoard(data as WireBoard) : null;
+    },
+
+    async listBoardTiles(boardId: string): Promise<BoardTileMeta[]> {
+      const { data, error } = await client.from('board_tiles').select('*').eq('board_id', boardId);
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WireBoardTileMeta[]).map(decodeBoardTileMeta);
+    },
+
+    async getBoardTileDownloadUrls(
+      boardId: string,
+      tiles: BoardTileGetRequest[],
+    ): Promise<SignedBoardTileUrl[]> {
+      const { data, error } = await client.functions.invoke('board-tile-urls', {
+        body: {
+          boardId,
+          action: 'get',
+          // The Edge Function's own field is `baseVersion` regardless of
+          // action — for a get, it means "the exact version to read",
+          // used as-is rather than incremented (only a put increments it).
+          tiles: tiles.map((t) => ({ tx: t.tx, ty: t.ty, baseVersion: t.version })),
+        },
+      });
+      if (error) throw await toEdgeFunctionError(error);
+      return (data as { urls: SignedBoardTileUrl[] }).urls;
+    },
+
+    async getBoardTileUploadUrls(
+      boardId: string,
+      tiles: BoardTilePutRequest[],
+    ): Promise<SignedBoardTileUrl[]> {
+      const { data, error } = await client.functions.invoke('board-tile-urls', {
+        body: {
+          boardId,
+          action: 'put',
+          tiles: tiles.map((t) => ({ tx: t.tx, ty: t.ty, baseVersion: t.baseVersion })),
+        },
+      });
+      if (error) throw await toEdgeFunctionError(error);
+      return (data as { urls: SignedBoardTileUrl[] }).urls;
+    },
+
+    async flushBoardTile(
+      boardId: string,
+      tx: number,
+      ty: number,
+      baseVersion: number,
+      objectKey: string,
+    ): Promise<FlushedBoardTile> {
+      const { data, error } = await client.rpc('flush_board_tile', {
+        p_board_id: boardId,
+        p_tx: tx,
+        p_ty: ty,
+        p_base_version: baseVersion,
+        p_object_key: objectKey,
+      });
+      if (error) throw toSosoError(error);
+      return decodeFlushedBoardTile(data as WireFlushedBoardTile);
     },
   };
 }

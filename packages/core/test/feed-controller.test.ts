@@ -58,6 +58,21 @@ class FakeGateway implements SosoGateway {
   async debugGrantCoins() {
     return { balance: 0, granted: 0 };
   }
+  async getBoard() {
+    return null;
+  }
+  async listBoardTiles() {
+    return [];
+  }
+  async getBoardTileDownloadUrls() {
+    return [];
+  }
+  async getBoardTileUploadUrls() {
+    return [];
+  }
+  async flushBoardTile() {
+    return {} as never;
+  }
   async sendChatMessage() {
     return {} as never;
   }

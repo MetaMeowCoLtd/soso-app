@@ -42,6 +42,14 @@ export const SOSO_ERROR_CODES = [
   'soso/invalid_walk_distance',
   'soso/implausible_walk',
   'soso/walk_rate_limited',
+  'soso/invalid_tile',
+  'soso/board_not_found',
+  'soso/board_locked',
+  'soso/board_tile_conflict',
+  'soso/forbidden',
+  'soso/bad_request',
+  'soso/internal_error',
+  'soso/r2_not_configured',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -114,5 +122,13 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/invalid_walk_distance': "That walk doesn't look right.",
   'soso/implausible_walk': "That was too fast to count as a walk.",
   'soso/walk_rate_limited': "You've already logged a lot of walking recently. Try again later.",
+  'soso/invalid_tile': "That tile position isn't valid.",
+  'soso/board_not_found': "That board isn't available.",
+  'soso/board_locked': 'A moderator has locked this board — no new strokes for now.',
+  'soso/board_tile_conflict': 'Someone else just drew on that tile. Refresh it and try again.',
+  'soso/forbidden': "You don't have access to that board.",
+  'soso/bad_request': 'That request was malformed. Try again.',
+  'soso/internal_error': 'Something went wrong on the server. Try again.',
+  'soso/r2_not_configured': 'Drawing boards are not fully set up on this server yet.',
   'soso/unknown': 'Something went wrong. Try again.',
 };

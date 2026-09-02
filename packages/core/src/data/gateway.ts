@@ -17,7 +17,12 @@
 
 import type { AreaCellId, CellId } from '../domain/grid';
 import type {
+  Board,
+  BoardTileGetRequest,
+  BoardTileMeta,
+  BoardTilePutRequest,
   ChatMessage,
+  FlushedBoardTile,
   FriendTier,
   NewZone,
   Zone,
@@ -30,6 +35,7 @@ import type {
   NewPost,
   Pin,
   PostDetail,
+  SignedBoardTileUrl,
   WalkResult,
 } from '../domain/types';
 
@@ -232,4 +238,52 @@ export interface SosoGateway {
 
   /** Fires when any chat_messages row changes — same signal-then-refetch contract as the other subscribe* methods. */
   subscribeChatMessagesChanged(onChange: () => void): () => void;
+
+  // --- Drawing boards --------------------------------------------------
+  // Step 1 (schema, tile index, R2 signing, already live — see migration
+  // 0018 and the board-tile-urls Edge Function) built the foundation this
+  // sits on. This is step 2 of the plan's own build order: the gateway
+  // surface and nothing past it. Deliberately absent: any live-stroke
+  // capability. Broadcast is its own later step in the plan, not folded in
+  // here — these methods cover only the tile index and the
+  // request-URL-then-flush persistence flow.
+
+  /** The board's own metadata (tile size, locked, bounding box) — null if the id isn't a board, or isn't visible to the caller. */
+  getBoard(boardId: string): Promise<Board | null>;
+
+  /** The tile index for a board — which tiles exist and at what version, never pixel data. */
+  listBoardTiles(boardId: string): Promise<BoardTileMeta[]>;
+
+  /**
+   * Signed, short-lived URLs for downloading tile bytes. Pass the version
+   * already known from `listBoardTiles` — this does not re-read the index,
+   * it only mints a URL for the version asked for.
+   */
+  getBoardTileDownloadUrls(boardId: string, tiles: BoardTileGetRequest[]): Promise<SignedBoardTileUrl[]>;
+
+  /**
+   * Signed, short-lived URLs for uploading tile bytes. Requesting a URL
+   * only reserves an object key (`baseVersion + 1`) — it does not reserve
+   * a slot in the tile index. The caller still has to PUT the bytes to the
+   * returned URL directly (not through this gateway — R2 upload is a plain
+   * `fetch`, no Supabase client involved) and then call `flushBoardTile` to
+   * actually claim it.
+   */
+  getBoardTileUploadUrls(boardId: string, tiles: BoardTilePutRequest[]): Promise<SignedBoardTileUrl[]>;
+
+  /**
+   * The confirm-and-upsert step, called after the PUT to R2 has already
+   * succeeded. `baseVersion` must match what was used to request the
+   * upload URL — if another client's flush landed first, this throws
+   * `soso/board_tile_conflict` rather than silently overwriting; the
+   * caller is expected to refetch the tile, recomposite its own unflushed
+   * strokes on top, and retry with the new version.
+   */
+  flushBoardTile(
+    boardId: string,
+    tx: number,
+    ty: number,
+    baseVersion: number,
+    objectKey: string,
+  ): Promise<FlushedBoardTile>;
 }

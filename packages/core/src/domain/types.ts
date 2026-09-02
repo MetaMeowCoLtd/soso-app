@@ -418,3 +418,118 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
     mine: w.mine,
   };
 }
+
+/**
+ * A board's own metadata — the `boards` row, 1:1 with a post whose category
+ * is `board`. Deliberately separate from `Pin`/`PostDetail`: everything
+ * generic about the post (author, audience, expiry) already lives there,
+ * this is only what's genuinely new (tile geometry, the moderation lock).
+ *
+ * `bbox` is null until the first tile is ever painted — nothing to fit a
+ * view to yet.
+ */
+export interface Board {
+  id: string;
+  tileSizePx: number;
+  locked: boolean;
+  bbox: { minTx: number; minTy: number; maxTx: number; maxTy: number } | null;
+}
+
+export interface WireBoard {
+  id: string;
+  tile_size_px: number;
+  locked: boolean;
+  min_tx: number | null;
+  min_ty: number | null;
+  max_tx: number | null;
+  max_ty: number | null;
+}
+
+export function decodeBoard(w: WireBoard): Board {
+  const hasBbox = w.min_tx !== null && w.min_ty !== null && w.max_tx !== null && w.max_ty !== null;
+  return {
+    id: w.id,
+    tileSizePx: w.tile_size_px,
+    locked: w.locked,
+    bbox: hasBbox ? { minTx: w.min_tx as number, minTy: w.min_ty as number, maxTx: w.max_tx as number, maxTy: w.max_ty as number } : null,
+  };
+}
+
+/**
+ * One entry in the tile index — "a tile exists, here's its current
+ * version," never pixel data. This is what a plain RLS-gated read of
+ * `board_tiles` returns; it carries no download URL, since minting one
+ * requires the board-tile-urls Edge Function's own, separate
+ * `can_see_post_as` check (the table read and the signed URL are two
+ * different gates, deliberately — see that function's own comment on why
+ * `board_tiles`' RLS policy only gates knowing a tile exists, not reading
+ * its bytes).
+ */
+export interface BoardTileMeta {
+  tx: number;
+  ty: number;
+  version: number;
+  objectKey: string;
+  updatedAt: string;
+}
+
+export interface WireBoardTileMeta {
+  tx: number;
+  ty: number;
+  version: number;
+  object_key: string;
+  updated_at: string;
+}
+
+export function decodeBoardTileMeta(w: WireBoardTileMeta): BoardTileMeta {
+  return { tx: w.tx, ty: w.ty, version: w.version, objectKey: w.object_key, updatedAt: w.updated_at };
+}
+
+/** A tile paired with a signed URL — the board-tile-urls Edge Function's own response shape for one tile. */
+export interface SignedBoardTileUrl {
+  tx: number;
+  ty: number;
+  version: number;
+  objectKey: string;
+  url: string;
+}
+
+/** What a client sends to request a tile's bytes (`action: "get"`) — the version it already knows about from its own read of the tile index. */
+export interface BoardTileGetRequest {
+  tx: number;
+  ty: number;
+  version: number;
+}
+
+/**
+ * What a client sends to request an upload slot (`action: "put"`) — the
+ * version it started painting from, 0 for a tile it believes does not
+ * exist yet. The Edge Function reserves the NEXT key
+ * (`baseVersion + 1`); whether that write actually lands there is decided
+ * later, atomically, by `flushBoardTile` — requesting the URL only
+ * reserves a key, never a slot.
+ */
+export interface BoardTilePutRequest {
+  tx: number;
+  ty: number;
+  baseVersion: number;
+}
+
+/** `flushBoardTile`'s own return shape — confirms what actually landed, which is not always what was asked for (see `soso/board_tile_conflict`). */
+export interface FlushedBoardTile {
+  tx: number;
+  ty: number;
+  version: number;
+  objectKey: string;
+}
+
+export interface WireFlushedBoardTile {
+  tx: number;
+  ty: number;
+  version: number;
+  objectKey: string;
+}
+
+export function decodeFlushedBoardTile(w: WireFlushedBoardTile): FlushedBoardTile {
+  return { tx: w.tx, ty: w.ty, version: w.version, objectKey: w.objectKey };
+}
