@@ -17,6 +17,17 @@ export const metadata: Metadata = {
     title: "Soso",
   },
   icons: {
+    icon: [
+      // Relative paths, same reasoning as `manifest` above: this deploys
+      // under a variable GitHub Pages subpath, so a leading "/" would
+      // resolve to the wrong place. favicon.ico is Next's own multi-res
+      // fallback for browsers/crawlers that fetch /favicon.ico directly
+      // regardless of these tags; the PNGs are what browsers that do read
+      // <link rel="icon"> actually render in the tab.
+      { url: "favicon.ico", sizes: "16x16 32x32 48x48" },
+      { url: "icons/favicon-16.png", sizes: "16x16", type: "image/png" },
+      { url: "icons/favicon-32.png", sizes: "32x32", type: "image/png" },
+    ],
     apple: "icons/apple-touch-icon.png",
   },
   // Next emits the modern `mobile-web-app-capable` tag from `appleWebApp`,
