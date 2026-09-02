@@ -730,12 +730,44 @@ canvas instead of a detail sheet. See `DRAWING_BOARDS_PLAN.md` for the full
 design (the vector-in-transit / raster-at-rest split, the concurrency model,
 access control, and the suggested build order).
 
-**Status: schema/tile-index/R2-signing (step 1), the gateway (step 2), and
-the single-player canvas UI (step 3 of the plan's build order: "canvas UI
-without live collab").** Still missing — the live Broadcast layer and
-moderation tooling — so `board` stays shipped with `is_enabled = false` in
-`seed.sql`. Demo mode enables the category locally so the canvas can be
-exercised without flipping the production kill switch.
+**Status: schema/tile-index/R2-signing (step 1), the gateway (step 2), the
+single-player canvas UI (step 3), the live Broadcast layer (step 4), and
+channel authorization (step 5 — "access control on tiles/channel") are all
+in place.** `board` is now `is_enabled = true` in `seed.sql`
+(`20260903000021_enable_board_category.sql` flips it for an
+already-migrated database), specifically to make this reachable for
+**testing**, not as a full launch — see the next paragraph for what that
+distinction rests on. Demo mode enables the category locally regardless of
+this flag, same as it always has.
+
+**Moderation (step 6 of the plan) is the one deliberately unfinished piece,
+and the reason "enabled" here means "for testing," not "ready for real
+users."** `boards.locked` is a real column `flush_board_tile` really
+enforces, but nothing can set it in response to a report yet —
+`moderation_reports` does not accept a board as a target. If someone draws
+something genuinely harmful on a public board today, there is no built way
+to act on it short of a manual database operation. This was an explicit,
+instructed scope cut when the category was enabled, not an oversight —
+flagging it here with the same weight the rest of this section gives every
+other real gap, not buried as a footnote.
+
+Channel authorization itself: `subscribeBoardStrokes` used to create
+`board:{boardId}` as a default Supabase Realtime channel, which is public
+and unauthenticated by design — anyone who knew or guessed a board's id
+could watch its live strokes regardless of that post's audience, and could
+inject strokes that a legitimate participant's own client might then flush
+into R2. `20260903000020_board_channel_authorization.sql` closes this by
+creating the channel with `{ private: true }` and adding RLS policies on
+`realtime.messages` (Supabase's actual current mechanism for this — the
+plan's own text says "a policy on realtime.channels", which is not quite
+the table Supabase authorizes private channels through; the migration's own
+header comment explains the correction) gated through a new
+`soso.can_access_board_topic` helper that applies `soso.can_see_post` to
+the board id parsed out of the channel's topic string. Same audience rule
+as everywhere else a board is gated, just enforced a third time, at the one
+remaining place it wasn't. Like the rest of this feature, this has not been
+exercised against a real Supabase project — no sandbox available here can
+open two real WebSocket connections and confirm one is actually denied.
 
 Verified by executing the full migration chain against a real PostgreSQL 16 +
 PostGIS instance (not just checked for syntax), then exercising every branch

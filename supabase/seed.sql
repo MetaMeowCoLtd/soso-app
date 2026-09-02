@@ -94,16 +94,22 @@ insert into public.post_categories (
  10, 2, false, 80),
 
 -- --------------------------------------------------------------------------
--- Drawing boards. SHIPPED DISABLED.
+-- Drawing boards. ENABLED FOR TESTING, NOT A FULL LAUNCH.
 -- --------------------------------------------------------------------------
--- Schema-only at this point (migration 0018): boards/board_tiles, the
--- optimistic-concurrency flush RPC, and R2 tile signing exist and can be
--- exercised directly, but no gateway, canvas UI, or live Broadcast layer
--- calls any of it yet. Flip is_enabled once the rest of the plan in
--- DRAWING_BOARDS_PLAN.md lands -- deliberately last in that plan's build
--- order, same as every other category shipped disabled here: the tooling to
--- act on a bad board (moderation_reports support, the locked flag's UI) does
--- not exist until then.
+-- Schema (0018), gateway + demo fallback, single-player canvas, the live
+-- Broadcast layer, and channel authorization (0020) all exist now — see
+-- 20260903000021_enable_board_category.sql, which flips this same value for
+-- an already-migrated database via UPDATE (this literal here only matters
+-- for a fresh `db reset`; the two are kept in sync by hand, same caveat as
+-- every other hand-mirrored constant in this codebase).
+--
+-- Moderation is the one deliberately unfinished piece: boards.locked is
+-- real and enforced, but nothing can set it from a report yet —
+-- moderation_reports does not accept a board as a target. That was an
+-- explicit, instructed scope cut for this flip, not an oversight — read
+-- it as "reachable for testing", not "ready for real users." The plan's
+-- own build order still puts moderation before a real launch would be
+-- appropriate.
 --
 -- TTL matches construction: long-lived by default, because a board is meant
 -- to be a standing, revisitable canvas rather than a single ephemeral report.
@@ -120,7 +126,7 @@ insert into public.post_categories (
  interval '7 days', interval '180 days',
  0, false, 500,
  true, 300, false,
- 0, 5, false, 90);
+ 0, 5, true, 90);
 
 
 insert into public.post_subtypes (category_key, key, label_ja, label_en, sort_order) values

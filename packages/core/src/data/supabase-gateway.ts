@@ -534,7 +534,21 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       // own strokes is exactly the kind of bug that only shows up once
       // someone is actually drawing, not in anything that typechecks or
       // unit-tests cleanly.
-      const channel = client.channel(`board:${boardId}`, { config: { broadcast: { self: false } } });
+      //
+      // private: true is the other half of closing the channel-authorization
+      // gap this method's own interface doc used to flag — see
+      // 20260903000020_board_channel_authorization.sql. Without it, this is
+      // a legacy Realtime channel with no authorization at all, regardless
+      // of anything RLS says; WITH it, Supabase evaluates the RLS policies
+      // that migration adds on realtime.messages before this subscription —
+      // or `publishBoardStroke` below's `channel.send` — is allowed to do
+      // anything. The two changes only work together; either alone is either
+      // still-open (this flag with no policies to check) or a connection
+      // silently unable to join anything (the policies with no client ever
+      // asking to be authorized against them).
+      const channel = client.channel(`board:${boardId}`, {
+        config: { broadcast: { self: false }, private: true },
+      });
       channel.on('broadcast', { event: 'stroke' }, ({ payload }: { payload: unknown }) => {
         const stroke = parseBoardStrokeBatch(payload);
         // A malformed payload from a misbehaving client is dropped, not

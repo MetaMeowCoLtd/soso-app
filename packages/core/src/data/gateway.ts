@@ -305,18 +305,18 @@ export interface SosoGateway {
    * there is no row to refetch a stroke from, the payload itself is the
    * thing to render.
    *
-   * A KNOWN, NOT-YET-CLOSED SECURITY GAP: this channel is currently public
-   * — Supabase's client-created channels are public by default, and
-   * nothing here restricts who may subscribe or publish to
-   * `board:{boardId}` beyond needing the id itself. Tile access control
-   * (signed URLs behind `can_see_post_as`) was built in step 1; this
-   * channel's own authorization is the plan's explicit, separate
-   * "access control on tiles/channel" step, deliberately not part of this
-   * one. This MUST land — a private board's Realtime `channels` table needs
-   * an RLS policy wired to the same audience check — before `board` is
-   * ever enabled for real users. Anyone who knows or guesses a board's id
-   * can currently watch (and inject into) its live strokes regardless of
-   * that post's own audience setting.
+   * Access-controlled as of `20260903000020_board_channel_authorization.sql`
+   * — previously a KNOWN, documented gap (this comment used to say so):
+   * Supabase's client-created channels are public by default, and nothing
+   * restricted who could subscribe or publish to `board:{boardId}` beyond
+   * knowing the id. The implementation now creates this channel with
+   * `{ private: true }`, which makes Supabase evaluate RLS policies on
+   * `realtime.messages` (gated through `soso.can_access_board_topic`,
+   * itself just `soso.can_see_post` applied to the topic's board id) before
+   * allowing either a subscribe or a `publishBoardStroke` send to go
+   * through. Same audience rule as reading the board's pin at all — nothing
+   * new to keep in sync, just a third enforcement point for one existing
+   * rule.
    */
   subscribeBoardStrokes(boardId: string, onStroke: (stroke: BoardStrokeBatch) => void): () => void;
 }
