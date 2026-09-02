@@ -95,6 +95,15 @@ class FakeGateway implements SosoGateway {
   async unfollowUser() {}
   async blockUser() {}
   async unblockUser() {}
+
+  // Coins are irrelevant to the feed controller; these exist only to
+  // satisfy the interface.
+  async myCoinBalance() {
+    return 0;
+  }
+  async recordWalk(): Promise<never> {
+    throw new Error('not used');
+  }
 }
 
 const pin = (id: string, expiresAt = NOW_S + 3600): Pin => ({

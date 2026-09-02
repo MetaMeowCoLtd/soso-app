@@ -45,12 +45,16 @@
 import {
   SosoError,
   cellOf,
+  coinsForDistanceMetres,
+  isPlausibleWalk,
+  POST_PIN_COST,
   type CategoryConfig,
   type CellCount,
   type FeedDelta,
   type NewPost,
   type Pin,
   type PostDetail,
+  type WalkResult,
   type Zone,
 } from "soso-core";
 import type { ChatMessage, FeedQuery, FollowResult, Friend, ReportReason, ResolutionReason, SosoGateway } from "soso-core";
@@ -195,6 +199,19 @@ const POSTS_KEY = "soso-demo:posts:v1";
 const VOTES_KEY = "soso-demo:votes:v1";
 const ME_KEY = "soso-demo:me:v1";
 const CHAT_KEY = "soso-demo:chat:v1";
+const COINS_KEY = "soso-demo:coins:v1";
+const WALKS_KEY = "soso-demo:walks:v1";
+
+// Same ceiling record_walk enforces server-side (migration 0016): how many
+// coins one user can earn from walking per hour, regardless of how many
+// separate calls it takes to get there.
+const MAX_WALK_COINS_PER_HOUR = 150;
+
+interface DemoWalk {
+  userId: string;
+  coinsEarned: number;
+  createdAt: number; // epoch seconds
+}
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -354,6 +371,30 @@ function saveChatMessages(messages: DemoChatMessage[]): void {
   writeJSON(CHAT_KEY, messages);
 }
 
+// New accounts start with enough to post a couple of pins without having to
+// walk first — an empty-balance first run would make the feature look
+// broken rather than earned.
+const STARTING_COIN_BALANCE = 20;
+
+function getCoinBalance(userId: string): number {
+  const balances = readJSON<Record<string, number>>(COINS_KEY, {});
+  return balances[userId] ?? STARTING_COIN_BALANCE;
+}
+
+function setCoinBalance(userId: string, balance: number): void {
+  const balances = readJSON<Record<string, number>>(COINS_KEY, {});
+  balances[userId] = balance;
+  writeJSON(COINS_KEY, balances);
+}
+
+function loadWalks(): DemoWalk[] {
+  return readJSON<DemoWalk[]>(WALKS_KEY, []);
+}
+
+function saveWalks(walks: DemoWalk[]): void {
+  writeJSON(WALKS_KEY, walks);
+}
+
 // ---------------------------------------------------------------------------
 // The gateway
 // ---------------------------------------------------------------------------
@@ -434,6 +475,14 @@ export function createDemoGateway(): SosoGateway {
     },
 
     async createPost(input: NewPost): Promise<Pin> {
+      // Checked first, same as create_post server-side: a user without
+      // enough coins finds out before spending effort on the rest of the
+      // form's validation.
+      const me = getMe();
+      if (getCoinBalance(me) < POST_PIN_COST) {
+        throw new SosoError("soso/insufficient_coins");
+      }
+
       const category = DEMO_CATEGORIES.find((c) => c.key === input.category);
       if (!category) throw new SosoError("soso/category_unavailable");
 
@@ -447,7 +496,6 @@ export function createDemoGateway(): SosoGateway {
         if (body.length > category.bodyMaxLength) throw new SosoError("soso/body_too_long");
       }
 
-      const me = getMe();
       const oneHourAgo = nowSeconds() - 3600;
       const recentCount = loadPosts().filter(
         (p) => p.authorId === me && p.category === category.key && p.createdAt > oneHourAgo,
@@ -502,6 +550,7 @@ export function createDemoGateway(): SosoGateway {
       };
 
       savePosts([post, ...loadPosts()]);
+      setCoinBalance(me, getCoinBalance(me) - POST_PIN_COST);
       return toPin(post);
     },
 
@@ -594,7 +643,48 @@ export function createDemoGateway(): SosoGateway {
     // mode can actually do, and a fake friends list would be worse.
 
     async myProfile() {
-      return { id: getMe(), handle: 'demo_user', displayName: 'You (demo)' };
+      const me = getMe();
+      return { id: me, handle: 'demo_user', displayName: 'You (demo)', coinBalance: getCoinBalance(me) };
+    },
+
+    // --- Coins -------------------------------------------------------------
+    //
+    // Same rules as `record_walk` (migration 0016), copied by hand for the
+    // reason explained at the top of this file: distance/time shape and
+    // plausibility come from `coinsForDistanceMetres` / `isPlausibleWalk` in
+    // soso-core so at least the arithmetic can't drift, but the per-hour cap
+    // is reimplemented against localStorage instead of a real table.
+
+    async myCoinBalance(): Promise<number> {
+      return getCoinBalance(getMe());
+    },
+
+    async recordWalk(distanceMetres: number, elapsedSeconds: number): Promise<WalkResult> {
+      if (!isPlausibleWalk(distanceMetres, elapsedSeconds)) {
+        // Mirrors the server's two distinct failure reasons: too short/too
+        // far in one call, versus too fast to be walking. Demo mode collapses
+        // both into the same client check that produces them, so it re-derives
+        // which one applies rather than inventing a third.
+        const tooShortOrTooFar =
+          elapsedSeconds < 30 || distanceMetres <= 0 || distanceMetres > 20_000;
+        throw new SosoError(tooShortOrTooFar ? "soso/invalid_walk_distance" : "soso/implausible_walk");
+      }
+
+      const me = getMe();
+      const oneHourAgo = nowSeconds() - 3600;
+      const recentCoins = loadWalks()
+        .filter((w) => w.userId === me && w.createdAt > oneHourAgo)
+        .reduce((sum, w) => sum + w.coinsEarned, 0);
+
+      const coinsEarned = coinsForDistanceMetres(distanceMetres);
+      if (recentCoins + coinsEarned > MAX_WALK_COINS_PER_HOUR) {
+        throw new SosoError("soso/walk_rate_limited");
+      }
+
+      saveWalks([...loadWalks(), { userId: me, coinsEarned, createdAt: nowSeconds() }]);
+      const balance = getCoinBalance(me) + coinsEarned;
+      setCoinBalance(me, balance);
+      return { coinsEarned, balance };
     },
 
     async presenceHeartbeat(): Promise<void> {

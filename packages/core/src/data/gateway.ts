@@ -30,6 +30,7 @@ import type {
   NewPost,
   Pin,
   PostDetail,
+  WalkResult,
 } from '../domain/types';
 
 export type ReportReason =
@@ -121,6 +122,29 @@ export interface SosoGateway {
 
   /** Your own handle, for sharing with someone who wants to add you. */
   myProfile(): Promise<MyProfile | null>;
+
+  // --- Coins ---------------------------------------------------------------
+  //
+  // Earned by walking (`recordWalk`), spent posting a pin (10 coins, charged
+  // inside `createPost` above — there is no separate "spend" call). Every
+  // rule enforced here mirrors `packages/core/src/domain/coins.ts`; see that
+  // file before changing amounts, limits, or plausibility checks.
+
+  /**
+   * A lightweight read of just the balance, for a badge that polls on its
+   * own rather than refetching the whole profile.
+   */
+  myCoinBalance(): Promise<number>;
+
+  /**
+   * Reports a completed walk for crediting. `distanceMetres` and
+   * `elapsedSeconds` describe the whole submission, not an instantaneous
+   * reading — the server judges plausibility from their ratio, so batching
+   * a short walk into one call after the fact is fine; splitting one walk
+   * into many rapid tiny calls to route around the rate limit is not, and
+   * is rejected the same way either way.
+   */
+  recordWalk(distanceMetres: number, elapsedSeconds: number): Promise<WalkResult>;
 
   /**
    * Opts in to presence and refreshes it. Called on an interval only while the

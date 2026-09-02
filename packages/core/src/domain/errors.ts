@@ -40,6 +40,10 @@ export const SOSO_ERROR_CODES = [
   'soso/not_yours_or_already_gone',
   'soso/empty_message',
   'soso/message_too_long',
+  'soso/insufficient_coins',
+  'soso/invalid_walk_distance',
+  'soso/implausible_walk',
+  'soso/walk_rate_limited',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -110,5 +114,9 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/not_yours_or_already_gone': "That post isn't yours, or it's already gone.",
   'soso/empty_message': "Type something first.",
   'soso/message_too_long': "That's too long — keep it under 500 characters.",
+  'soso/insufficient_coins': "You don't have enough coins to post this. Walk a bit to earn more.",
+  'soso/invalid_walk_distance': "That walk doesn't look right.",
+  'soso/implausible_walk': "That was too fast to count as a walk.",
+  'soso/walk_rate_limited': "You've already logged a lot of walking recently. Try again later.",
   'soso/unknown': 'Something went wrong. Try again.',
 };

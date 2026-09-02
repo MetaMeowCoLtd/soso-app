@@ -14,9 +14,11 @@ import {
   decodeZone,
   decodeFeedDelta,
   decodeFriend,
+  decodeMyProfile,
   decodePin,
   decodePostDetail,
   decodeChatMessage,
+  decodeWalkResult,
   type CategoryConfig,
   type CellCount,
   type FeedDelta,
@@ -26,10 +28,13 @@ import {
   type FollowResult,
   type Friend,
   type MyProfile,
+  type WalkResult,
   type WireFeedDelta,
   type WireFriend,
+  type WireMyProfile,
   type WirePin,
   type WirePostDetail,
+  type WireWalkResult,
   type WireZone,
   type Zone,
   type NewZone,
@@ -208,8 +213,24 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       const { data, error } = await client.rpc('my_profile');
       if (error) throw toSosoError(error);
       if (!data) return null;
-      const row = data as { id: string; handle: string; name: string };
-      return { id: row.id, handle: row.handle, displayName: row.name };
+      return decodeMyProfile(data as WireMyProfile);
+    },
+
+    // --- Coins -----------------------------------------------------------
+
+    async myCoinBalance(): Promise<number> {
+      const { data, error } = await client.rpc('my_coin_balance');
+      if (error) throw toSosoError(error);
+      return typeof data === 'number' ? data : 0;
+    },
+
+    async recordWalk(distanceMetres: number, elapsedSeconds: number): Promise<WalkResult> {
+      const { data, error } = await client.rpc('record_walk', {
+        p_distance_m: Math.round(distanceMetres),
+        p_elapsed_s: Math.round(elapsedSeconds),
+      });
+      if (error) throw toSosoError(error);
+      return decodeWalkResult(data as WireWalkResult);
     },
 
     async presenceHeartbeat(at: { lng: number; lat: number }): Promise<void> {
