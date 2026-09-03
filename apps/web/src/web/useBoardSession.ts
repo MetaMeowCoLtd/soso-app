@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_BOARD_TILE_SIZE_PX,
+  ERROR_MESSAGES_EN,
   canvasTileBounds,
   canvasTileKey,
   chunkForSigning,
@@ -487,8 +488,15 @@ export function useBoardSession(
       bump();
     } catch (err) {
       if (!cancelled.current) {
-        const code = (err as { code?: string }).code;
-        setError(code === "soso/board_locked" ? "This board has been locked." : "Couldn't save a tile. Try drawing again.");
+        // Same code -> message lookup ChatPanel/PinPreview/ReportForm all
+        // already use — this used to hardcode a single generic string for
+        // every code except soso/board_locked, which meant a registered,
+        // specific message (soso/r2_not_configured's "Drawing boards are
+        // not fully set up on this server yet.", for one) never actually
+        // reached anyone, even though the code carrying it was right there
+        // on the caught error the whole time.
+        const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
+        setError(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
       }
     } finally {
       flushing.current = false;
