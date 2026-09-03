@@ -445,7 +445,14 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   function selectPin(pin: Pin) {
     setSelectedPin(pin);
     setSelectedDetail(null);
-    setFocusAt({ latitude: pin.lat, longitude: pin.lng });
+    // A location-optional post ("update") reaching this function at all
+    // isn't possible today — SosoMap only ever renders pins with a
+    // location as markers to tap (see its own pinMarkers filter) — but
+    // Pin.lat/lng are honestly nullable now, so this guards the type
+    // rather than the one existing caller's actual behaviour.
+    if (pin.lat !== null && pin.lng !== null) {
+      setFocusAt({ latitude: pin.lat, longitude: pin.lng });
+    }
     void gateway
       .postDetail(pin.id)
       .then(setSelectedDetail)
@@ -473,7 +480,13 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       if (!detail) return; // gone, expired, or no longer visible to this viewer
       setSelectedPin(detail);
       setSelectedDetail(detail);
-      setFocusAt({ latitude: detail.lat, longitude: detail.lng });
+      // Unlike selectPin, this one genuinely can reach a location-optional
+      // post today — a notification deep link only has a post id, with no
+      // guarantee of what kind of post is behind it. Simply not moving the
+      // map for one is the correct behaviour, not a gap to fill in later.
+      if (detail.lat !== null && detail.lng !== null) {
+        setFocusAt({ latitude: detail.lat, longitude: detail.lng });
+      }
     } catch {
       // A stale, deleted, or inaccessible post from an old notification
       // shouldn't fail the whole app on load — it should just open nothing.

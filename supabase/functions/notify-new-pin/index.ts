@@ -160,8 +160,16 @@ async function geocodePostAddress(
     const { data: coords, error: coordsError } = await supabase
       .rpc("post_coordinates", { p_post_id: postId })
       .single<{ lng: number; lat: number }>();
-    if (coordsError || !coords) {
-      console.error("[notify-new-pin] post_coordinates failed:", coordsError);
+    // A location-optional post (see 20260903000023_location_optional_posts.sql)
+    // returns exactly one row here with both columns null, not zero rows —
+    // st_x/st_y on a null geometry is null, not an error, so `.single()`
+    // succeeds and `coords` is a truthy `{lng: null, lat: null}`. Without this
+    // check that would fall through to a Nominatim request with literal
+    // "lat=null&lon=null" in the query string. There is nothing to geocode
+    // for a post that was never given a location; skipping is correct, not
+    // a fallback for a failure.
+    if (coordsError || !coords || coords.lng == null || coords.lat == null) {
+      if (coordsError) console.error("[notify-new-pin] post_coordinates failed:", coordsError);
       return;
     }
 

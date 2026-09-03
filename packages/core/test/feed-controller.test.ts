@@ -54,6 +54,16 @@ class FakeGateway implements SosoGateway {
     return "zone-1";
   }
   async deleteZone() {}
+  async listFeedPosts() {
+    return { cursor: null, posts: [] };
+  }
+  async createPostReply(): Promise<never> {
+    throw new Error('not used');
+  }
+  async deletePostReply() {}
+  async getPostReplies() {
+    return [];
+  }
   async resolvePost() {}
   async debugGrantCoins() {
     return { balance: 0, granted: 0 };

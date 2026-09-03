@@ -144,6 +144,32 @@ insert into public.post_categories (
  true, 300, false,
  0, 5, true, 90);
 
+-- --------------------------------------------------------------------------
+-- "Update" — the Threads-style, location-optional post. See
+-- 20260903000023_location_optional_posts.sql for the full design and
+-- POST_FEED_PLAN.md for the three-stage plan this is Stage 1 of.
+-- --------------------------------------------------------------------------
+-- requires_location = false is the only thing that makes this category
+-- different from every other row above: no lng/lat, no proximity check, no
+-- zone-based audience inheritance. TTL is a long fixed window rather than a
+-- default/max spread, since there is no real reason to let an update linger
+-- shorter or longer than any other — it reads as effectively permanent
+-- without actually special-casing "no expiry" anywhere in the schema.
+insert into public.post_categories (
+  key, label_ja, label_en,
+  default_ttl, max_ttl,
+  location_precision_m, requires_proximity, proximity_radius_m,
+  allows_body, body_max_length, allows_media,
+  min_reputation, hourly_post_limit, is_enabled, sort_order,
+  requires_location
+) values
+('update', '近況アップデート', 'Update',
+ interval '180 days', interval '180 days',
+ 0, false, 500,
+ true, 280, true,
+ 0, 20, true, 100,
+ false);
+
 
 insert into public.post_subtypes (category_key, key, label_ja, label_en, sort_order) values
   ('incident', 'traffic_accident', '交通事故',   'Traffic accident',  10),

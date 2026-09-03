@@ -136,6 +136,11 @@ export function retainCells(state: FeedState, keep: readonly CellId[]): FeedStat
 
   const pins = new Map<string, Pin>();
   for (const [id, pin] of state.pins) {
+    // A pin reaching feed state at all came through feedDelta, which only
+    // ever returns pins that already have a cell — a location-optional
+    // post (see post_categories.requires_location) is never among them.
+    // This check exists for that honestly-nullable type, not a real case.
+    if (pin.lng === null || pin.lat === null) continue;
     if (keepSet.has(cellOf(pin.lng, pin.lat))) pins.set(id, pin);
   }
 

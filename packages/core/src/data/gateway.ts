@@ -23,6 +23,7 @@ import type {
   BoardTileMeta,
   BoardTilePutRequest,
   ChatMessage,
+  FeedPostsPage,
   FlushedBoardTile,
   FriendTier,
   NewZone,
@@ -36,6 +37,7 @@ import type {
   NewPost,
   Pin,
   PostDetail,
+  PostReply,
   SignedBoardTileUrl,
   WalkResult,
 } from '../domain/types';
@@ -202,6 +204,38 @@ export interface SosoGateway {
   myZones(): Promise<Zone[]>;
   createZone(zone: NewZone): Promise<string>;
   deleteZone(zoneId: string): Promise<void>;
+
+  // --- Location-optional feed ----------------------------------------------
+  // See POST_FEED_PLAN.md, Stage 1. A location-optional post ("update") is
+  // just a post with category_key: "update" -- createPost needs no new
+  // method for it, only a category string the existing composer already
+  // knows how to pass through. These four methods cover the two things a
+  // pin-centric createPost/postDetail pair does not: a feed with no
+  // viewport to scope it, and a reply thread, which nothing in this
+  // interface had a shape for before now.
+
+  /**
+   * The global, reverse-chronological, audience-filtered feed of
+   * location-optional posts — every post with no cell, not only
+   * category: "update" specifically (see list_feed_posts' own comment in
+   * migration 0023 for why that's the right scope). Pass a page's
+   * `cursor` back as `before` to fetch the next one; omit `before` for the
+   * first page.
+   */
+  listFeedPosts(before?: string): Promise<FeedPostsPage>;
+
+  /** Same length/visibility rules as any other reply — see create_post_reply. */
+  createPostReply(postId: string, body: string): Promise<PostReply>;
+
+  /** Author-only. Throws soso/not_yours_or_already_gone otherwise. */
+  deletePostReply(replyId: string): Promise<void>;
+
+  /**
+   * A single post's reply thread, oldest first. `postId` may be any post,
+   * not only a location-optional one — replies are generic over posts.id
+   * (see post_replies' own comment in migration 0023).
+   */
+  getPostReplies(postId: string, before?: string): Promise<PostReply[]>;
 
   // --- Live change signals ------------------------------------------------
   //

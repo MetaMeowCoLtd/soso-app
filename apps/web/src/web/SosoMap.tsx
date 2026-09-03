@@ -769,19 +769,26 @@ export default function SosoMap({
   const pinMarkers = useMemo(
     () =>
       feed.mode === "pins" && !placing
-        ? feed.pins.map((pin) => (
-            <Marker
-              key={pin.id}
-              position={[pin.lat, pin.lng]}
-              icon={getPinIcon(pin, pin.id === selectedId || pin.id === celebrateId)}
-              // Leaflet's own opacity option — mutates the existing icon
-              // element's style in place via `marker.setOpacity()` rather
-              // than swapping the icon, so the fade-with-age effect stays
-              // smooth without ever touching the bob animation's DOM node.
-              opacity={pinFreshness(pin, nowSeconds)}
-              eventHandlers={{ click: () => handlePinClick(pin) }}
-            />
-          ))
+        ? feed.pins
+            // A location-optional post ("update", see post_categories
+            // .requires_location) never has a cell, so feed_delta's own
+            // viewport query never returns one — this filter is a type-level
+            // formality for TypeScript's benefit given Pin.lat/lng are now
+            // nullable, not a real-world case this map view will ever hit.
+            .filter((pin): pin is typeof pin & { lat: number; lng: number } => pin.lat !== null && pin.lng !== null)
+            .map((pin) => (
+              <Marker
+                key={pin.id}
+                position={[pin.lat, pin.lng]}
+                icon={getPinIcon(pin, pin.id === selectedId || pin.id === celebrateId)}
+                // Leaflet's own opacity option — mutates the existing icon
+                // element's style in place via `marker.setOpacity()` rather
+                // than swapping the icon, so the fade-with-age effect stays
+                // smooth without ever touching the bob animation's DOM node.
+                opacity={pinFreshness(pin, nowSeconds)}
+                eventHandlers={{ click: () => handlePinClick(pin) }}
+              />
+            ))
         : null,
     [feed.mode, feed.pins, placing, nowSeconds, selectedId, celebrateId, handlePinClick, getPinIcon],
   );

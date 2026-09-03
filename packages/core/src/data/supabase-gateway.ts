@@ -45,6 +45,8 @@ import {
   decodeBoardTileMeta,
   decodeFlushedBoardTile,
   parseBoardStrokeBatch,
+  decodeFeedPostsPage,
+  decodePostReply,
   type Board,
   type BoardStrokeBatch,
   type WireBoard,
@@ -55,6 +57,10 @@ import {
   type SignedBoardTileUrl,
   type FlushedBoardTile,
   type WireFlushedBoardTile,
+  type FeedPostsPage,
+  type WireFeedPostsPage,
+  type PostReply,
+  type WirePostReply,
 } from '../domain/types';
 import type { FeedQuery, PushEndpoint, ReportReason, SosoGateway } from './gateway';
 
@@ -213,8 +219,8 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
     async createPost(input: NewPost): Promise<Pin> {
       const { data, error } = await client.rpc('create_post', {
         p_category: input.category,
-        p_lng: input.at.lng,
-        p_lat: input.at.lat,
+        p_lng: input.at?.lng ?? null,
+        p_lat: input.at?.lat ?? null,
         p_subtype: input.subtype ?? null,
         p_body: input.body ?? null,
         p_device_lng: input.device?.lng ?? null,
@@ -376,6 +382,34 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
     async deleteZone(zoneId: string): Promise<void> {
       const { error } = await client.rpc('delete_zone', { p_zone_id: zoneId });
       if (error) throw toSosoError(error);
+    },
+
+    // --- Location-optional feed ---------------------------------------------
+
+    async listFeedPosts(before?: string): Promise<FeedPostsPage> {
+      const { data, error } = await client.rpc('list_feed_posts', { p_before: before ?? null });
+      if (error) throw toSosoError(error);
+      return decodeFeedPostsPage(data as WireFeedPostsPage);
+    },
+
+    async createPostReply(postId: string, body: string): Promise<PostReply> {
+      const { data, error } = await client.rpc('create_post_reply', { p_post_id: postId, p_body: body });
+      if (error) throw toSosoError(error);
+      return decodePostReply(data as WirePostReply);
+    },
+
+    async deletePostReply(replyId: string): Promise<void> {
+      const { error } = await client.rpc('delete_post_reply', { p_reply_id: replyId });
+      if (error) throw toSosoError(error);
+    },
+
+    async getPostReplies(postId: string, before?: string): Promise<PostReply[]> {
+      const { data, error } = await client.rpc('get_post_replies', {
+        p_post_id: postId,
+        p_before: before ?? null,
+      });
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WirePostReply[]).map(decodePostReply);
     },
 
     // --- Live change signals ---------------------------------------------

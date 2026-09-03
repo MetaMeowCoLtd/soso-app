@@ -68,8 +68,10 @@ export interface Pin {
   id: string;
   category: string;
   subtype: string | null;
-  lng: number;
-  lat: number;
+  /** Null for a location-optional post (see post_categories.requires_location). */
+  lng: number | null;
+  /** Null for a location-optional post (see post_categories.requires_location). */
+  lat: number | null;
   /** Epoch seconds. */
   createdAt: number;
   /** Epoch seconds. The client drops the pin locally when this passes. */
@@ -92,7 +94,8 @@ export interface WirePin {
   i: string;
   c: string;
   s: string | null;
-  g: [number, number];
+  /** Null for a location-optional post — see soso.pin in migration 0023. */
+  g: [number, number] | null;
   t: number;
   x: number;
   n: number;
@@ -105,8 +108,8 @@ export function decodePin(w: WirePin): Pin {
     id: w.i,
     category: w.c,
     subtype: w.s,
-    lng: Number(w.g[0]),
-    lat: Number(w.g[1]),
+    lng: w.g ? Number(w.g[0]) : null,
+    lat: w.g ? Number(w.g[1]) : null,
     createdAt: Number(w.t),
     expiresAt: Number(w.x),
     net: w.n,
@@ -174,6 +177,7 @@ export interface PostDetail extends Pin {
   mine: boolean;
   author: { id: string; handle: string; displayName: string };
   media: { objectKey: string; width: number; height: number }[];
+  replyCount: number;
 }
 
 /** `post_detail` response: a pin plus the fields the pin deliberately omits. */
@@ -185,6 +189,7 @@ export interface WirePostDetail extends WirePin {
   mine: boolean;
   author: { id: string; handle: string; name: string };
   media: { key: string; w: number; h: number }[];
+  replies: number;
 }
 
 export function decodePostDetail(w: WirePostDetail): PostDetail {
@@ -197,6 +202,7 @@ export function decodePostDetail(w: WirePostDetail): PostDetail {
     mine: w.mine,
     author: { id: w.author.id, handle: w.author.handle, displayName: w.author.name },
     media: (w.media ?? []).map((m) => ({ objectKey: m.key, width: m.w, height: m.h })),
+    replyCount: w.replies,
   };
 }
 
@@ -212,8 +218,14 @@ export interface NewPost {
   category: string;
   subtype?: string | null;
   body?: string | null;
-  /** What the post is about. */
-  at: { lng: number; lat: number };
+  /**
+   * What the post is about. Omit for a location-optional category
+   * (post_categories.requires_location = false, e.g. "update") — every
+   * other category still requires this; the server enforces that, not this
+   * type, since which categories require it is server-authoritative
+   * config, not something the client should hardcode a list of.
+   */
+  at?: { lng: number; lat: number };
   /**
    * Where the poster's device claims to be. Required for proximity-gated
    * categories. On the web this is weak evidence; in a native build it is
@@ -575,4 +587,72 @@ export function parseBoardStrokeBatch(value: unknown): BoardStrokeBatch | null {
     points.push({ x: point.x, y: point.y });
   }
   return { color: v.color, size: v.size, points };
+}
+
+// ---------------------------------------------------------------------------
+// Post replies — flat, one level deep (see post_replies, migration 0023)
+// ---------------------------------------------------------------------------
+
+export interface PostReply {
+  id: string;
+  postId: string;
+  body: string;
+  createdAt: string;
+  authorId: string;
+  authorHandle: string;
+  authorName: string;
+  mine: boolean;
+}
+
+export interface WirePostReply {
+  id: string;
+  post_id: string;
+  body: string;
+  created_at: string;
+  author_id: string;
+  author_handle: string;
+  author_name: string;
+  mine: boolean;
+}
+
+export function decodePostReply(w: WirePostReply): PostReply {
+  return {
+    id: w.id,
+    postId: w.post_id,
+    body: w.body,
+    createdAt: w.created_at,
+    authorId: w.author_id,
+    authorHandle: w.author_handle,
+    authorName: w.author_name,
+    mine: w.mine,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The location-optional feed (list_feed_posts, migration 0023)
+// ---------------------------------------------------------------------------
+
+/**
+ * Each item is decoded through `decodePostDetail` — `list_feed_posts` builds
+ * every row with the exact same shape `post_detail` returns for one post
+ * (see that RPC's own comment), so a single-item fetch and a paginated list
+ * of them share one wire shape and one decoder rather than two to keep in
+ * sync.
+ */
+export interface FeedPostsPage {
+  /** Pass as `p_before` to fetch the next page. Null when the page returned was empty. */
+  cursor: string | null;
+  posts: PostDetail[];
+}
+
+export interface WireFeedPostsPage {
+  cursor: string | null;
+  posts: WirePostDetail[];
+}
+
+export function decodeFeedPostsPage(w: WireFeedPostsPage): FeedPostsPage {
+  return {
+    cursor: w.cursor,
+    posts: (w.posts ?? []).map(decodePostDetail),
+  };
 }

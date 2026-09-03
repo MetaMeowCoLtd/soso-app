@@ -63,10 +63,12 @@ import type {
   BoardTileMeta,
   BoardTilePutRequest,
   ChatMessage,
+  FeedPostsPage,
   FeedQuery,
   FlushedBoardTile,
   FollowResult,
   Friend,
+  PostReply,
   ReportReason,
   SignedBoardTileUrl,
   SosoGateway,
@@ -195,6 +197,29 @@ const DEMO_CATEGORIES: CategoryConfig[] = [
     sortOrder: 90,
     subtypes: [],
   },
+  // Location-optional — see POST_FEED_PLAN.md Stage 1. Values mirror the
+  // "update" row in seed.sql / 20260903000023_location_optional_posts.sql
+  // exactly. createPost above checks `category.key === "update"` directly
+  // to skip its location handling entirely for this one; there is
+  // otherwise nothing location-specific about how this category is
+  // configured here.
+  {
+    key: "update",
+    labelJa: "近況アップデート",
+    labelEn: "Update",
+    defaultTtlSeconds: 180 * 86400,
+    maxTtlSeconds: 180 * 86400,
+    locationPrecisionM: 0,
+    requiresProximity: false,
+    proximityRadiusM: 500,
+    allowsBody: true,
+    bodyMaxLength: 280,
+    allowsMedia: true,
+    minReputation: 0,
+    hourlyPostLimit: 20,
+    sortOrder: 100,
+    subtypes: [],
+  },
 ];
 
 const DISPUTE_THRESHOLD = 3; // mirrors soso.dispute_threshold()
@@ -211,15 +236,27 @@ interface DemoPost {
   category: string;
   subtype: string | null;
   body: string | null;
-  lng: number;
-  lat: number;
-  cellId: number;
+  /** Null for a location-optional category (see requiresLocation on DemoCategoryConfig-equivalent handling in createPost). */
+  lng: number | null;
+  lat: number | null;
+  /** Null exactly when lng/lat are — mirrors soso.tg_posts_derive's own branch. */
+  cellId: number | null;
   status: PostStatus;
   createdAt: number; // epoch seconds
   expiresAt: number; // epoch seconds
   updatedAt: number; // epoch seconds — bumped on every write, mirrors the posts_derive trigger
   confirmCount: number;
   disputeCount: number;
+  replyCount: number;
+}
+
+interface DemoReply {
+  id: string;
+  postId: string;
+  authorId: string;
+  body: string;
+  createdAt: number; // epoch seconds
+  status: PostStatus;
 }
 
 interface DemoVote {
@@ -325,6 +362,7 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
         updatedAt: now - 18 * 60,
         confirmCount: 4,
         disputeCount: 0,
+        replyCount: 0,
       },
       {
         id: crypto.randomUUID(),
@@ -339,6 +377,7 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
         updatedAt: now - 95 * 60,
         confirmCount: 2,
         disputeCount: 0,
+        replyCount: 0,
       },
       {
         id: crypto.randomUUID(),
@@ -353,6 +392,7 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
         updatedAt: now - 210 * 60,
         confirmCount: 1,
         disputeCount: 0,
+        replyCount: 0,
       },
       {
         id: crypto.randomUUID(),
@@ -367,6 +407,7 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
         updatedAt: now - 4 * 60,
         confirmCount: 1,
         disputeCount: 0,
+        replyCount: 0,
       },
     ] satisfies Array<Omit<DemoPost, "cellId">>
   ).map((s) => ({ ...s, cellId: cellOf(s.lng, s.lat) }));
@@ -381,6 +422,16 @@ function loadPosts(): DemoPost[] {
 
 function savePosts(posts: DemoPost[]): void {
   writeJSON(POSTS_KEY, posts);
+}
+
+const REPLIES_KEY = "soso-demo:replies:v1";
+
+function loadReplies(): DemoReply[] {
+  return readJSON<DemoReply[]>(REPLIES_KEY, []);
+}
+
+function saveReplies(replies: DemoReply[]): void {
+  writeJSON(REPLIES_KEY, replies);
 }
 
 function loadVotes(): DemoVote[] {
@@ -558,7 +609,7 @@ export function createDemoGateway(): SosoGateway {
       const sinceMs = query.since ? Date.parse(query.since) - 10_000 : null; // lap back 10s, same as feed_delta
 
       const candidates = loadPosts().filter(
-        (p) => cellSet.has(p.cellId) && (!categorySet || categorySet.has(p.category)),
+        (p) => p.cellId !== null && cellSet.has(p.cellId) && (!categorySet || categorySet.has(p.category)),
       );
 
       const isLive = (p: DemoPost) => p.status === "live" && p.expiresAt > now;
@@ -591,7 +642,7 @@ export function createDemoGateway(): SosoGateway {
       const counts = new Map<number, number>();
 
       for (const p of loadPosts()) {
-        if (!cellSet.has(p.cellId)) continue;
+        if (p.cellId === null || !cellSet.has(p.cellId)) continue;
         if (categorySet && !categorySet.has(p.category)) continue;
         if (p.status !== "live" || p.expiresAt <= now) continue;
         counts.set(p.cellId, (counts.get(p.cellId) ?? 0) + 1);
@@ -617,6 +668,7 @@ export function createDemoGateway(): SosoGateway {
         mine: post.authorId === me,
         author: { id: post.authorId, handle: "demo", displayName: post.authorId === me ? "You" : "A neighbour" },
         media: [],
+        replyCount: post.replyCount,
       };
     },
 
@@ -648,29 +700,43 @@ export function createDemoGateway(): SosoGateway {
       ).length;
       if (recentCount >= category.hourlyPostLimit) throw new SosoError("soso/rate_limited");
 
-      const { lng, lat } = input.at;
-      if (!Number.isFinite(lng) || !Number.isFinite(lat) || Math.abs(lng) > 180 || Math.abs(lat) > 85) {
-        throw new SosoError("soso/invalid_location");
-      }
+      // "update" is the one location-optional category demo mode knows
+      // about (see post_categories.requires_location, migration 0023) —
+      // checked by key here rather than threading a requiresLocation flag
+      // through CategoryConfig, matching how DEMO_CATEGORIES already
+      // hardcodes every other category's quirks locally rather than
+      // faking a full config-driven pipeline nothing here reads generically
+      // yet. Revisit if a UI ever needs to ask "does this category need a
+      // location" generically — Stage 1 doesn't.
+      const needsLocation = category.key !== "update";
 
-      if (category.requiresProximity) {
-        if (!input.device) throw new SosoError("soso/device_location_required");
-        const distance = haversineMetres(
-          { lng: input.device.lng, lat: input.device.lat },
-          { lng, lat },
-        );
-        if (distance > category.proximityRadiusM) throw new SosoError("soso/too_far_away");
-      }
+      let fuzzed: { lng: number; lat: number } | null = null;
+      if (needsLocation) {
+        if (!input.at) throw new SosoError("soso/invalid_location");
+        const { lng, lat } = input.at;
+        if (!Number.isFinite(lng) || !Number.isFinite(lat) || Math.abs(lng) > 180 || Math.abs(lat) > 85) {
+          throw new SosoError("soso/invalid_location");
+        }
 
-      // Fuzzing is a no-op for every category currently enabled here
-      // (locationPrecisionM is 0 for all five) — kept for parity with
-      // create_post's shape rather than because it does anything today.
-      const fuzzed = category.locationPrecisionM > 0
-        ? {
-            lng: Math.round(lng / (category.locationPrecisionM / 111_320)) * (category.locationPrecisionM / 111_320),
-            lat,
-          }
-        : { lng, lat };
+        if (category.requiresProximity) {
+          if (!input.device) throw new SosoError("soso/device_location_required");
+          const distance = haversineMetres(
+            { lng: input.device.lng, lat: input.device.lat },
+            { lng, lat },
+          );
+          if (distance > category.proximityRadiusM) throw new SosoError("soso/too_far_away");
+        }
+
+        // Fuzzing is a no-op for every category currently enabled here
+        // (locationPrecisionM is 0 for all five) — kept for parity with
+        // create_post's shape rather than because it does anything today.
+        fuzzed = category.locationPrecisionM > 0
+          ? {
+              lng: Math.round(lng / (category.locationPrecisionM / 111_320)) * (category.locationPrecisionM / 111_320),
+              lat,
+            }
+          : { lng, lat };
+      }
 
       const ttlSeconds = Math.min(
         input.ttlMinutes ? Math.max(input.ttlMinutes * 60, 60) : category.defaultTtlSeconds,
@@ -684,15 +750,16 @@ export function createDemoGateway(): SosoGateway {
         category: category.key,
         subtype: input.subtype ?? null,
         body,
-        lng: fuzzed.lng,
-        lat: fuzzed.lat,
-        cellId: cellOf(fuzzed.lng, fuzzed.lat),
+        lng: fuzzed?.lng ?? null,
+        lat: fuzzed?.lat ?? null,
+        cellId: fuzzed ? cellOf(fuzzed.lng, fuzzed.lat) : null,
         status: "live",
         createdAt: now,
         expiresAt: now + ttlSeconds,
         updatedAt: now,
         confirmCount: 0,
         disputeCount: 0,
+        replyCount: 0,
       };
 
       savePosts([post, ...loadPosts()]);
@@ -884,6 +951,113 @@ export function createDemoGateway(): SosoGateway {
     },
 
     async deleteZone(): Promise<void> {},
+
+    // --- Location-optional feed ---------------------------------------------
+    // Fully functional in demo mode, unlike the social-graph methods just
+    // above — an "update" post and its replies are content a single local
+    // user can create and read back, the same reason posts/votes/chat are
+    // already fully faked here rather than rejecting.
+
+    async listFeedPosts(before?: string): Promise<FeedPostsPage> {
+      const me = getMe();
+      const cursor = before ? Number(before) : null;
+      const now = nowSeconds();
+
+      const matching = loadPosts()
+        .filter(
+          (p) =>
+            p.cellId === null &&
+            p.status === "live" &&
+            p.expiresAt > now &&
+            (cursor === null || p.createdAt < cursor),
+        )
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 20);
+
+      const last = matching.length > 0 ? matching[matching.length - 1] : undefined;
+
+      return {
+        cursor: last ? String(last.createdAt) : null,
+        posts: matching.map((post) => ({
+          ...toPin(post),
+          body: post.body,
+          confirmCount: post.confirmCount,
+          disputeCount: post.disputeCount,
+          address: null,
+          mine: post.authorId === me,
+          author: { id: post.authorId, handle: "demo", displayName: post.authorId === me ? "You" : "A neighbour" },
+          media: [],
+          replyCount: post.replyCount,
+        })),
+      };
+    },
+
+    async createPostReply(postId: string, body: string): Promise<PostReply> {
+      const me = getMe();
+      const post = loadPosts().find((p) => p.id === postId);
+      if (!post || post.status !== "live" || post.expiresAt <= nowSeconds()) {
+        throw new SosoError("soso/post_not_found");
+      }
+
+      const trimmed = body.trim();
+      if (trimmed.length === 0) throw new SosoError("soso/empty_message");
+      if (trimmed.length > 500) throw new SosoError("soso/reply_too_long");
+
+      const reply: DemoReply = {
+        id: crypto.randomUUID(),
+        postId,
+        authorId: me,
+        body: trimmed,
+        createdAt: nowSeconds(),
+        status: "live",
+      };
+      saveReplies([...loadReplies(), reply]);
+      savePosts(loadPosts().map((p) => (p.id === postId ? { ...p, replyCount: p.replyCount + 1 } : p)));
+
+      return {
+        id: reply.id,
+        postId: reply.postId,
+        body: reply.body,
+        createdAt: new Date(reply.createdAt * 1000).toISOString(),
+        authorId: me,
+        authorHandle: "demo",
+        authorName: "You",
+        mine: true,
+      };
+    },
+
+    async deletePostReply(replyId: string): Promise<void> {
+      const me = getMe();
+      const reply = loadReplies().find((r) => r.id === replyId && r.authorId === me && r.status === "live");
+      if (!reply) throw new SosoError("soso/not_yours_or_already_gone");
+
+      saveReplies(loadReplies().map((r) => (r.id === replyId ? { ...r, status: "removed" as const } : r)));
+      savePosts(
+        loadPosts().map((p) =>
+          p.id === reply.postId ? { ...p, replyCount: Math.max(p.replyCount - 1, 0) } : p,
+        ),
+      );
+    },
+
+    async getPostReplies(postId: string): Promise<PostReply[]> {
+      const me = getMe();
+      const post = loadPosts().find((p) => p.id === postId);
+      if (!post) throw new SosoError("soso/post_not_found");
+
+      return loadReplies()
+        .filter((r) => r.postId === postId && r.status === "live")
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map((r) => ({
+          id: r.id,
+          postId: r.postId,
+          body: r.body,
+          createdAt: new Date(r.createdAt * 1000).toISOString(),
+          authorId: r.authorId,
+          authorHandle: "demo",
+          authorName: r.authorId === me ? "You" : "A neighbour",
+          mine: r.authorId === me,
+        }));
+    },
 
     // No realtime transport in demo mode -- there's nobody else to hear
     // from, and the 30s poll (harmless here, since it's a local read) is
