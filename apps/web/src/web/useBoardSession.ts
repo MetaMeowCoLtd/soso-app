@@ -417,9 +417,41 @@ export function useBoardSession(
 
   const stampDot = useCallback(
     (x: number, y: number) => {
+      // A dot only ever marks the very start of a brand new stroke (see
+      // BoardCanvas's onPointerDown — this is its sole call site). The
+      // outgoing accumulator must not carry anything from whatever stroke
+      // just ended into this one: the publish interval below always
+      // carries a finished stroke's last point forward as a 1-point seed,
+      // with no idea the pointer was ever lifted, on the theory that it
+      // might just be a batch boundary mid-drag. If this new stroke happens
+      // to share that old one's color and size — the common case, since
+      // most people draw several strokes before switching color —
+      // stampSegment's own "same color/size, keep coalescing" branch would
+      // silently append this new stroke's starting point onto that stale
+      // seed, wiring the tail of the finished stroke to the head of a
+      // completely unrelated new one in whatever gets broadcast next.
+      //
+      // This is never painted onto the artist's own canvas — paintSegment
+      // only ever runs with this device's actual pointer coordinates, which
+      // never contained that spurious jump — which is exactly why it only
+      // ever showed up as a straight line connecting orphaned pixels on
+      // OTHER people's boards, never the artist's own.
+      //
+      // Publishing whatever was still pending, rather than just discarding
+      // it, matters for a fast flick immediately followed by a new stroke:
+      // with a plain reset, any of that first stroke's points not yet sent
+      // by the 60ms throttle below would be lost from the broadcast (and
+      // from what a NEW joiner sees once it is eventually flushed to a
+      // tile) even though they are already sitting correctly on this
+      // device's own canvas.
+      const pending = outgoing.current;
+      if (pending && pending.points.length > 0) {
+        gateway.publishBoardStroke(boardId, { color: pending.color, size: pending.size, points: pending.points });
+      }
+      outgoing.current = null;
       stampSegment(x, y, x, y);
     },
-    [stampSegment],
+    [stampSegment, gateway, boardId],
   );
 
   /**
@@ -432,6 +464,20 @@ export function useBoardSession(
    */
   const applyRemoteStroke = useCallback(
     (stroke: { color: string; size: number; points: { x: number; y: number }[] }) => {
+      // A stroke that was a single click with no drag arrives as one point,
+      // not two — stampDot's local equivalent is a zero-length segment
+      // (see stampDot), which this mirrors. Without this, the loop below
+      // (which needs a pair to draw between) never runs at all for it, so
+      // an isolated dot the artist placed simply never appeared on anyone
+      // else's board — a second, narrower version of this same "doesn't
+      // look the same on other devices" complaint, just from a batch
+      // having too FEW points to draw anything, rather than an extra one
+      // wrongly connecting it to something else.
+      if (stroke.points.length === 1) {
+        const only = stroke.points[0];
+        if (only) paintSegment(only.x, only.y, only.x, only.y, stroke.color, stroke.size);
+        return;
+      }
       for (let i = 1; i < stroke.points.length; i++) {
         const prev = stroke.points[i - 1];
         const curr = stroke.points[i];
