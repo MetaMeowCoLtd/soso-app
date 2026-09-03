@@ -6,18 +6,20 @@ import { formatAgo } from "soso-core";
 import type { UsePresenceResult } from "./usePresence";
 
 /**
- * The people frame.
+ * The friends frame.
  *
- * Docked open by default rather than a modal — this sits on the home screen
- * as a fixture, not a screen someone opens and dismisses. That changes the
- * copy budget: a one-time modal can afford an explanatory paragraph per
- * control, a permanent fixture cannot, so the "why" that used to be visible
- * body text now lives in `title`/`aria-label` (still reachable, just not
- * taking up standing space). The two things that must never be conflated —
- * "Around here" is an anonymous count anyone can see, "Your people" is a
- * named list gated by mutual follow — are kept as two visually distinct
- * blocks even with the prose gone, so the boundary is still legible at a
- * glance and not just in a tooltip.
+ * Docked as a fixture rather than a modal — a `minimized` CSS class collapses
+ * it toward the header icon instead of unmounting it, so `usePresence`'s
+ * heartbeat (which lives in the parent regardless) never has to restart, and
+ * a minimize/restore reads as an animation rather than a close/reopen. That
+ * changes the copy budget: a one-time modal can afford an explanatory
+ * paragraph per control, a permanent fixture cannot, so the "why" that used
+ * to be visible body text now lives in `title`/`aria-label` (still reachable,
+ * just not taking up standing space). The two things that must never be
+ * conflated — "nearby" is an anonymous count anyone can see, the list below
+ * it is a named list gated by mutual follow — are kept as two visually
+ * distinct blocks even with the prose gone, so the boundary is still legible
+ * at a glance and not just in a tooltip.
  */
 
 interface PeoplePanelProps {
@@ -120,7 +122,7 @@ export default function PeoplePanel({ presence, demoMode, minimized, onMinimize 
   return (
     <aside
       className={`people-frame ${minimized ? "minimized" : ""}`}
-      aria-label="People"
+      aria-label="Friends"
       aria-hidden={minimized}
       // Genuinely out of the tab order while minimized, not just visually
       // hidden — otherwise a keyboard user could still tab into a panel
@@ -128,7 +130,7 @@ export default function PeoplePanel({ presence, demoMode, minimized, onMinimize 
       inert={minimized || undefined}
     >
       <div className="people-frame-head">
-        <span className="people-frame-title">People</span>
+        <span className="people-frame-title">Friends</span>
         <button
           className="people-frame-close"
           onClick={onMinimize}

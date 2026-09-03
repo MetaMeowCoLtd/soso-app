@@ -193,12 +193,12 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
-  const [showPeople, setShowPeople] = useState(true);
-  // Starts minimized, unlike People: this is an opt-in extra, not something
-  // serving the map's own core "is this area alive" purpose the way
-  // presence does, and opening two panels by default on first load would
-  // work directly against the compactness this feature was specifically
-  // asked to keep.
+  const [showPeople, setShowPeople] = useState(false);
+  // Starts minimized, same as chat below. Used to default open — the
+  // reasoning was that presence serves the map's own "is this area alive"
+  // purpose, unlike chat's opt-in extra — but that's been changed on
+  // request so neither panel claims screen space before someone's actually
+  // asked to see it.
   const [showChat, setShowChat] = useState(false);
   // null while loading, distinct from 0 — ReportForm treats null as "don't
   // block on this yet" rather than falsely showing "you can't afford this"
@@ -610,9 +610,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           className={`people-button ${presence.sharing ? "sharing" : ""} ${showPeople ? "active" : ""}`}
           onClick={() => setShowPeople((v) => !v)}
           type="button"
-          aria-label="People around here"
+          aria-label="Friends"
           aria-pressed={showPeople}
-          title="People around here"
+          title="Friends"
         >
           <PeopleIcon />
           {presence.areaCount !== null && presence.areaCount > 0 && (
