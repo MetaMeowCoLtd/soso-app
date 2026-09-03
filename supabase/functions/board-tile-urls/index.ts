@@ -60,6 +60,34 @@ const R2_BUCKET = Deno.env.get("R2_BUCKET") ?? "";
 // window is simply less time for a leaked URL to matter.
 const URL_TTL_SECONDS = 300;
 
+// This function is called directly from the browser (see the header comment
+// above on why it verifies the caller's JWT), which means every request is
+// preceded by a CORS preflight (an OPTIONS request) that the browser sends
+// on its own — the app code never issues it. Supabase does not add CORS
+// headers to Edge Function responses automatically; without handling OPTIONS
+// explicitly and echoing these headers on every response (including error
+// responses — the browser checks the preflight's response, not just a
+// successful one), the preflight itself comes back as a bare 405 with no
+// Access-Control-Allow-* headers, which the browser reports as exactly the
+// "preflight... does not have HTTP ok status" CORS error, before the actual
+// POST is ever sent. `*` here is intentional and safe: no cookies or
+// ambient credentials cross this boundary (the caller's JWT is an explicit
+// Authorization header, not something `*` would expose), and the app is
+// served from GitHub Pages while this function lives on a different origin,
+// so there is no single first-party origin to pin this to instead.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function json(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 const r2 = R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
   ? new S3Client({
       region: "auto",
@@ -131,13 +159,20 @@ function objectKeyFor(boardId: string, tx: number, ty: number, version: number):
 }
 
 Deno.serve(async (req: Request) => {
+  // The preflight itself. Must return 2xx with the CORS headers and nothing
+  // else — no auth check, no body parsing — since the browser sends this
+  // before it has attached anything from the real request at all.
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return json({ error: "soso/method_not_allowed" }, 405);
   }
 
   if (!r2) {
     console.error("[board-tile-urls] R2 credentials not configured");
-    return new Response(JSON.stringify({ error: "soso/r2_not_configured" }), { status: 500 });
+    return json({ error: "soso/r2_not_configured" }, 500);
   }
 
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -152,7 +187,7 @@ Deno.serve(async (req: Request) => {
   });
   const { data: userData, error: userError } = await callerClient.auth.getUser();
   if (userError || !userData?.user) {
-    return new Response(JSON.stringify({ error: "soso/unauthenticated" }), { status: 401 });
+    return json({ error: "soso/unauthenticated" }, 401);
   }
   const viewerId = userData.user.id;
 
@@ -160,12 +195,12 @@ Deno.serve(async (req: Request) => {
   try {
     rawBody = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: "soso/bad_request" }), { status: 400 });
+    return json({ error: "soso/bad_request" }, 400);
   }
 
   const body = parseBody(rawBody);
   if (!body) {
-    return new Response(JSON.stringify({ error: "soso/bad_request" }), { status: 400 });
+    return json({ error: "soso/bad_request" }, 400);
   }
 
   // The one access-control check this whole function exists to make. Same
@@ -182,14 +217,14 @@ Deno.serve(async (req: Request) => {
 
   if (canSeeError) {
     console.error("[board-tile-urls] visibility check failed:", canSeeError);
-    return new Response(JSON.stringify({ error: "soso/internal_error" }), { status: 500 });
+    return json({ error: "soso/internal_error" }, 500);
   }
   if (canSee !== true) {
     // Deliberately the same response whether the board does not exist, is
     // not visible to this viewer, or is not actually a board at all — the
     // three cases are indistinguishable from the caller's side of the audience
     // system everywhere else in this app, and should stay that way here too.
-    return new Response(JSON.stringify({ error: "soso/forbidden" }), { status: 403 });
+    return json({ error: "soso/forbidden" }, 403);
   }
 
   try {
@@ -208,9 +243,9 @@ Deno.serve(async (req: Request) => {
       }),
     );
 
-    return new Response(JSON.stringify({ urls, expiresInSeconds: URL_TTL_SECONDS }), { status: 200 });
+    return json({ urls, expiresInSeconds: URL_TTL_SECONDS }, 200);
   } catch (err) {
     console.error("[board-tile-urls] presigning failed:", err);
-    return new Response(JSON.stringify({ error: "soso/internal_error" }), { status: 500 });
+    return json({ error: "soso/internal_error" }, 500);
   }
 });

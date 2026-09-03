@@ -197,6 +197,20 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
           {session.locked && <span className="board-canvas-locked">Locked</span>}
           {session.saving && <span className="board-canvas-saving">Saving</span>}
         </div>
+        {/*
+         * A flush failure (see useBoardSession's flushNow) sets `error` but
+         * deliberately leaves `status` at "ready" — the canvas itself is
+         * still fine to draw on, only the save failed. The status==="error"
+         * branch below only ever covers the initial board-open failing, so
+         * without this, a save failure was previously invisible: `saving`
+         * just flips back to false as if nothing happened, and the person
+         * has no way to know their last few strokes never left the device.
+         */}
+        {session.status === "ready" && session.error && (
+          <span className="board-canvas-save-error" role="alert">
+            {session.error}
+          </span>
+        )}
       </header>
 
       <div className="board-canvas-stage">

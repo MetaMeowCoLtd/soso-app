@@ -387,6 +387,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .board-canvas-locked, .board-canvas-saving { padding:3px 8px; border-radius:999px; font-size:.68rem; font-weight:700; }
 .board-canvas-locked { background:#fef2f4; color:#b52445; }
 .board-canvas-saving { background:#eef8f4; color:#1b866c; }
+.board-canvas-save-error { padding:3px 8px; border-radius:999px; background:#fef2f4; color:#b52445; font-size:.68rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .board-canvas-stage { position:relative; flex:1; min-height:0; }
 .board-canvas-surface { position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:crosshair; display:block; }
 .board-canvas-status { position:absolute; z-index:1; top:16px; left:50%; transform:translateX(-50%); margin:0; padding:8px 13px; border-radius:999px; background:rgba(255,255,255,.88); color:#276153; font-size:.78rem; font-weight:750; }
