@@ -4,8 +4,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Soso | Local reports, simply shared",
-  description: "A local-first incident reporting MVP.",
+  title: "SoSo",
+  description: "A map-centric social network service",
   // A relative path, not "/manifest.json" — this deploys under a variable
   // GitHub Pages subpath (see NEXT_BASE_PATH in next.config.ts), and a
   // relative reference resolves correctly against the page's own URL either
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Soso",
+    title: "SoSo",
   },
   icons: {
     icon: [
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   // iOS still uses it to decide whether a Home Screen web app may draw below
   // the status bar/notch when `black-translucent` is requested.
   other: {
-    "apple-mobile-web-app-capable": "yes",
+    "mobile-web-app-capable": "yes",
   },
 };
 
