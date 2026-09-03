@@ -356,7 +356,7 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   const notificationBody = JSON.stringify({
-    title: "Soso",
+    title: "SoSo",
     body: `New ${category?.label_en ?? payload.category_key} report nearby`,
     postId: payload.post_id,
   });

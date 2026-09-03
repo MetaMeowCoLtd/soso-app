@@ -796,7 +796,7 @@ export default function SosoMap({
 
   return (
     <MapContainer
-      aria-label="Soso map: click anywhere to drop a pin"
+      aria-label="SoSo map: click anywhere to drop a pin"
       center={DEFAULT_CENTER}
       zoom={DEFAULT_ZOOM}
       className="map"

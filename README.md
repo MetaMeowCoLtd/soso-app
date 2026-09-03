@@ -1,6 +1,6 @@
-# Soso
+# SoSo
 
-Soso is a location-based reporting platform. Reports are location- and
+SoSo is a location-based reporting platform. Reports are location- and
 time-bound: an accident, a lane closure, a lost item, or a table opening up
 at a cafe. Every report follows the same model: a claim, tied to a location,
 valid until a defined expiry. This model is what allows expiry, per-category
@@ -554,7 +554,7 @@ select user_id, cell_id, label from public.cell_subscriptions order by cell_id;
 
 For a delivery test, use two different browsers or two anonymous accounts.
 On the receiving device, first enable the bell. Post from the other account
-within the same small map area; Soso watches a 3×3 cell block around the map
+within the same small map area; SoSo watches a 3×3 cell block around the map
 centre, so a report in a different neighbourhood will correctly match nobody.
 Then open **Edge Functions > notify-new-pin > Logs**. A healthy invocation
 contains `processing post` and `delivery complete` with a nonzero `sent`.

@@ -263,7 +263,7 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
             <span className="audience-label">Visible to</span>
             <div className="audience-options">
               {([
-                { key: "public", label: "Everyone", hint: "Anyone using Soso here" },
+                { key: "public", label: "Everyone", hint: "Anyone using SoSo here" },
                 { key: "friends", label: "Friends", hint: "People you both follow" },
                 { key: "close_friends", label: "Close friends", hint: "Friends you marked close" },
               ] as const).map((option) => (

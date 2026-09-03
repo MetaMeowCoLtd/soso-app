@@ -16,7 +16,7 @@
  */
 
 self.addEventListener("push", (event) => {
-  let payload = { title: "Soso", body: "Something new nearby.", postId: null };
+  let payload = { title: "SoSo", body: "Something new nearby.", postId: null };
   try {
     if (event.data) payload = { ...payload, ...event.data.json() };
   } catch {

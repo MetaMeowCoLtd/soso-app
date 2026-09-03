@@ -250,7 +250,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
   async function toggleNotifications() {
     if (pushAvailability === "ios-needs-install") {
-      setNotice("Add Soso to your Home Screen from Safari's share menu first, then try again.");
+      setNotice("Add SoSo to your Home Screen from Safari's share menu first, then try again.");
       return;
     }
     if (pushAvailability !== "available") {
@@ -586,8 +586,8 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
       <header className="map-header">
         <div className="header-left">
-          <a className="brand" href="#top" aria-label="Soso home">
-            <span>so</span>so
+          <a className="brand" href="#top" aria-label="SoSo home">
+            <span>So</span>So
           </a>
           <div className="coin-badge" title="Coins — spent posting, earned by walking">
             <span className="coin-badge-amount">🪙 {coinBalance ?? "…"}</span>

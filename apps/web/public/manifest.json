@@ -1,6 +1,6 @@
 {
-  "name": "Soso",
-  "short_name": "Soso",
+  "name": "SoSo",
+  "short_name": "SoSo",
   "description": "Local reports, simply shared.",
   "start_url": "./",
   "scope": "./",
