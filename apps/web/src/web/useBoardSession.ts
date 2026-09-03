@@ -261,6 +261,19 @@ export function useBoardSession(
 
   const baseTiles = useRef(new Map<string, CachedTile>());
   const dirtyTiles = useRef(new Map<string, HTMLCanvasElement>());
+  /**
+   * Which tiles currently have content that has not made it to R2 yet —
+   * deliberately a separate bookkeeping structure from `dirtyTiles` itself
+   * rather than inferring "needs a flush" from `dirtyTiles.size`. See
+   * `flushNow`'s own comment for why: a tile's canvas OBJECT needs to
+   * survive being read for an in-flight upload without being cleared or
+   * swapped away mid-stroke, but "has this tile been painted on since the
+   * last successful flush" still needs an answer that updates instantly —
+   * these two concerns used to be conflated into one Map, which is what
+   * let a stroke painted while its tile's flush was in flight get silently
+   * discarded the moment that flush completed.
+   */
+  const dirtyKeys = useRef(new Set<string>());
   const indexRef = useRef(new Map<string, BoardTileMeta>());
   const loadedVersions = useRef(new Map<string, number>());
   const flushing = useRef(false);
@@ -289,6 +302,31 @@ export function useBoardSession(
     }
     return canvas.getContext("2d");
   };
+
+  /**
+   * Draws `src`'s current pixels underneath whatever is currently on the
+   * live dirty canvas for a tile, then replaces that canvas's content with
+   * the merged result. Used only when a flush attempt for `src` (a
+   * snapshot taken at the start of that attempt — see `flushNow`) has
+   * exhausted its retries: `src`'s content never made it to R2, and the
+   * live canvas may by now hold newer strokes painted while those retries
+   * were in flight. Merging rather than picking one or the other is what
+   * keeps both: the failed content is retried whole, together with
+   * whatever came after it, on the next flush pass.
+   */
+  function mergeCanvasInto(ctx: CanvasRenderingContext2D | null, src: HTMLCanvasElement) {
+    if (!ctx) return;
+    const { width, height } = src;
+    const merged = document.createElement("canvas");
+    merged.width = width;
+    merged.height = height;
+    const mergedCtx = merged.getContext("2d");
+    if (!mergedCtx) return;
+    mergedCtx.drawImage(src, 0, 0);
+    mergedCtx.drawImage(ctx.canvas, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(merged, 0, 0);
+  }
 
   /**
    * The actual tile-painting work, extracted so both a locally-drawn
@@ -320,6 +358,12 @@ export function useBoardSession(
         if (!ctx) continue;
         const bounds = canvasTileBounds(tile.tx, tile.ty, tileSize);
         paintOntoDirty(ctx, bounds.minX, bounds.minY, color, size, x0, y0, x1, y1);
+        // Marks this tile as needing a flush REGARDLESS of whether that
+        // flush for it happens to already be in flight right now — see
+        // flushNow's own comment on why re-marking here, rather than only
+        // when a canvas is first created, is what makes a stroke drawn
+        // mid-flush get picked up on the next pass instead of vanishing.
+        dirtyKeys.current.add(canvasTileKey(tile.tx, tile.ty));
       }
       bump();
     },
@@ -463,21 +507,56 @@ export function useBoardSession(
   const flushNow = useCallback(async () => {
     const currentBoard = boardRef.current;
     if (!currentBoard || currentBoard.locked) return;
-    if (flushing.current || dirtyTiles.current.size === 0) return;
+    if (flushing.current || dirtyKeys.current.size === 0) return;
     flushing.current = true;
     setSaving(true);
     try {
-      const dirtyEntries = [...dirtyTiles.current.entries()];
-      for (const [key, dirty] of dirtyEntries) {
+      const keysToFlush = [...dirtyKeys.current];
+      for (const key of keysToFlush) {
         const parsed = parseCanvasTileKey(key);
         if (!parsed) continue;
         const { tx, ty } = parsed;
+
+        const live = dirtyTiles.current.get(key);
+        if (!live) {
+          dirtyKeys.current.delete(key);
+          continue;
+        }
+
+        // Snapshot exactly what has been painted so far, then immediately
+        // swap in a fresh, blank canvas as the live layer for this tile —
+        // and, right alongside that, drop it from dirtyKeys. From this
+        // instant on, anything painted on this tile (including mid-stroke,
+        // which is the whole point) lands on the fresh canvas and, via
+        // paintSegment re-adding the key, is correctly queued for the NEXT
+        // flush pass. Nothing painted from here on can be affected by the
+        // upload below: it reads only `snapshot`, a detached object the
+        // live canvas map no longer even references.
+        //
+        // Before this, `dirty` here WAS the live canvas — the very object
+        // paintSegment kept drawing onto during the several-hundred-ms trip
+        // through getBoardTileUploadUrls / putBoardTileBytes /
+        // flushBoardTile below. A stroke landing on it after compositeTile
+        // had already read its pixels, but before the old code's
+        // `dirtyTiles.current.delete(key)` ran, was silently thrown away
+        // the moment that delete fired: exactly the "disappears before
+        // letting go of the mouse" bug, and since it could strike any one
+        // tile in the middle of a stroke that spanned several, the visible
+        // result was a break in the line at that tile's boundary.
+        const snapshot = live;
+        const fresh = document.createElement("canvas");
+        fresh.width = live.width;
+        fresh.height = live.height;
+        dirtyTiles.current.set(key, fresh);
+        dirtyKeys.current.delete(key);
+
         let attempt = 0;
+        let succeeded = false;
         while (attempt < MAX_FLUSH_RETRIES) {
           attempt += 1;
           const cached = baseTiles.current.get(key);
           const baseVersion = cached?.version ?? indexRef.current.get(key)?.version ?? 0;
-          const blob = await compositeTile(currentBoard.tileSizePx, cached?.image, dirty);
+          const blob = await compositeTile(currentBoard.tileSizePx, cached?.image, snapshot);
           try {
             const [signed] = await gateway.getBoardTileUploadUrls(boardId, [{ tx, ty, baseVersion }]);
             if (!signed) throw new Error("no upload URL");
@@ -495,11 +574,17 @@ export function useBoardSession(
               objectKey: flushed.objectKey,
               updatedAt: new Date().toISOString(),
             });
-            dirtyTiles.current.delete(key);
+            succeeded = true;
             break;
           } catch (err) {
             const code = (err as { code?: string }).code;
             if (code === "soso/board_locked") {
+              // The snapshot's content never made it in, and never will —
+              // fold it back so it is at least visible locally rather than
+              // vanishing, even though a locked board means it cannot be
+              // flushed again either.
+              mergeCanvasInto(getDirty(tx, ty), snapshot);
+              bump();
               setBoard((b) => (b ? { ...b, locked: true } : b));
               return;
             }
@@ -523,9 +608,23 @@ export function useBoardSession(
               }
               continue;
             }
-            if (attempt >= MAX_FLUSH_RETRIES) throw err;
+            if (attempt >= MAX_FLUSH_RETRIES) {
+              // Every retry failed. `snapshot` never made it to R2, and the
+              // live canvas for this tile may by now hold newer strokes
+              // painted while those retries were in flight (each one a
+              // real network round trip). Merge rather than pick one:
+              // combine them back into the live canvas and re-mark the key
+              // dirty, so the whole thing — old and new together — is
+              // retried as one unit on the next flush pass instead of the
+              // failed portion being lost.
+              mergeCanvasInto(getDirty(tx, ty), snapshot);
+              dirtyKeys.current.add(key);
+              bump();
+              throw err;
+            }
           }
         }
+        if (!succeeded) continue;
       }
       const latest = await gateway.getBoard(boardId);
       if (latest && !cancelled.current) setBoard(latest);
@@ -555,6 +654,7 @@ export function useBoardSession(
     setError(null);
     baseTiles.current.clear();
     dirtyTiles.current.clear();
+    dirtyKeys.current.clear();
     indexRef.current.clear();
     loadedVersions.current.clear();
     fitted.current = false;
@@ -640,7 +740,7 @@ export function useBoardSession(
 
   useEffect(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
-    if (dirtyTiles.current.size === 0) return;
+    if (dirtyKeys.current.size === 0) return;
     idleTimer.current = setTimeout(() => {
       void flushNow();
     }, FLUSH_IDLE_MS);
@@ -651,7 +751,7 @@ export function useBoardSession(
 
   useEffect(() => {
     const id = setInterval(() => {
-      if (dirtyTiles.current.size > 0) void flushNow();
+      if (dirtyKeys.current.size > 0) void flushNow();
     }, FLUSH_INTERVAL_MS);
     return () => clearInterval(id);
   }, [flushNow]);
