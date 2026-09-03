@@ -94,23 +94,20 @@ insert into public.post_categories (
  10, 2, false, 80),
 
 -- --------------------------------------------------------------------------
--- Suspicious activity reporting. SHIPPED DISABLED — see
--- 20260904000023_suspicious_category.sql for the full reasoning (this is
--- kept in sync with that migration by hand, same caveat as every other
--- hand-mirrored constant in this file). Short version: this is the
--- Nextdoor "suspicious person" failure mode waiting to happen if enabled
--- carelessly, so it ships with harassment's same restrictions (no body,
--- no media, fuzzed location, mandatory proximity) plus a shorter TTL and a
--- fourth pre-launch requirement harassment doesn't have: a deliberate
--- decision about whether this should ever reach the general public feed
--- at all, versus something narrower like a neighbourhood-watch/police
--- liaison audience.
+-- Suspicious activity reporting. ENABLED — see
+-- 20260904000024_enable_suspicious_category.sql for what this does and,
+-- more importantly, does not yet cover (legal review is confirmed done;
+-- aggregate-only display and a staffed moderation SLA are not built/
+-- confirmed, so this currently renders as an individual public pin like
+-- any other category, not the aggregate-only display 0023 originally
+-- assumed as a precondition). Kept in sync with that migration by hand,
+-- same caveat as every other hand-mirrored constant in this file.
 -- --------------------------------------------------------------------------
 ('suspicious', '不審な活動', 'Suspicious activity',
  interval '4 hours', interval '12 hours',
  250, true, 300,
  false, 0, false,
- 10, 2, false, 85),
+ 10, 2, true, 85),
 
 -- --------------------------------------------------------------------------
 -- Drawing boards. ENABLED FOR TESTING, NOT A FULL LAUNCH.

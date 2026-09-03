@@ -34,6 +34,15 @@ const LOOK: Record<string, CategoryLook> = {
   poll: { icon: "🗳", color: "#d68fd0" },
   news: { icon: "📰", color: "#4fa89a" },
   board: { icon: "🖌", color: "#e07a9a" },
+  // Added alongside 20260904000024_enable_suspicious_category.sql. Unlike
+  // `harassment` (still no entry, still meant for aggregate-only display
+  // whenever that's built), `suspicious` is now enabled and rendering as a
+  // normal individual pin -- see that migration's comment for why that's
+  // the current reality even though it wasn't the original plan. A muted,
+  // low-alarm color on purpose: this category is already the one most prone
+  // to reading as an accusation, and a loud warning-red marker would add to
+  // that rather than just informing.
+  suspicious: { icon: "👁", color: "#9a8fc2" },
 };
 
 const FALLBACK: CategoryLook = { icon: "•", color: "#a39a91" };

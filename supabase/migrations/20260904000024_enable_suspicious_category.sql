@@ -1,0 +1,41 @@
+-- ============================================================================
+-- 0024  Enable `suspicious`
+-- ============================================================================
+--
+-- Flips is_enabled on the row 20260904000023_suspicious_category.sql
+-- already inserted. A plain UPDATE is safe here in a way it was not for
+-- `board` (see 0021 vs 0022's postmortem) — this category's row was
+-- inserted by a real migration from day one, so there is no "row doesn't
+-- exist yet" case to worry about; either it's there with is_enabled=false,
+-- or (idempotently) already true.
+--
+-- Confirmed by the project owner: legal review of this category's shape
+-- against defamation/profiling exposure is done.
+--
+-- WHAT THIS DOES NOT CHANGE, AND WHY IT'S WORTH SAYING EXPLICITLY
+-- ------------------------------------------------------------------------
+-- 20260904000023's own comment set three preconditions before enabling:
+-- legal review, a moderator on the hook for takedowns, and aggregate-only
+-- display (individual pins never shown). Only the first is confirmed done.
+-- This migration does not build the other two — there was no display-layer
+-- or moderation-workflow change requested alongside it, and none is made
+-- here.
+--
+-- Concretely: as of this migration, a `suspicious` pin renders exactly like
+-- an `incident` or `lost` pin — an individual, tappable marker on the
+-- public map (using the client's fallback "•" icon, since theme.ts still
+-- has no entry for this key — see that file's own comment on why one
+-- wasn't added). The schema-level guardrails from 0023 still apply (no
+-- body text, no media, 250m fuzzing, mandatory proximity, reputation floor,
+-- 2/hour cap) and meaningfully reduce the worst-case harm, but they are not
+-- the same thing as aggregate-only display, which does not exist anywhere
+-- in this codebase yet — see the (empty) search for it in this migration's
+-- own commit description. Reporting works via the existing, generic
+-- moderation_reports path (no schema gap the way `board` had), but whether
+-- someone is actually staffed to act on a report within a meaningful
+-- window is an operational fact this migration cannot confirm or enforce.
+-- ============================================================================
+
+update public.post_categories
+set is_enabled = true
+where key = 'suspicious';
