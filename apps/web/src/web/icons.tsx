@@ -69,6 +69,36 @@ export function BellIcon({ className, muted }: BellIconProps) {
 }
 
 /**
+ * A tilted eraser block with a divider line across it, following the exact
+ * same convention as PeopleIcon/BellIcon/ChatIcon above: 20x20, stroke-only,
+ * currentColor, 1.8 stroke weight, rounded caps and joins. Used for the
+ * drawing-board eraser tool (see BoardCanvas.tsx) — rotated rather than
+ * axis-aligned specifically so it doesn't read as just another rounded
+ * rectangle among the board's circular color swatches.
+ */
+export function EraserIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <g transform="rotate(-30 10 10)">
+        <rect x="4.6" y="6.2" width="10.8" height="7.6" rx="1.7" />
+        <path d="M4.6 10.4h10.8" opacity="0.75" />
+      </g>
+    </svg>
+  );
+}
+
+/**
  * A speech bubble, following the exact same convention as PeopleIcon and
  * BellIcon above: 20x20, stroke-only, currentColor, 1.8 stroke weight,
  * rounded caps and joins. Deliberately not a filled/solid glyph — every

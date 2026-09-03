@@ -391,12 +391,32 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .board-canvas-stage { position:relative; flex:1; min-height:0; }
 .board-canvas-surface { position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:crosshair; display:block; }
 .board-canvas-status { position:absolute; z-index:1; top:16px; left:50%; transform:translateX(-50%); margin:0; padding:8px 13px; border-radius:999px; background:rgba(255,255,255,.88); color:#276153; font-size:.78rem; font-weight:750; }
-.board-canvas-tools { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 14px; padding-bottom:max(10px, env(safe-area-inset-bottom)); background:rgba(255,255,255,.94); box-shadow:0 -8px 22px rgba(16,54,46,.08); }
-.board-canvas-colors, .board-canvas-sizes { display:flex; align-items:center; gap:8px; }
+.board-canvas-tools { display:flex; justify-content:center; align-items:center; gap:12px; padding:10px 14px; padding-bottom:max(10px, env(safe-area-inset-bottom)); background:rgba(255,255,255,.94); box-shadow:0 -8px 22px rgba(16,54,46,.08); }
+.board-canvas-colors { display:flex; align-items:center; gap:8px; }
 .board-color { width:28px; height:28px; border:2px solid rgba(23,36,31,.12); border-radius:50%; box-shadow:inset 0 0 0 1px rgba(255,255,255,.4); }
 .board-color.active { border-color:var(--deep); box-shadow:0 0 0 3px rgba(23,36,31,.18); }
-.board-size { display:grid; place-items:center; width:36px; height:36px; border:1px solid #e2eae6; border-radius:12px; background:#fff; }
-.board-size.active { border-color:var(--deep); background:var(--deep); }
-.board-size span { display:block; border-radius:50%; background:currentColor; color:var(--deep); }
-.board-size.active span { color:#fff; }
-.board-color:disabled, .board-size:disabled { opacity:.4; }
+.board-color:disabled, .board-eraser:disabled { opacity:.4; }
+
+/* The eraser sits with the color swatches (see BoardCanvas.tsx) rather than
+   with the size slider: choosing it is the same kind of choice as choosing a
+   color — "what does this stroke paint with" — while size is an independent
+   axis that applies to either. A square badge instead of a circle is
+   deliberate too, so it doesn't get lost among six-plus circular swatches. */
+.board-eraser { display:grid; place-items:center; width:28px; height:28px; border:1px solid #e2eae6; border-radius:10px; background:#fff; color:var(--deep); }
+.board-eraser.active { border-color:var(--deep); background:var(--deep); color:#fff; }
+
+/* Fixed to the trailing edge of the canvas stage, vertically centered — see
+   BoardCanvas.tsx for why this lives apart from the rest of the toolbar.
+   The `writing-mode` + `direction` pair is the standards-track way to get a
+   vertical <input type="range"> (Safari 15.4+, Chromium 105+, Firefox
+   118+); `-webkit-appearance: slider-vertical` is layered in ahead of it
+   for the (increasingly rare) engine that only understands the older,
+   non-standard property. A CSS `rotate()` transform on a horizontal input
+   was deliberately avoided: it looks identical when static, but the
+   rotated element's actual touch hit-box does not always track the
+   rotation in exactly the way it appears to, which matters a lot more here
+   than on a mouse-only surface. */
+.board-size-slider { position:absolute; z-index:5; right:14px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; align-items:center; gap:8px; padding:14px 9px; border-radius:999px; background:rgba(255,255,255,.94); box-shadow:var(--e1); }
+.board-size-value { font-size:.72rem; font-weight:800; color:var(--deep); min-width:18px; text-align:center; }
+.board-size-range { appearance:slider-vertical; -webkit-appearance:slider-vertical; writing-mode:vertical-lr; direction:rtl; width:22px; height:130px; margin:0; accent-color:var(--deep); touch-action:none; }
+.board-size-range:disabled { opacity:.4; }

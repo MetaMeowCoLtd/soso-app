@@ -44,7 +44,28 @@ const MIN_SCALE = 0.15;
 const MAX_SCALE = 8;
 
 export const BOARD_COLORS = ["#17241f", "#ef7b6c", "#eba854", "#57bd9a", "#6fa4dd", "#a98fe0", "#ffffff"] as const;
-export const BOARD_BRUSH_SIZES = [3, 8, 18] as const;
+
+/**
+ * The empty-canvas fill `drawFrame` paints before any tile exists (see
+ * below). Shared as a constant, rather than a second hardcoded literal,
+ * specifically because the eraser (see `BoardTool.mode` and `stampSegment`)
+ * IS this color: there is no separate transparency/alpha channel an eraser
+ * could punch a hole in that would survive a flush. Once a tile is flushed
+ * it is a flattened PNG (see `compositeTile`) with no memory of what used
+ * to be underneath a stroke, so "erase" can only ever mean "paint over with
+ * whatever an empty tile looks like" — which only stays invisible against
+ * the actual empty background if both places agree on the exact same
+ * color. A `destination-out` composite op would look identical for a
+ * stroke erasing something still in this session's own unflushed dirty
+ * layer, but silently do nothing for a mark that already made it into a
+ * flushed base tile — a inconsistency a person drawing would have no way
+ * to predict, so it is not used here.
+ */
+export const BOARD_BACKGROUND_COLOR = "#f4efe6";
+
+export const BOARD_BRUSH_SIZE_MIN = 2;
+export const BOARD_BRUSH_SIZE_MAX = 56;
+const DEFAULT_BRUSH_SIZE = 10;
 
 export interface BoardCamera {
   x: number;
@@ -55,6 +76,15 @@ export interface BoardCamera {
 export interface BoardTool {
   color: string;
   size: number;
+  /**
+   * "erase" resolves to painting with `BOARD_BACKGROUND_COLOR` instead of
+   * `color` — see that constant's comment for why an eraser is implemented
+   * this way rather than as true transparency. Kept as its own field
+   * rather than overwriting `color` on toggle so the last color someone
+   * was drawing with is still there, unchanged, the moment they switch
+   * back out of erasing.
+   */
+  mode: "draw" | "erase";
 }
 
 export type BoardSessionStatus = "loading" | "ready" | "error";
@@ -210,7 +240,11 @@ export function useBoardSession(
   const [error, setError] = useState<string | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [camera, setCameraState] = useState<BoardCamera>({ x: 128, y: 128, scale: 1 });
-  const [tool, setTool] = useState<BoardTool>({ color: BOARD_COLORS[0] ?? "#17241f", size: BOARD_BRUSH_SIZES[1] ?? 8 });
+  const [tool, setTool] = useState<BoardTool>({
+    color: BOARD_COLORS[0] ?? "#17241f",
+    size: DEFAULT_BRUSH_SIZE,
+    mode: "draw",
+  });
   const [revision, setRevision] = useState(0);
   const [saving, setSaving] = useState(false);
 
@@ -307,7 +341,15 @@ export function useBoardSession(
     (x0: number, y0: number, x1: number, y1: number) => {
       const currentBoard = boardRef.current;
       if (!currentBoard || currentBoard.locked) return;
-      const { color, size } = toolRef.current;
+      const { color: toolColor, size, mode } = toolRef.current;
+      // Erasing is drawing with the background color, not a distinct
+      // operation — see BOARD_BACKGROUND_COLOR's comment for why. This is
+      // also why nothing downstream (paintSegment, the outgoing broadcast
+      // accumulator, BoardStrokeBatch on the wire) needs to know an erase
+      // happened at all: as far as every one of those is concerned, this
+      // is just a stroke in a particular color, indistinguishable from the
+      // person picking that color from the palette themselves.
+      const color = mode === "erase" ? BOARD_BACKGROUND_COLOR : toolColor;
       paintSegment(x0, y0, x1, y1, color, size);
 
       const pending = outgoing.current;
@@ -320,7 +362,9 @@ export function useBoardSession(
         // simpler than trying to represent a colour change within a
         // single BoardStrokeBatch, and a tool change mid-drag is rare
         // enough that a receiver seeing two short batches instead of one
-        // is not a noticeable cost.
+        // is not a noticeable cost. A draw/erase toggle mid-drag falls
+        // out of this for free too, since it changes the resolved `color`
+        // just like picking a different swatch would.
         outgoing.current = { color, size, points: [{ x: x0, y: y0 }, { x: x1, y: y1 }] };
       }
     },
@@ -634,7 +678,7 @@ export function useBoardSession(
       const current = boardRef.current;
       const cam = cameraRef.current;
       ctx.clearRect(0, 0, viewW, viewH);
-      ctx.fillStyle = "#f4efe6";
+      ctx.fillStyle = BOARD_BACKGROUND_COLOR;
       ctx.fillRect(0, 0, viewW, viewH);
       if (!current) return;
       const tileSize = current.tileSizePx;

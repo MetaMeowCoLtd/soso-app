@@ -12,8 +12,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Pin, SosoGateway } from "soso-core";
+import { EraserIcon } from "./icons";
 import {
-  BOARD_BRUSH_SIZES,
+  BOARD_BRUSH_SIZE_MAX,
+  BOARD_BRUSH_SIZE_MIN,
   BOARD_COLORS,
   useBoardSession,
 } from "./useBoardSession";
@@ -224,37 +226,55 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         />
+        {/*
+         * Fixed to the side of the drawing surface rather than living in the
+         * bottom toolbar with everything else: a size slider is something a
+         * person adjusts *while* mid-stroke far more often than color or
+         * tool, and putting it at the opposite edge from the color palette
+         * means a thumb resting near either one doesn't obscure the other.
+         */}
+        <div className="board-size-slider" role="group" aria-label="Brush size">
+          <span className="board-size-value" aria-hidden="true">{session.tool.size}</span>
+          <input
+            type="range"
+            className="board-size-range"
+            min={BOARD_BRUSH_SIZE_MIN}
+            max={BOARD_BRUSH_SIZE_MAX}
+            step={1}
+            value={session.tool.size}
+            disabled={session.locked}
+            aria-label="Brush size"
+            onChange={(event) =>
+              session.setTool((tool) => ({ ...tool, size: Number(event.target.value) }))
+            }
+          />
+        </div>
       </div>
 
       <footer className="board-canvas-tools">
-        <div className="board-canvas-colors" role="group" aria-label="Brush colour">
+        <div className="board-canvas-colors" role="group" aria-label="Brush colour and tool">
           {BOARD_COLORS.map((color) => (
             <button
               key={color}
               type="button"
-              className={`board-color ${session.tool.color === color ? "active" : ""}`}
+              className={`board-color ${session.tool.mode === "draw" && session.tool.color === color ? "active" : ""}`}
               style={{ background: color }}
               aria-label={`Colour ${color}`}
-              aria-pressed={session.tool.color === color}
+              aria-pressed={session.tool.mode === "draw" && session.tool.color === color}
               disabled={session.locked}
-              onClick={() => session.setTool((tool) => ({ ...tool, color }))}
+              onClick={() => session.setTool((tool) => ({ ...tool, color, mode: "draw" }))}
             />
           ))}
-        </div>
-        <div className="board-canvas-sizes" role="group" aria-label="Brush size">
-          {BOARD_BRUSH_SIZES.map((size) => (
-            <button
-              key={size}
-              type="button"
-              className={`board-size ${session.tool.size === size ? "active" : ""}`}
-              aria-label={`Brush size ${size}`}
-              aria-pressed={session.tool.size === size}
-              disabled={session.locked}
-              onClick={() => session.setTool((tool) => ({ ...tool, size }))}
-            >
-              <span style={{ width: size, height: size }} />
-            </button>
-          ))}
+          <button
+            type="button"
+            className={`board-eraser ${session.tool.mode === "erase" ? "active" : ""}`}
+            aria-label="Eraser"
+            aria-pressed={session.tool.mode === "erase"}
+            disabled={session.locked}
+            onClick={() => session.setTool((tool) => ({ ...tool, mode: "erase" }))}
+          >
+            <EraserIcon />
+          </button>
         </div>
       </footer>
     </div>
