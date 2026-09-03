@@ -86,16 +86,28 @@ grant execute on function soso.can_access_board_topic(text) to authenticated;
 -- ----------------------------------------------------------------------------
 -- realtime.messages — the actual Broadcast Authorization gate
 -- ----------------------------------------------------------------------------
--- `enable row level security` is idempotent (a harmless no-op if a given
--- Supabase project already ships it enabled) and included defensively rather
--- than assumed. Both policies restrict to `authenticated`: this app's every
--- user is anonymously signed in (bootstrap.ts's ensureSession, unrelated to
--- this migration) rather than a fully anonymous connection with no session
--- at all, and Realtime private channels require an authenticated connection
--- to evaluate RLS against in the first place — there is no `anon`-role case
--- to also grant here, unlike posts/board_tiles' own read policies.
+-- No `alter table ... enable row level security` here, and deliberately so
+-- — a first version of this migration had one, defended in this same
+-- comment as "idempotent, a harmless no-op." That reasoning was wrong in a
+-- way only a real deploy surfaced: `must be owner of table messages`
+-- (SQLSTATE 42501). Postgres checks ownership before it ever asks whether
+-- an ALTER would be a no-op, and on a hosted Supabase project
+-- `realtime.messages` is owned by an internal role, not the `postgres` role
+-- `supabase db push` runs as — no migration here can ever hold that
+-- ownership, this was never a permission this migration was merely missing
+-- by oversight. It also wasn't needed: Supabase ships this table with RLS
+-- already enabled by default specifically so `CREATE POLICY` on it is the
+-- one operation a project's migrations are expected to run — which
+-- apparently does not require ownership the way ALTER does, or this
+-- statement would have failed the exact same way.
+--
+-- Both policies restrict to `authenticated`: this app's every user is
+-- anonymously signed in (bootstrap.ts's ensureSession, unrelated to this
+-- migration) rather than a fully anonymous connection with no session at
+-- all, and Realtime private channels require an authenticated connection to
+-- evaluate RLS against in the first place — there is no `anon`-role case to
+-- also grant here, unlike posts/board_tiles' own read policies.
 -- ----------------------------------------------------------------------------
-alter table realtime.messages enable row level security;
 
 create policy board_broadcast_receive on realtime.messages
   for select
