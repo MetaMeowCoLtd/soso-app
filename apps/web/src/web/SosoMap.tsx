@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
-import { setWorkerUrl } from "maplibre-gl";
+import { setWorkerUrl, Popup, type Map as MaplibreMap, type MapGeoJSONFeature } from "maplibre-gl";
 import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
 import { Circle, MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import { cellCentre, pinOpacity, pinSaturation, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
@@ -142,7 +142,7 @@ function ViewportWatcher({
  * file is untouched by this swap; MapLibre's layer sits in Leaflet's normal
  * tile pane, below the marker pane, exactly where a `<TileLayer>` would.
  */
-function CuteBaseLayer() {
+function CuteBaseLayer({ glMapRef }: { glMapRef: React.MutableRefObject<MaplibreMap | null> }) {
   const map = useMap();
 
   useEffect(() => {
@@ -182,6 +182,7 @@ function CuteBaseLayer() {
         map.attributionControl.addAttribution(cuteAttribution);
 
         const gl = layer.getMaplibreMap();
+        glMapRef.current = gl;
 
         // A style JSON can load fine while the vector tile DATA it points at
         // still fails afterwards — a stalled connection, a bad response, a
@@ -218,8 +219,9 @@ function CuteBaseLayer() {
         map.removeLayer(layer);
         map.attributionControl.removeAttribution(cuteAttribution);
       }
+      glMapRef.current = null;
     };
-  }, [map]);
+  }, [map, glMapRef]);
 
   return null;
 }
@@ -233,13 +235,40 @@ function CuteBaseLayer() {
  */
 const DOUBLE_TAP_WINDOW_MS = 500;
 
-function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {
+/**
+ * Mirrors soso_shops/poi_transit's own `text-field` style expression in
+ * plain JS — there is no way to evaluate a MapLibre style expression
+ * directly against a feature returned from `queryRenderedFeatures`, so
+ * this reproduces the same name/nonlatin-name priority by hand rather
+ * than showing something that reads differently from the label already
+ * visible on the map for the exact same point.
+ */
+function poiDisplayName(properties: Record<string, unknown>): string {
+  const nonlatin = properties["name:nonlatin"];
+  if (typeof nonlatin === "string" && nonlatin) {
+    const latin = properties["name:latin"];
+    return typeof latin === "string" && latin ? `${latin} / ${nonlatin}` : nonlatin;
+  }
+  const nameEn = properties["name_en"];
+  if (typeof nameEn === "string" && nameEn) return nameEn;
+  const name = properties["name"];
+  return typeof name === "string" && name ? name : "";
+}
+
+function ClickHandler({
+  onMapClick,
+  glMapRef,
+}: Pick<SosoMapProps, "onMapClick"> & { glMapRef: React.MutableRefObject<MaplibreMap | null> }) {
   const map = useMap();
   const pendingClick = useRef<{ timer: ReturnType<typeof setTimeout>; latlng: L.LatLng } | null>(null);
+  // At most one open at a time — a second POI tapped while one popup is
+  // still showing replaces it rather than stacking a new bubble on top.
+  const poiPopup = useRef<Popup | null>(null);
 
   useEffect(
     () => () => {
       if (pendingClick.current) clearTimeout(pendingClick.current.timer);
+      poiPopup.current?.remove();
     },
     [],
   );
@@ -283,6 +312,7 @@ function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {
       }
 
       const latlng = e.latlng;
+      const containerPoint = e.containerPoint;
       const timer = setTimeout(() => {
         pendingClick.current = null;
         // Still worth checking this: a one-handed zoom that started slowly
@@ -292,6 +322,37 @@ function ClickHandler({ onMapClick }: Pick<SosoMapProps, "onMapClick">) {
         // click synthesis behaves — kept as a second, independent layer
         // rather than assumed redundant with the debounce above.
         if (oneHandedZoomInProgress.get(map)) return;
+
+        // Checked here, inside the same debounce/one-handed-zoom guards
+        // that already protect onMapClick below, rather than at the very
+        // top of this handler — a tap on a shop or transit label deserves
+        // the exact same "was this actually a single tap, or the first
+        // half of a gesture" disambiguation a tap on empty map space
+        // already gets; there's no reason a POI should skip that.
+        //
+        // MapLibre GL is explicitly non-interactive in this integration
+        // (Leaflet owns all input, MapLibre is only synced to match its
+        // camera — see maplibre-gl-leaflet's own README), so this could
+        // never be answered by a MapLibre-native click-on-layer listener;
+        // querying rendered features at Leaflet's own click point is the
+        // only way to ask "was there a POI symbol at this pixel" at all.
+        const gl = glMapRef.current;
+        if (gl) {
+          const features = gl.queryRenderedFeatures([containerPoint.x, containerPoint.y], {
+            layers: ["soso_shops", "poi_transit"],
+          });
+          const feature = features[0];
+          if (feature) {
+            const name = poiDisplayName(feature.properties);
+            poiPopup.current?.remove();
+            poiPopup.current = new Popup({ closeButton: true, closeOnClick: false, offset: 12 })
+              .setLngLat([latlng.lng, latlng.lat])
+              .setText(name || "…")
+              .addTo(gl);
+            return;
+          }
+        }
+
         onMapClick({ latitude: latlng.lat, longitude: latlng.lng });
       }, DOUBLE_TAP_WINDOW_MS);
       pendingClick.current = { timer, latlng };
@@ -729,6 +790,14 @@ export default function SosoMap({
 }: SosoMapProps) {
   const handlePinClick = useCallback((pin: Pin) => onPinClick(pin), [onPinClick]);
 
+  // Shared between CuteBaseLayer (which sets it once the style finishes
+  // loading) and ClickHandler (which reads it to check for a POI at a
+  // click point) — the two are sibling components with no other channel
+  // to pass this through, and lifting it any higher than here would mean
+  // threading it through props this component's own caller has no reason
+  // to know about.
+  const glMapRef = useRef<MaplibreMap | null>(null);
+
   // Icons are cached per pin, keyed on only the fields that should ever
   // produce a visually different icon. A viewport refetch (moveend) or a
   // `nowSeconds` tick hands us a brand-new `feed.pins` array — often full of
@@ -842,11 +911,11 @@ export default function SosoMap({
       // do not "fix" trackpad smoothness by turning snap back on.
       zoomSnap={0}
     >
-      <CuteBaseLayer />
+      <CuteBaseLayer glMapRef={glMapRef} />
       <SafeAreaResizeFix />
       <OneHandedZoomConfig />
       <ViewportWatcher onViewportChange={onViewportChange} />
-      {!placing && <ClickHandler onMapClick={onMapClick} />}
+      {!placing && <ClickHandler onMapClick={onMapClick} glMapRef={glMapRef} />}
       <FlyToDraft at={placing ?? focusAt} />
       <FlyToSignal signal={flyToSignal} />
       {myLocation && <MyLocationMarker myLocation={myLocation} />}
