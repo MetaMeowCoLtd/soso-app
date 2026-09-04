@@ -30,12 +30,16 @@ export const metadata: Metadata = {
     ],
     apple: "icons/apple-touch-icon.png",
   },
-  // Next emits the modern `mobile-web-app-capable` tag from `appleWebApp`,
-  // but recent static builds do not reliably emit this legacy Apple tag.
-  // iOS still uses it to decide whether a Home Screen web app may draw below
-  // the status bar/notch when `black-translucent` is requested.
+  // Next emits the modern `mobile-web-app-capable` tag from `appleWebApp`
+  // above, but not this legacy Apple-prefixed one — check `out/index.html`
+  // after a build and you'll find `mobile-web-app-capable` twice and
+  // `apple-mobile-web-app-capable` not at all. iOS still reads ONLY the
+  // Apple-prefixed name when deciding whether a Home Screen web app may draw
+  // below the status bar and above the Home Indicator, and
+  // `apple-mobile-web-app-status-bar-style: black-translucent` (set via
+  // `appleWebApp.statusBarStyle`) is ignored outright without it.
   other: {
-    "mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-capable": "yes",
   },
 };
 
@@ -73,9 +77,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           user-scalable=no the user can no longer drag to correct it).
 
           Do NOT size the shell from visualViewport.height: on iOS Home Screen
-          with viewport-fit=cover that value often excludes the Home Indicator,
-          which is exactly the empty background strip at the bottom. Height is
-          handled in CSS via inset:0 and -webkit-fill-available.
+          with viewport-fit=cover that value excludes the Home Indicator, which
+          is exactly the empty background strip this used to leave at the
+          bottom. -webkit-fill-available and 100dvh are short in the same way
+          and for the same reason — see the html/body comment in globals.css.
+          Height is handled there, by body's inset alone.
         */}
         <script
           dangerouslySetInnerHTML={{

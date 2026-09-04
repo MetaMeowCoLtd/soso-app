@@ -4,10 +4,29 @@
  * html/body are pinned exactly to the viewport and never allowed to scroll.
  * `position:fixed` + `inset:0` (no vh/dvh height) stretches body to all four
  * edges of the layout viewport, including the Home Indicator region unlocked
- * by viewport-fit=cover. Do not also set height:100dvh: that over-constrains
- * the box, WebKit may ignore the bottom edge, and 100dvh / visualViewport.height
- * on iOS Home Screen often exclude the Home Indicator — the empty #bcd9d2 bar.
- * `-webkit-fill-available` is last so it wins on iOS over 100dvh.
+ * by viewport-fit=cover.
+ *
+ * The root element must NOT carry a height of its own here, and this is the
+ * whole reason the #bcd9d2 bar used to sit along the bottom on iOS Home
+ * Screen. `height:-webkit-fill-available` resolves, on iOS, to the SAFE
+ * height — the screen minus the Home Indicator inset — and 100dvh does the
+ * same in that context. That alone would be harmless (body is fixed, so it
+ * is laid out against the initial containing block, not against <html>), but
+ * combined with `overflow:hidden` on the same element WebKit clips the fixed
+ * body to the short root box, so the shell stopped ~34pt above the screen
+ * bottom. The root background still paints the whole canvas, per spec, which
+ * is why the uncovered strip came out as #bcd9d2 rather than white — and why
+ * the Leaflet attribution, pinned to the map container's bottom edge, sat
+ * above the strip instead of in it.
+ *
+ * `height:100%` resolves against the initial containing block, which under
+ * viewport-fit=cover IS the full screen, and the scroll lock now lives on
+ * body alone. That is not a loss: body is `position:fixed`, so it is out of
+ * flow and contributes nothing to the root's scrollable overflow — there is
+ * nothing left for the root to scroll, and `overscroll-behavior:none` still
+ * kills rubber-banding. None of this reproduces in desktop DevTools, where
+ * every safe-area inset is 0 and the two heights agree.
+ *
  * `--app-top` / `--app-left` come from visualViewport.offset* in layout.tsx
  * so a stuck visual-viewport offset (uncorrectable once zoom is locked) still
  * keeps the shell aligned. `.sheet-body`, `.people-frame` and `.filter-row`
@@ -15,10 +34,7 @@
  */
 html {
   height:100%;
-  height:100dvh;
-  height:-webkit-fill-available;
   background:#bcd9d2;
-  overflow:hidden;
   overscroll-behavior:none;
 }
 body {
