@@ -1,16 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatAgo, type PostDetail, type SosoGateway } from "soso-core";
+import { formatAgo, type Pin, type PostDetail, type SosoGateway } from "soso-core";
 import { useFeedPosts } from "./hooks";
 import ThoughtComposer from "./ThoughtComposer";
-import ThoughtThread from "./ThoughtThread";
 
 interface FeedTabProps {
   gateway: SosoGateway;
   nowSeconds: number;
   coinBalance: number | null;
   onPosted: () => void;
+  /**
+   * Opening a post's full thread is handled at page.tsx's own top level
+   * (see its viewingThought branch), not inside this component — the exact
+   * same ThoughtThread instance has to serve both a card tap here AND a
+   * push-notification deep link that can land while this tab isn't even
+   * open, and a component-local "which post is open" state could only ever
+   * answer the first of those. Reuses page.tsx's existing selectPin, the
+   * same function the map itself already calls to open a pin.
+   */
+  onOpenPost: (pin: Pin) => void;
 }
 
 /**
@@ -33,10 +42,9 @@ interface FeedTabProps {
  * wearing the first one's name. Called out as deferred, not silently
  * skipped.
  */
-export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted }: FeedTabProps) {
+export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, onOpenPost }: FeedTabProps) {
   const { posts, loading, loadingMore, atEnd, error, loadMore, refresh, hasNewPosts } = useFeedPosts(gateway);
   const [composing, setComposing] = useState(false);
-  const [openPost, setOpenPost] = useState<PostDetail | null>(null);
   // A card the thread view has since deleted or changed, applied locally
   // rather than waiting for the next refresh() — mirrors how submitReport's
   // own callers elsewhere in this app reconcile local state instead of
@@ -71,11 +79,6 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted }: 
 
   function handlePostChanged(updated: PostDetail) {
     setLocalPosts((current) => (current ?? posts).map((p) => (p.id === updated.id ? updated : p)));
-    setOpenPost(updated);
-  }
-
-  function handlePostDeleted(postId: string) {
-    setLocalPosts((current) => (current ?? posts).filter((p) => p.id !== postId));
   }
 
   return (
@@ -91,7 +94,11 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted }: 
       )}
 
       {loading ? (
-        <p className="feed-tab-status">Loading…</p>
+        <ul className="feed-tab-list" aria-busy="true" aria-label="Loading posts">
+          <FeedCardSkeleton />
+          <FeedCardSkeleton />
+          <FeedCardSkeleton />
+        </ul>
       ) : error && visiblePosts.length === 0 ? (
         <p className="feed-tab-status">
           {error}{" "}
@@ -109,7 +116,7 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted }: 
               post={post}
               nowSeconds={nowSeconds}
               gateway={gateway}
-              onOpen={() => setOpenPost(post)}
+              onOpen={() => onOpenPost(post)}
               onChanged={handlePostChanged}
             />
           ))}
@@ -146,18 +153,6 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted }: 
           }}
         />
       )}
-
-      {openPost && (
-        <ThoughtThread
-          key={openPost.id}
-          post={openPost}
-          gateway={gateway}
-          nowSeconds={nowSeconds}
-          onClose={() => setOpenPost(null)}
-          onPostChanged={handlePostChanged}
-          onPostDeleted={handlePostDeleted}
-        />
-      )}
     </div>
   );
 }
@@ -165,6 +160,29 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted }: 
 function initialsOf(name: string): string {
   const trimmed = name.trim();
   return trimmed.length > 0 ? trimmed[0]!.toUpperCase() : "?";
+}
+
+/**
+ * Mirrors .feed-card's own layout (avatar circle, byline, two lines of
+ * text, a meta row) with plain shimmering placeholder shapes instead of
+ * real content, rather than a generic spinner — so the transition from
+ * "loading" to "loaded" doesn't visibly reflow the page once real cards
+ * replace these. `aria-hidden` throughout: the list's own
+ * `aria-busy`/`aria-label="Loading posts"` (set where this is rendered)
+ * is the actual accessible announcement, so a screen reader is not read
+ * three near-identical "loading" placeholders in a row on top of that.
+ */
+function FeedCardSkeleton() {
+  return (
+    <li className="feed-card feed-card-skeleton" aria-hidden="true">
+      <div className="skeleton-block skeleton-avatar" />
+      <div className="feed-card-body">
+        <div className="skeleton-block skeleton-line skeleton-line-byline" />
+        <div className="skeleton-block skeleton-line skeleton-line-text" />
+        <div className="skeleton-block skeleton-line skeleton-line-text-short" />
+      </div>
+    </li>
+  );
 }
 
 function FeedCard({

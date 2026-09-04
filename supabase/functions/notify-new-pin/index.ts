@@ -94,6 +94,12 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails("mailto:support@example.com", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
+// Computed once, shared by every notification path below (posts, votes,
+// replies) rather than re-derived per handler — was previously a local
+// inside the single Deno.serve handler, back when there was only one path
+// that needed it.
+const VAPID_CONFIGURED = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -142,6 +148,164 @@ function parsePostPayload(value: unknown): PostPayload | null {
     author_id: authorId,
     audience,
   };
+}
+
+interface VotePayload {
+  post_id: string;
+  voter_id: string;
+  vote: number;
+}
+
+function parseVotePayload(value: unknown): VotePayload | null {
+  if (!isRecord(value) || value.type !== "INSERT" || !isRecord(value.record)) return null;
+  const r = value.record;
+  if (typeof r.post_id !== "string" || typeof r.voter_id !== "string" || typeof r.vote !== "number") return null;
+  return { post_id: r.post_id, voter_id: r.voter_id, vote: r.vote };
+}
+
+interface ReplyPayload {
+  post_id: string;
+  author_id: string;
+}
+
+function parseReplyPayload(value: unknown): ReplyPayload | null {
+  if (!isRecord(value) || value.type !== "INSERT" || !isRecord(value.record)) return null;
+  const r = value.record;
+  if (typeof r.post_id !== "string" || typeof r.author_id !== "string") return null;
+  // A reported reply is not withdrawn by soft-deleting it out from under a
+  // notification that already went out — status is read at reply time, not
+  // re-checked here, so a since-removed reply's notification still arrives.
+  // That mirrors this whole function's own general posture: a
+  // notification is a best-effort nudge, not a guarantee tightly coupled
+  // to the content's current state.
+  return { post_id: r.post_id, author_id: r.author_id };
+}
+
+/**
+ * Shared by both handlePostVote and handlePostReply below: who actually
+ * gets notified, and whether they should be at all. Looked up fresh per
+ * event rather than trusted from the payload — neither post_votes nor
+ * post_replies' own row carries the post's author_id, and a stale or
+ * spoofed value would defeat the self-notification guard entirely.
+ */
+async function loadNotifiablePostAuthor(
+  supabase: ReturnType<typeof createClient>,
+  postId: string,
+  actorId: string,
+): Promise<string | null> {
+  const { data: post, error } = await supabase
+    .from("posts")
+    .select("author_id, status")
+    .eq("id", postId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[notify-new-pin] post lookup failed:", error);
+    return null;
+  }
+  if (!post || post.status !== "live") return null;
+  // Cannot currently happen — vote_post rejects a self-vote, and replying
+  // to your own post has no reason to notify yourself either way — but
+  // this costs one comparison and protects against either of those rules
+  // changing later without this function being updated to match.
+  if (post.author_id === actorId) return null;
+
+  return post.author_id;
+}
+
+async function handlePostVote(
+  supabase: ReturnType<typeof createClient>,
+  rawPayload: unknown,
+): Promise<Response> {
+  const payload = parseVotePayload(rawPayload);
+  if (!payload) {
+    console.error("[notify-new-pin] unexpected post_votes payload", rawPayload);
+    return new Response("Bad request", { status: 400 });
+  }
+
+  // Only a like (+1) notifies — a dispute vote is not "someone reacted
+  // positively to your post," and the feature this exists for is
+  // specifically framed as "likes and replies," not every vote.
+  if (payload.vote !== 1) {
+    return new Response(JSON.stringify({ sent: 0, reason: "not a like" }), { status: 200 });
+  }
+
+  if (!VAPID_CONFIGURED) {
+    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
+  }
+
+  const authorId = await loadNotifiablePostAuthor(supabase, payload.post_id, payload.voter_id);
+  if (!authorId) {
+    return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
+  }
+
+  const { data: endpoints, error: endpointsError } = await supabase
+    .from("push_endpoints")
+    .select("endpoint, p256dh, auth")
+    .eq("user_id", authorId);
+
+  if (endpointsError) {
+    console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
+    return new Response("Internal error", { status: 500 });
+  }
+
+  // Deliberately anonymous — "Someone liked your post," not naming the
+  // voter. Nowhere else in this app surfaces who specifically voted on a
+  // post (there is no "liked by" list anywhere), so a push notification
+  // is not the place to introduce that first.
+  const notificationBody = JSON.stringify({
+    title: "SoSo",
+    body: "Someone liked your post",
+    postId: payload.post_id,
+  });
+
+  const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
+  console.log("[notify-new-pin] like notification complete", { postId: payload.post_id, ...result });
+  return new Response(JSON.stringify(result), { status: 200 });
+}
+
+async function handlePostReply(
+  supabase: ReturnType<typeof createClient>,
+  rawPayload: unknown,
+): Promise<Response> {
+  const payload = parseReplyPayload(rawPayload);
+  if (!payload) {
+    console.error("[notify-new-pin] unexpected post_replies payload", rawPayload);
+    return new Response("Bad request", { status: 400 });
+  }
+
+  if (!VAPID_CONFIGURED) {
+    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
+  }
+
+  const authorId = await loadNotifiablePostAuthor(supabase, payload.post_id, payload.author_id);
+  if (!authorId) {
+    return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
+  }
+
+  const { data: endpoints, error: endpointsError } = await supabase
+    .from("push_endpoints")
+    .select("endpoint, p256dh, auth")
+    .eq("user_id", authorId);
+
+  if (endpointsError) {
+    console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
+    return new Response("Internal error", { status: 500 });
+  }
+
+  // Anonymous and without the reply's own body, for the same reason the
+  // like notification above names neither: nothing else in this app
+  // surfaces a reply's content or author outside of actually opening the
+  // thread, and a push notification is not the place to start.
+  const notificationBody = JSON.stringify({
+    title: "SoSo",
+    body: "New reply on your post",
+    postId: payload.post_id,
+  });
+
+  const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
+  console.log("[notify-new-pin] reply notification complete", { postId: payload.post_id, ...result });
+  return new Response(JSON.stringify(result), { status: 200 });
 }
 
 /**
@@ -270,7 +434,21 @@ Deno.serve(async (req: Request) => {
   }
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-  const vapidConfigured = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+
+  // Routed by table, the same shared-function pattern this file's own
+  // header comment documents having used before (resolution_flags, removed
+  // in migration 0020) — one Database Webhook per table, all pointed at
+  // this one deployed function, rather than a separate function per event
+  // type. A payload with no "table" field at all (the legacy pg_net
+  // trigger for posts) falls through to the existing posts handling below
+  // exactly as it always has; isRecord's own check makes that safe even
+  // when rawPayload isn't an object at all.
+  if (isRecord(rawPayload) && rawPayload.table === "post_votes") {
+    return await handlePostVote(supabase, rawPayload);
+  }
+  if (isRecord(rawPayload) && rawPayload.table === "post_replies") {
+    return await handlePostReply(supabase, rawPayload);
+  }
 
   const payload = parsePostPayload(rawPayload);
   if (!payload) {
@@ -290,7 +468,7 @@ Deno.serve(async (req: Request) => {
   // this post's address should be looked up at all.
   await geocodePostAddress(supabase, payload.post_id);
 
-  if (!vapidConfigured) {
+  if (!VAPID_CONFIGURED) {
     return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
   }
 

@@ -509,6 +509,32 @@ None of the following occurs automatically from a `git push`.
    report produces one notification, not two. For an existing hosted project,
    apply that migration with `supabase db push` before testing.
 
+4b. **Create a second Database Webhook, for likes.** Same function, same
+    secret header, different table — one deployed function routes by table
+    name, the same pattern this project used once before for
+    `resolution_flags` (see that table's own removal in migration 0020).
+
+    - Name: `notify-post-like`
+    - Table: `public.post_votes`
+    - Events: **Insert** only
+    - Type: **Supabase Edge Function**
+    - Edge Function: `notify-new-pin` (the same one)
+    - HTTP header: identical to step 4, `x-push-secret` with the same value
+
+4c. **Create a third Database Webhook, for replies.**
+
+    - Name: `notify-post-reply`
+    - Table: `public.post_replies`
+    - Events: **Insert** only
+    - Type: **Supabase Edge Function**
+    - Edge Function: `notify-new-pin` (the same one)
+    - HTTP header: identical to step 4, `x-push-secret` with the same value
+
+    Both of these are genuinely optional — the app works completely without
+    them, just without a nudge when someone likes or replies to your own
+    post. Skip either (or both) if that's not wanted; nothing else depends
+    on them existing.
+
 5. **Provide the client with the public key.** This value is safe to
    expose; that is the purpose of a VAPID public key. Add it to
    `apps/web/.env.local` for local development and as a repository variable

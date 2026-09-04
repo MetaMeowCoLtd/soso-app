@@ -7,6 +7,7 @@ import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
 import BoardCanvas from "@/src/web/BoardCanvas";
 import FeedTab from "@/src/web/FeedTab";
+import ThoughtThread from "@/src/web/ThoughtThread";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeoplePanel from "@/src/web/PeoplePanel";
@@ -348,8 +349,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // A pin preview takes visual priority over whatever browse state the
   // sheet was already in — selecting a pin always shows it, regardless of
   // whether the feed list happened to be expanded at the time.
-  const previewingPin = selectedPin !== null && selectedPin.category !== "board";
+  const previewingPin = selectedPin !== null && selectedPin.category !== "board" && selectedPin.category !== "thought";
   const viewingBoard = selectedPin?.category === "board";
+  const viewingThought = selectedPin?.category === "thought";
 
   // Measured, not guessed: the preview now holds everything that used to be
   // a separate modal (voting, reporting, early resolution), so its height
@@ -672,6 +674,25 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         <BoardCanvas pin={selectedPin} title={selectedDetail?.body} gateway={gateway} onClose={deselectPin} />
       )}
 
+      {viewingThought && selectedPin && selectedDetail && (
+        <ThoughtThread
+          key={selectedPin.id}
+          post={selectedDetail}
+          gateway={gateway}
+          nowSeconds={nowSeconds}
+          onClose={deselectPin}
+          // Updates only this open thread's own display — the Feed tab's
+          // own list (FeedTab's local state) reconciles itself on its next
+          // refresh() rather than being reached into from here. The two
+          // most likely ways to arrive at this exact branch — a
+          // notification deep link, or having switched away from the Feed
+          // tab entirely — both mean there usually isn't a feed list
+          // visibly on screen to keep in sync with in the first place.
+          onPostChanged={(updated) => setSelectedDetail(updated)}
+          onPostDeleted={() => deselectPin()}
+        />
+      )}
+
       {(statusLabel ?? transientNotice) && (
         <p className="map-notice" role="status">
           {statusLabel ?? transientNotice}
@@ -832,7 +853,13 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       </main>
 
       {activeTab === "feed" && (
-        <FeedTab gateway={gateway} nowSeconds={nowSeconds} coinBalance={coinBalance} onPosted={() => void refreshCoinBalance()} />
+        <FeedTab
+          gateway={gateway}
+          nowSeconds={nowSeconds}
+          coinBalance={coinBalance}
+          onPosted={() => void refreshCoinBalance()}
+          onOpenPost={selectPin}
+        />
       )}
 
       <nav className="tab-bar" role="tablist" aria-label="Main navigation">

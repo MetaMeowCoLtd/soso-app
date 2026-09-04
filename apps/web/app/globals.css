@@ -507,3 +507,12 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .thought-thread-post { border-bottom:1px solid var(--hairline); }
 .thought-thread-own { margin-top:10px; }
 .thought-thread-replies { display:flex; flex-direction:column; gap:2px; padding-bottom:8px; }
+
+/* Loading skeletons for the feed's initial fetch */
+@keyframes shimmer { 0% { background-position:-120% 0; } 100% { background-position:120% 0; } }
+.skeleton-block { background:linear-gradient(90deg, #ece4d5 25%, #f6efe2 37%, #ece4d5 63%); background-size:400% 100%; animation:shimmer 1.4s ease-in-out infinite; border-radius:8px; }
+.feed-card-skeleton .skeleton-avatar { flex-shrink:0; width:40px; height:40px; border-radius:50%; }
+.feed-card-skeleton .skeleton-line { height:11px; margin-top:8px; }
+.feed-card-skeleton .skeleton-line-byline { width:45%; margin-top:2px; }
+.feed-card-skeleton .skeleton-line-text { width:92%; }
+.feed-card-skeleton .skeleton-line-text-short { width:60%; }
