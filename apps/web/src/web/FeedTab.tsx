@@ -84,6 +84,9 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, on
   return (
     <div className="feed-tab" role="tabpanel" aria-label="Feed">
       <header className="feed-tab-header">
+        <a className="brand" href="#top" aria-label="SoSo home">
+          <span>So</span>So
+        </a>
         <h1>Feed</h1>
       </header>
 

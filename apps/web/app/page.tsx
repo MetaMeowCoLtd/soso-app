@@ -497,6 +497,17 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       if (detail.lat !== null && detail.lng !== null) {
         setFocusAt({ latitude: detail.lat, longitude: detail.lng });
       }
+      // A board or an "update" thread render as their own tab-independent,
+      // fixed-position overlay now (see globals.css) and show correctly
+      // whatever tab is active. A plain pin's preview does not — it's
+      // .sheet, still nested inside <main className="map-app">, which is
+      // display:none whenever activeTab isn't "map" (see .tab-hidden). Only
+      // that remaining case needs switching back to the Map tab explicitly;
+      // forcing it for the other two would undo the fix above by yanking
+      // someone back to Map after they open a board/thread from Chat.
+      if (detail.category !== "board" && detail.category !== "update") {
+        setActiveTab("map");
+      }
     } catch {
       // A stale, deleted, or inaccessible post from an old notification
       // shouldn't fail the whole app on load — it should just open nothing.
@@ -658,29 +669,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         )}
       </header>
 
-      {viewingBoard && selectedPin && (
-        <BoardCanvas pin={selectedPin} title={selectedDetail?.body} gateway={gateway} onClose={deselectPin} />
-      )}
-
-      {viewingThought && selectedPin && selectedDetail && (
-        <ThoughtThread
-          key={selectedPin.id}
-          post={selectedDetail}
-          gateway={gateway}
-          nowSeconds={nowSeconds}
-          onClose={deselectPin}
-          // Updates only this open thread's own display — the Feed tab's
-          // own list (FeedTab's local state) reconciles itself on its next
-          // refresh() rather than being reached into from here. The two
-          // most likely ways to arrive at this exact branch — a
-          // notification deep link, or having switched away from the Feed
-          // tab entirely — both mean there usually isn't a feed list
-          // visibly on screen to keep in sync with in the first place.
-          onPostChanged={(updated) => setSelectedDetail(updated)}
-          onPostDeleted={() => deselectPin()}
-        />
-      )}
-
       {(statusLabel ?? transientNotice) && (
         <p className="map-notice" role="status">
           {statusLabel ?? transientNotice}
@@ -837,6 +825,43 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         onMinimize={() => setShowPeople(false)}
       />
       </main>
+
+      {/*
+        Moved out from inside <main className="map-app"> (where these used to
+        live, right after the header) — that container gets display:none via
+        .tab-hidden whenever activeTab isn't "map" (see .tab-hidden in
+        globals.css), and a board or an "update" thread is reachable from the
+        Feed tab and from a push-notification deep link just as often as from
+        the map itself. Nested inside .map-app, either one would mount,
+        hold correct state, and be completely invisible the moment someone
+        opened it from anywhere but the Map tab — which for a feed post's
+        thread is the ONLY place that ever happens. Full-screen overlays
+        that aren't intrinsically map content belong at this level,
+        alongside PeoplePanel/FeedTab/ChatPanel, not nested in a container
+        that assumes the Map tab is the one currently showing.
+      */}
+      {viewingBoard && selectedPin && (
+        <BoardCanvas pin={selectedPin} title={selectedDetail?.body} gateway={gateway} onClose={deselectPin} />
+      )}
+
+      {viewingThought && selectedPin && selectedDetail && (
+        <ThoughtThread
+          key={selectedPin.id}
+          post={selectedDetail}
+          gateway={gateway}
+          nowSeconds={nowSeconds}
+          onClose={deselectPin}
+          // Updates only this open thread's own display — the Feed tab's
+          // own list (FeedTab's local state) reconciles itself on its next
+          // refresh() rather than being reached into from here. The two
+          // most likely ways to arrive at this exact branch — a
+          // notification deep link, or having switched away from the Feed
+          // tab entirely — both mean there usually isn't a feed list
+          // visibly on screen to keep in sync with in the first place.
+          onPostChanged={(updated) => setSelectedDetail(updated)}
+          onPostDeleted={() => deselectPin()}
+        />
+      )}
 
       {activeTab === "feed" && (
         <FeedTab

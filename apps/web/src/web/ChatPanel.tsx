@@ -97,6 +97,9 @@ export default function ChatPanel({ gateway, demoMode }: ChatPanelProps) {
   return (
     <div className="chat-tab" role="tabpanel" aria-label="Chat">
       <header className="chat-tab-header">
+        <a className="brand" href="#top" aria-label="SoSo home">
+          <span>So</span>So
+        </a>
         <h1>Chat</h1>
       </header>
 
