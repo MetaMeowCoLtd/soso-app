@@ -12,7 +12,7 @@ import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeoplePanel from "@/src/web/PeoplePanel";
 import ChatPanel from "@/src/web/ChatPanel";
-import { PeopleIcon, BellIcon, ChatIcon } from "@/src/web/icons";
+import { PeopleIcon, BellIcon, ChatIcon, MapIcon, FeedIcon } from "@/src/web/icons";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { usePresence } from "@/src/web/usePresence";
 import { lookOf } from "@/src/web/theme";
@@ -876,7 +876,8 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             className={`tab-bar-button${activeTab === "map" ? " active" : ""}`}
             onClick={() => setActiveTab("map")}
           >
-            Map
+            <MapIcon />
+            <span>Map</span>
           </button>
           <button
             type="button"
@@ -885,7 +886,8 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             className={`tab-bar-button${activeTab === "feed" ? " active" : ""}`}
             onClick={() => setActiveTab("feed")}
           >
-            Feed
+            <FeedIcon />
+            <span>Feed</span>
           </button>
         </nav>
       )}
