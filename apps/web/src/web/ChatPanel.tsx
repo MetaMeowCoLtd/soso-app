@@ -4,24 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { ERROR_MESSAGES_EN, formatAgo, type ChatMessage, type SosoGateway } from "soso-core";
 
 /**
- * The shared chat panel.
+ * The shared chat panel — its own full-screen tab, not a floating panel
+ * overlaid on the map (see page.tsx's tab-bar wiring: this and Feed are
+ * siblings of the map, toggled by `activeTab`).
  *
  * One global room, not scoped to an area — a deliberate departure from the
  * location-bound model the rest of this app follows; see the migration's
- * own comment for why. Mirrors PeoplePanel's exact minimize mechanism
- * (mounted at all times, a CSS class toggle collapses it toward the header
- * icon rather than unmounting) but is positioned on the opposite side of
- * the screen — People opens top-left specifically to stay clear of the
- * vertical rail further down the right side, and putting chat on the right
- * instead means the two panels can never overlap each other either, even
- * if both happen to be open at once.
- *
- * State is self-contained here rather than lifted into page.tsx the way
- * presence is for PeoplePanel — there is no unread-count badge on the
- * header button (a reasonable next addition, not built here: it would need
- * the message list hoisted up to be visible to the button too, which
- * wasn't asked for and adds real complexity for a feature this scope
- * didn't request).
+ * own comment for why.
  *
  * Real-time delivery follows the same signal-then-refetch contract as
  * subscribePostsChanged and subscribeFollowsChanged elsewhere in this app:
@@ -34,11 +23,9 @@ import { ERROR_MESSAGES_EN, formatAgo, type ChatMessage, type SosoGateway } from
 interface ChatPanelProps {
   gateway: SosoGateway;
   demoMode: boolean;
-  minimized: boolean;
-  onMinimize: () => void;
 }
 
-export default function ChatPanel({ gateway, demoMode, minimized, onMinimize }: ChatPanelProps) {
+export default function ChatPanel({ gateway, demoMode }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
@@ -70,8 +57,8 @@ export default function ChatPanel({ gateway, demoMode, minimized, onMinimize }: 
   }, []);
 
   useEffect(() => {
-    if (!minimized) listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages, minimized]);
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [messages]);
 
   async function send() {
     const body = input.trim();
@@ -108,28 +95,10 @@ export default function ChatPanel({ gateway, demoMode, minimized, onMinimize }: 
   }
 
   return (
-    <aside
-      className={`chat-frame ${minimized ? "minimized" : ""}`}
-      aria-label="Chat"
-      aria-hidden={minimized}
-      // See PeoplePanel's identical use of this: genuinely out of the tab
-      // order while minimized, not just visually hidden.
-      inert={minimized || undefined}
-    >
-      <div className="people-frame-head">
-        <span className="people-frame-title">Chat</span>
-        <button
-          className="people-frame-close"
-          onClick={onMinimize}
-          aria-label="Minimize"
-          title="Minimize"
-          type="button"
-        >
-          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-            <rect x="1" y="5.25" width="10" height="1.5" rx=".75" fill="currentColor" />
-          </svg>
-        </button>
-      </div>
+    <div className="chat-tab" role="tabpanel" aria-label="Chat">
+      <header className="chat-tab-header">
+        <h1>Chat</h1>
+      </header>
 
       <div className="chat-messages" ref={listRef}>
         {demoMode ? (
@@ -180,6 +149,6 @@ export default function ChatPanel({ gateway, demoMode, minimized, onMinimize }: 
           </svg>
         </button>
       </form>
-    </aside>
+    </div>
   );
 }

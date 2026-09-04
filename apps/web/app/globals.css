@@ -224,7 +224,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    badge counter-rotates to stay upright. */
 .soso-pin-private::before { content:"\1F512"; position:absolute; top:-5px; right:-5px; display:grid; place-items:center; width:17px; height:17px; border-radius:50%; background:#fff; color:#41564f; font-size:.55rem; box-shadow:var(--e1); transform:rotate(45deg); z-index:2; }
 
-@media (max-width:600px) { .brand { height:34px; padding:0 11px; font-size:1rem; }.notify-button, .people-button { width:34px; height:34px; }.notify-button svg, .people-button svg { width:18px; height:18px; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; }.people-frame { top:calc(max(14px, env(safe-area-inset-top)) + 34px + 14px + 8px); left:10px; width:min(210px, calc(100% - 20px)); max-height:min(55vh, 340px); padding:9px 10px; }.chat-button { width:34px; height:34px; }.chat-button svg { width:18px; height:18px; }.chat-frame { top:calc(max(14px, env(safe-area-inset-top)) + 34px + 14px + 8px); right:10px; width:min(230px, calc(100% - 20px)); max-height:min(58vh, 380px); }.coin-badge { padding:5px 5px 5px 9px; }.coin-badge-amount { font-size:.72rem; }.coin-debug-button { width:18px; height:18px; font-size:.72rem; } }
+@media (max-width:600px) { .brand { height:34px; padding:0 11px; font-size:1rem; }.notify-button, .people-button { width:34px; height:34px; }.notify-button svg, .people-button svg { width:18px; height:18px; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; }.people-frame { top:calc(max(14px, env(safe-area-inset-top)) + 34px + 14px + 8px); left:10px; width:min(210px, calc(100% - 20px)); max-height:min(55vh, 340px); padding:9px 10px; }.coin-badge { padding:5px 5px 5px 9px; }.coin-badge-amount { font-size:.72rem; }.coin-debug-button { width:18px; height:18px; font-size:.72rem; } }
 
 /* --- Added for the Supabase-backed rewrite: subtype chips reuse .vibe-picker/
    .vibe-option above as-is. Everything below is new: the detail panel (tap a
@@ -282,27 +282,17 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .people-frame { position:absolute; z-index:9; top:calc(max(14px, env(safe-area-inset-top)) + 38px + 14px + 10px); left:16px; width:min(220px, calc(100% - 32px)); max-height:min(60vh, 380px); overflow-y:auto; padding:10px 12px; border-radius:16px; background:rgba(255,255,255,.6); border:1px solid rgba(255,255,255,.6); box-shadow:var(--e2); backdrop-filter:blur(24px) saturate(180%); transform-origin:top left; transition:transform .22s cubic-bezier(.32,.72,0,1), opacity .18s, visibility 0s linear 0s; }
 
 /* -------------------------------------------------------------- chat --- */
-/* Mirrors .people-frame's exact mechanism (safe-area-derived top offset,
-   same minimize animation, same mounted-but-inert-when-minimized pattern)
-   but anchored to the RIGHT edge rather than the left, and mirrored in every
-   direction that implies (transform-origin, the minimize translate). People
-   opens top-left specifically to stay clear of the vertical rail further
-   down the right side; putting chat on the opposite side guarantees the two
-   panels can never overlap each other either, even if both happen to be
-   open at once, without needing any z-index or occlusion logic between them.
-   .chat-frame-head/.chat-frame-title/.chat-frame-close intentionally reuse
-   .people-frame's identically-named classes rather than duplicating them —
-   both are fully generic already (no people-specific styling baked in), so
-   sharing them keeps the two panels' chrome visually identical for free. */
-.chat-frame { position:absolute; z-index:9; top:calc(max(14px, env(safe-area-inset-top)) + 38px + 14px + 10px); right:16px; width:min(260px, calc(100% - 32px)); max-height:min(60vh, 420px); display:flex; flex-direction:column; border-radius:16px; background:rgba(255,255,255,.9); border:1px solid rgba(255,255,255,.6); box-shadow:var(--e2); backdrop-filter:blur(24px) saturate(180%); transform-origin:top right; transition:transform .22s cubic-bezier(.32,.72,0,1), opacity .18s, visibility 0s linear 0s; }
-.chat-frame.minimized { transform:scale(.15) translate(38%,-38%); opacity:0; pointer-events:none; visibility:hidden; transition:transform .18s cubic-bezier(.4,0,1,1), opacity .16s, visibility 0s linear .18s; }
-.chat-frame > .people-frame-head { padding:10px 12px 0; margin-bottom:4px; }
-
-.chat-button { position:relative; display:grid; place-items:center; width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.92); color:#2b5d52; font-size:1.02rem; transition:background .18s, transform .18s; }
-.chat-button:hover { background:#fff; transform:scale(1.05); }
-.chat-button:active { transform:scale(.94); }
-.chat-button.active { box-shadow:0 0 0 2px var(--teal); }
-.chat-unread-count { position:absolute; top:-3px; right:-3px; min-width:17px; height:17px; padding:0 4px; border-radius:999px; background:var(--hot); color:#fff; font-size:.62rem; font-weight:750; display:grid; place-items:center; border:1.5px solid #fff; }
+/* Its own full-screen tab now, not a floating panel — see page.tsx's tab-bar
+   wiring: this and Feed are siblings of the map, toggled by `activeTab`,
+   with the map staying mounted underneath rather than torn down. Layout
+   mirrors .feed-tab (fixed, full-viewport, bottom padding to clear the
+   floating .tab-bar) but as a flex column rather than one scrolling list,
+   since chat additionally needs a pinned compose row at the bottom rather
+   than everything scrolling as one region — .chat-messages below is the
+   only part that actually scrolls. */
+.chat-tab { position:fixed; z-index:1; inset:0; display:flex; flex-direction:column; background:#f4f8f6; padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
+.chat-tab-header { flex-shrink:0; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); background:rgba(244,248,246,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.chat-tab-header h1 { margin:0; font-size:1.1rem; font-weight:900; color:var(--deep); }
 
 .chat-messages { flex:1; min-height:120px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:2px 12px; display:flex; flex-direction:column; gap:9px; }
 .chat-empty { margin:auto; padding:16px 8px; color:var(--muted); font-size:.78rem; text-align:center; line-height:1.5; }
