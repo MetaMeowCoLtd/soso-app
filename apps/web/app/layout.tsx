@@ -86,19 +86,48 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){
+  // Established once, before any input is ever focused (this script's own
+  // initial call and its 100/400/1000ms follow-ups all run long before a
+  // real person could have tapped a text field), and only ever revised
+  // upward from there. This exists because window.innerHeight cannot be
+  // trusted moment-to-moment as "the true full-screen height" on an
+  // installed iOS Home Screen PWA specifically: the first time the on-screen
+  // keyboard opens in a session, window.innerHeight (and
+  // visualViewport.height, and 100dvh) drop to the keyboard-open size and,
+  // per widely-reported iOS behaviour, do not reliably return to the full
+  // value afterwards even once the keyboard closes. A formula that
+  // subtracts the CURRENT innerHeight from the current visual viewport
+  // height — the textbook way to size a keyboard from visualViewport, and
+  // what this script used to do — silently breaks the moment that happens:
+  // both sides of the subtraction have shrunk by roughly the same amount,
+  // so the difference comes out near zero regardless of how much of the
+  // screen the keyboard actually covers. Keeping our own independently
+  // tracked maximum sidesteps this entirely, since it never trusts
+  // window.innerHeight's CURRENT value as the baseline, only ever the
+  // largest one this session has ever actually observed.
+  var maxViewportHeight = window.innerHeight;
   function setAppOffset(){
     var vv = window.visualViewport;
     var top = vv ? vv.offsetTop : 0;
     var left = vv ? vv.offsetLeft : 0;
     document.documentElement.style.setProperty('--app-top', top + 'px');
     document.documentElement.style.setProperty('--app-left', left + 'px');
+    maxViewportHeight = Math.max(maxViewportHeight, window.innerHeight);
     // How much of the layout viewport's bottom edge the on-screen keyboard
     // currently covers. body itself is deliberately NOT resized for this
     // (see the comment above — that would reintroduce the Home Indicator
     // gap this same script exists to avoid), so this is applied narrowly,
     // in CSS, only to the specific fixed-bottom inputs that actually need
     // to stay above the keyboard (.chat-compose) rather than to the shell.
-    var keyboardInset = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+    var visualHeight = vv ? vv.height : window.innerHeight;
+    var keyboardInset = vv ? Math.max(0, maxViewportHeight - visualHeight - top) : 0;
+    // A separately-documented iOS quirk (visualViewport.offsetTop sometimes
+    // not resetting cleanly to 0 right after the keyboard is dismissed) can
+    // otherwise leave a few stray pixels of residual inset behind even with
+    // the fix above. Below this threshold there is no keyboard actually
+    // open — round it down to a clean 0 rather than leaving a sliver of
+    // unwanted margin under the compose bar for the rest of the session.
+    if (keyboardInset < 4) keyboardInset = 0;
     document.documentElement.style.setProperty('--keyboard-inset', keyboardInset + 'px');
     if (top || left) window.scrollTo(0, 0);
   }
