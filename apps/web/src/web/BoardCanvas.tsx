@@ -12,11 +12,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Pin, SosoGateway } from "soso-core";
-import { EraserIcon } from "./icons";
+import { EraserIcon, RedoIcon, UndoIcon } from "./icons";
 import {
   BOARD_BRUSH_SIZE_MAX,
   BOARD_BRUSH_SIZE_MIN,
   BOARD_COLORS,
+  BOARD_ERASER_SIZE_MAX,
+  DEFAULT_ERASER_SIZE,
   useBoardSession,
 } from "./useBoardSession";
 
@@ -183,6 +185,7 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
   function onPointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
     pointers.current.delete(event.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
+    if (drawing.current) session.endStroke();
     drawing.current = null;
   }
 
@@ -198,6 +201,36 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
           <strong>{displayTitle}</strong>
           {session.locked && <span className="board-canvas-locked">Locked</span>}
           {session.saving && <span className="board-canvas-saving">Saving</span>}
+        </div>
+        {/*
+         * Undo/redo only ever affects this session's own unflushed strokes
+         * — see useBoardSession's own comment on why a flushed tile has no
+         * memory of the strokes that made it up. Placed in the header
+         * rather than the bottom toolbar: they're actions on the drawing
+         * itself, not tool selection, and the footer is already carrying
+         * color swatches, the eraser, and the size slider.
+         */}
+        <div className="board-canvas-undo-redo" role="group" aria-label="Undo and redo">
+          <button
+            type="button"
+            className="board-undo-redo-button"
+            onClick={session.undo}
+            disabled={session.locked || !session.canUndo}
+            aria-label="Undo"
+            title="Undo"
+          >
+            <UndoIcon />
+          </button>
+          <button
+            type="button"
+            className="board-undo-redo-button"
+            onClick={session.redo}
+            disabled={session.locked || !session.canRedo}
+            aria-label="Redo"
+            title="Redo"
+          >
+            <RedoIcon />
+          </button>
         </div>
         {/*
          * A flush failure (see useBoardSession's flushNow) sets `error` but
@@ -239,7 +272,7 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
             type="range"
             className="board-size-range"
             min={BOARD_BRUSH_SIZE_MIN}
-            max={BOARD_BRUSH_SIZE_MAX}
+            max={session.tool.mode === "erase" ? BOARD_ERASER_SIZE_MAX : BOARD_BRUSH_SIZE_MAX}
             step={1}
             value={session.tool.size}
             disabled={session.locked}
@@ -262,7 +295,19 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
               aria-label={`Colour ${color}`}
               aria-pressed={session.tool.mode === "draw" && session.tool.color === color}
               disabled={session.locked}
-              onClick={() => session.setTool((tool) => ({ ...tool, color, mode: "draw" }))}
+              onClick={() =>
+                // Coming back from erase, a size picked for clearing large
+                // mistakes is clamped back down to what the draw slider's
+                // own range actually allows — leaving it at, say, 120 would
+                // desync the stored size from what the slider can even
+                // display once its own max drops back to BOARD_BRUSH_SIZE_MAX.
+                session.setTool((tool) => ({
+                  ...tool,
+                  color,
+                  mode: "draw",
+                  size: Math.min(tool.size, BOARD_BRUSH_SIZE_MAX),
+                }))
+              }
             />
           ))}
           <button
@@ -271,7 +316,16 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
             aria-label="Eraser"
             aria-pressed={session.tool.mode === "erase"}
             disabled={session.locked}
-            onClick={() => session.setTool((tool) => ({ ...tool, mode: "erase" }))}
+            onClick={() =>
+              // Bumped up to a real eraser-sized default on switching in,
+              // rather than inheriting whatever the draw brush happened to
+              // be set to — a precise, small drawing size is exactly the
+              // wrong size to also be stuck with for clearing mistakes.
+              // Never shrinks an already-larger size back down, so
+              // switching in and out of erase mode repeatedly doesn't fight
+              // a size someone deliberately picked.
+              session.setTool((tool) => ({ ...tool, mode: "erase", size: Math.max(tool.size, DEFAULT_ERASER_SIZE) }))
+            }
           >
             <EraserIcon />
           </button>

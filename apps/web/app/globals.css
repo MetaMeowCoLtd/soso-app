@@ -393,6 +393,10 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .board-canvas-title strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.92rem; letter-spacing:-.03em; }
 .board-canvas-locked, .board-canvas-saving { padding:3px 8px; border-radius:999px; font-size:.68rem; font-weight:700; }
 .board-canvas-locked { background:#fef2f4; color:#b52445; }
+.board-canvas-undo-redo { display:flex; gap:4px; margin-left:auto; }
+.board-undo-redo-button { display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:50%; background:#f1f4f2; color:var(--deep); transition:background .16s, opacity .16s; }
+.board-undo-redo-button:hover:not(:disabled) { background:#e4e9e6; }
+.board-undo-redo-button:disabled { opacity:.35; }
 .board-canvas-saving { background:#eef8f4; color:#1b866c; }
 .board-canvas-save-error { padding:3px 8px; border-radius:999px; background:#fef2f4; color:#b52445; font-size:.68rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .board-canvas-stage { position:relative; flex:1; min-height:0; }

@@ -98,6 +98,49 @@ export function EraserIcon({ className }: IconProps) {
   );
 }
 
+/** A curved arrow sweeping counter-clockwise, the conventional "undo" shape. */
+export function UndoIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6.5 6.5H4V4" />
+      <path d="M4.3 6.7A6.5 6.5 0 1 1 5 13.2" />
+    </svg>
+  );
+}
+
+/** UndoIcon mirrored horizontally, rather than a second hand-drawn path — the two are the same shape by construction, not two independently-tuned curves that happen to look similar. */
+export function RedoIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ transform: "scaleX(-1)" }}
+    >
+      <path d="M6.5 6.5H4V4" />
+      <path d="M4.3 6.7A6.5 6.5 0 1 1 5 13.2" />
+    </svg>
+  );
+}
+
 /**
  * A speech bubble, following the exact same convention as PeopleIcon and
  * BellIcon above: 20x20, stroke-only, currentColor, 1.8 stroke weight,

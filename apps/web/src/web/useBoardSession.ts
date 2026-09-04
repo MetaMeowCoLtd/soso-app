@@ -67,6 +67,17 @@ export const BOARD_BRUSH_SIZE_MIN = 2;
 export const BOARD_BRUSH_SIZE_MAX = 56;
 const DEFAULT_BRUSH_SIZE = 10;
 
+/**
+ * A separate, much larger ceiling than the draw brush's own — an eraser at
+ * the same max size as a drawing brush is genuinely too small to clear
+ * mistakes efficiently, which is the whole reason to reach for it in the
+ * first place. 160 is roughly 60% of a tile (see
+ * DEFAULT_BOARD_TILE_SIZE_PX) — large enough to feel like a real eraser,
+ * short of covering multiple tiles in one stamp regardless of zoom.
+ */
+export const BOARD_ERASER_SIZE_MAX = 160;
+export const DEFAULT_ERASER_SIZE = 60;
+
 export interface BoardCamera {
   x: number;
   y: number;
@@ -89,6 +100,16 @@ export interface BoardTool {
 
 export type BoardSessionStatus = "loading" | "ready" | "error";
 
+/**
+ * One stroke's worth of per-tile pixel snapshots, taken the instant BEFORE
+ * that stroke touched a given tile for the first time — see
+ * `useBoardSession`'s own undo/redo comment for the full reasoning. `null`
+ * for a tile the stroke created from nothing.
+ */
+interface UndoEntry {
+  tiles: { key: string; before: ImageData | null }[];
+}
+
 export interface UseBoardSessionResult {
   status: BoardSessionStatus;
   error: string | null;
@@ -103,6 +124,12 @@ export interface UseBoardSessionResult {
   drawFrame: (ctx: CanvasRenderingContext2D, viewW: number, viewH: number) => void;
   stampDot: (x: number, y: number) => void;
   stampSegment: (x0: number, y0: number, x1: number, y1: number) => void;
+  /** Commits the in-progress stroke's undo entry — call once per stroke, from pointerup/pointercancel, never mid-stroke. */
+  endStroke: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   flushNow: () => Promise<void>;
   screenToCanvas: (sx: number, sy: number, viewW: number, viewH: number, camera?: BoardCamera) => { x: number; y: number };
   zoomAt: (sx: number, sy: number, nextScale: number, viewW: number, viewH: number) => void;
@@ -281,6 +308,29 @@ export function useBoardSession(
   const cancelled = useRef(false);
   const fitted = useRef(false);
 
+  /**
+   * Undo/redo, scoped to what a flush can actually still affect — this
+   * board has no server-side memory of individual strokes at all (see
+   * BOARD_BACKGROUND_COLOR's own comment: once flushed, a tile is a
+   * flattened PNG), so there is no way to undo something already persisted
+   * without a versioning system this codebase does not have. What IS
+   * genuinely undoable is exactly the same content a flush is about to
+   * upload — this session's own unflushed strokes.
+   *
+   * Each entry is one stroke's worth of per-tile pixel snapshots, taken
+   * the instant BEFORE that stroke touched a given tile for the first
+   * time (see paintSegment below) — `null` for a tile the stroke created
+   * from nothing, meaning undo should remove it outright rather than
+   * restore blank pixels onto a canvas that should not exist at all.
+   * `currentStroke` accumulates one entry's worth of snapshots while a
+   * stroke is in progress; `endStroke` (called from BoardCanvas's own
+   * pointerup/pointercancel) is what actually commits it onto the stack.
+   */
+  const undoStack = useRef<UndoEntry[]>([]);
+  const redoStack = useRef<UndoEntry[]>([]);
+  const currentStroke = useRef<Map<string, ImageData | null> | null>(null);
+  const MAX_UNDO_DEPTH = 40;
+
   const tileSizeOf = () => boardRef.current?.tileSizePx || DEFAULT_BOARD_TILE_SIZE_PX;
 
   const setCamera = useCallback((next: BoardCamera | ((current: BoardCamera) => BoardCamera)) => {
@@ -354,6 +404,19 @@ export function useBoardSession(
         tileSize,
       );
       for (const tile of tiles) {
+        const key = canvasTileKey(tile.tx, tile.ty);
+        // Snapshot BEFORE getDirty below, which would otherwise lazily
+        // create a blank canvas for a tile that did not exist yet — after
+        // that, there would be no way to tell undo "this tile did not
+        // exist before this stroke, remove it outright" apart from "this
+        // tile existed but was blank, restore it to blank".
+        if (currentStroke.current && !currentStroke.current.has(key)) {
+          const existing = dirtyTiles.current.get(key);
+          const before = existing
+            ? (existing.getContext("2d")?.getImageData(0, 0, existing.width, existing.height) ?? null)
+            : null;
+          currentStroke.current.set(key, before);
+        }
         const ctx = getDirty(tile.tx, tile.ty);
         if (!ctx) continue;
         const bounds = canvasTileBounds(tile.tx, tile.ty, tileSize);
@@ -363,7 +426,7 @@ export function useBoardSession(
         // flushNow's own comment on why re-marking here, rather than only
         // when a canvas is first created, is what makes a stroke drawn
         // mid-flush get picked up on the next pass instead of vanishing.
-        dirtyKeys.current.add(canvasTileKey(tile.tx, tile.ty));
+        dirtyKeys.current.add(key);
       }
       bump();
     },
@@ -449,10 +512,92 @@ export function useBoardSession(
         gateway.publishBoardStroke(boardId, { color: pending.color, size: pending.size, points: pending.points });
       }
       outgoing.current = null;
+      // Starts this stroke's own undo entry — see endStroke below, its
+      // sole consumer, for how this map becomes a committed UndoEntry.
+      currentStroke.current = new Map();
       stampSegment(x, y, x, y);
     },
     [stampSegment, gateway, boardId],
   );
+
+  /**
+   * Commits whatever paintSegment accumulated into currentStroke while the
+   * just-finished stroke was in progress. Called once per stroke, from
+   * BoardCanvas's own pointerup/pointercancel — never mid-stroke, and
+   * never more than once per stroke, or a single drag would fragment into
+   * several separate undo steps instead of undoing as the one gesture it
+   * visually was.
+   */
+  const endStroke = useCallback(() => {
+    const snapshots = currentStroke.current;
+    currentStroke.current = null;
+    // Nothing was actually painted — a tap while locked, or a stroke that
+    // never called paintSegment at all — so there is nothing to undo.
+    if (!snapshots || snapshots.size === 0) return;
+    undoStack.current.push({ tiles: [...snapshots.entries()].map(([key, before]) => ({ key, before })) });
+    if (undoStack.current.length > MAX_UNDO_DEPTH) undoStack.current.shift();
+    // A fresh action invalidates whatever was undone before it — the same
+    // rule an ordinary text editor's undo/redo already follows.
+    redoStack.current = [];
+    bump();
+  }, [bump]);
+
+  /**
+   * Shared by undo and redo below — both are "pop one stack, restore its
+   * snapshots, push the pre-restore state onto the other stack" with the
+   * two stacks swapped, not two genuinely different operations.
+   */
+  function applyUndoEntry(entry: UndoEntry, pushOnto: { current: UndoEntry[] }) {
+    const inverse: UndoEntry["tiles"] = [];
+    for (const { key, before } of entry.tiles) {
+      const current = dirtyTiles.current.get(key);
+      const currentPixels = current
+        ? (current.getContext("2d")?.getImageData(0, 0, current.width, current.height) ?? null)
+        : null;
+      inverse.push({ key, before: currentPixels });
+
+      if (before === null) {
+        // This tile did not exist before the stroke being undone created
+        // it — removed outright, not restored to blank, so it stops being
+        // drawn/flushed at all rather than becoming an empty tile someone
+        // else would see appear and immediately want explained.
+        dirtyTiles.current.delete(key);
+      } else {
+        let canvas = dirtyTiles.current.get(key);
+        if (!canvas) {
+          canvas = document.createElement("canvas");
+          canvas.width = before.width;
+          canvas.height = before.height;
+          dirtyTiles.current.set(key, canvas);
+        }
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.putImageData(before, 0, 0);
+        }
+      }
+      // Marked dirty either way: a restored tile needs to be re-flushed
+      // with its restored content, and a removed one needs its next flush
+      // to happen at all so the now-blank tile actually reaches R2 rather
+      // than the server going on believing it still holds what this
+      // client just undid.
+      dirtyKeys.current.add(key);
+    }
+    pushOnto.current.push({ tiles: inverse });
+    bump();
+  }
+
+  const undo = useCallback(() => {
+    const entry = undoStack.current.pop();
+    if (!entry) return;
+    applyUndoEntry(entry, redoStack);
+  }, [bump]);
+
+  const redo = useCallback(() => {
+    const entry = redoStack.current.pop();
+    if (!entry) return;
+    applyUndoEntry(entry, undoStack);
+  }, [bump]);
 
   /**
    * Applies a stroke received from someone else — same tile-painting code
@@ -621,6 +766,19 @@ export function useBoardSession(
               updatedAt: new Date().toISOString(),
             });
             succeeded = true;
+            // A flushed tile is a flattened PNG with no memory of the
+            // strokes that made it up (see BOARD_BACKGROUND_COLOR's own
+            // comment) — restoring an undo snapshot taken before this
+            // point would be visually invisible at best (its pixels now
+            // match the base layer this flush just wrote) and confusing
+            // at worst, so the whole history is cleared rather than left
+            // sitting there offering an undo that cannot actually undo
+            // anything anymore. Simpler than tracking which specific
+            // entries a partial, per-tile flush would still leave valid,
+            // and a flush happens every few seconds regardless, so the
+            // window this actually costs anyone is short either way.
+            undoStack.current = [];
+            redoStack.current = [];
             break;
           } catch (err) {
             const code = (err as { code?: string }).code;
@@ -836,13 +994,21 @@ export function useBoardSession(
       for (const tile of tiles) {
         const key = canvasTileKey(tile.tx, tile.ty);
         const bounds = canvasTileBounds(tile.tx, tile.ty, tileSize);
-        ctx.strokeStyle = "rgba(23,36,31,.06)";
-        ctx.lineWidth = 1 / cam.scale;
-        ctx.strokeRect(bounds.minX, bounds.minY, tileSize, tileSize);
         const base = baseTiles.current.get(key);
         if (base) ctx.drawImage(base.image, bounds.minX, bounds.minY, tileSize, tileSize);
         const dirty = dirtyTiles.current.get(key);
         if (dirty) ctx.drawImage(dirty, bounds.minX, bounds.minY, tileSize, tileSize);
+        // Drawn LAST, on top of both layers — not first. It used to be
+        // drawn before the tile's own content, meaning any opaque paint
+        // reaching a tile's edge (including the eraser's own background-
+        // colored fill, see BOARD_BACKGROUND_COLOR's comment) simply
+        // covered the line underneath it, making the grid look like it
+        // "went whiter" wherever someone had drawn or erased near an edge.
+        // It's a reference overlay, not part of the canvas content, so it
+        // needs to always render on top regardless of what's underneath.
+        ctx.strokeStyle = "rgba(23,36,31,.06)";
+        ctx.lineWidth = 1 / cam.scale;
+        ctx.strokeRect(bounds.minX, bounds.minY, tileSize, tileSize);
       }
       ctx.restore();
     },
@@ -881,6 +1047,11 @@ export function useBoardSession(
     drawFrame,
     stampDot,
     stampSegment,
+    endStroke,
+    undo,
+    redo,
+    canUndo: undoStack.current.length > 0,
+    canRedo: redoStack.current.length > 0,
     flushNow,
     screenToCanvas,
     zoomAt,
