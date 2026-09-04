@@ -409,7 +409,7 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
         disputeCount: 0,
         replyCount: 0,
       },
-      // Location-optional ("thought") posts — the only seeds here with no
+      // Location-optional ("update") posts — the only seeds here with no
       // lng/lat at all, exercising the exact branch that distinguishes this
       // category from every other seed above. Without at least one of
       // these, a fresh demo session's Feed tab would always show "Nothing
@@ -420,7 +420,7 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
       {
         id: crypto.randomUUID(),
         authorId: "seed",
-        category: "thought",
+        category: "update",
         subtype: null,
         body: "First one of these — no pin, no place, just a short update.",
         lng: null,
@@ -436,7 +436,7 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
       {
         id: crypto.randomUUID(),
         authorId: "seed",
-        category: "thought",
+        category: "update",
         subtype: null,
         body: "Testing whether a feed post can exist without ever touching the map at all. It can.",
         lng: null,

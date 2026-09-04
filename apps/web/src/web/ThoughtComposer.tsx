@@ -56,7 +56,7 @@ export default function ThoughtComposer({ gateway, coinBalance, onCancel, onPost
     setBusy(true);
     setError(null);
     try {
-      const input: NewPost = { category: "thought", body: trimmed, audience };
+      const input: NewPost = { category: "update", body: trimmed, audience };
       const pin = await gateway.createPost(input);
       // createPost's own return is a lightweight Pin, not the full
       // PostDetail a feed card needs (author name/handle, reply count,

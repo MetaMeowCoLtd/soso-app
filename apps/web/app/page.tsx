@@ -349,9 +349,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // A pin preview takes visual priority over whatever browse state the
   // sheet was already in — selecting a pin always shows it, regardless of
   // whether the feed list happened to be expanded at the time.
-  const previewingPin = selectedPin !== null && selectedPin.category !== "board" && selectedPin.category !== "thought";
+  const previewingPin = selectedPin !== null && selectedPin.category !== "board" && selectedPin.category !== "update";
   const viewingBoard = selectedPin?.category === "board";
-  const viewingThought = selectedPin?.category === "thought";
+  const viewingThought = selectedPin?.category === "update";
 
   // Measured, not guessed: the preview now holds everything that used to be
   // a separate modal (voting, reporting, early resolution), so its height
