@@ -86,6 +86,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     var left = vv ? vv.offsetLeft : 0;
     document.documentElement.style.setProperty('--app-top', top + 'px');
     document.documentElement.style.setProperty('--app-left', left + 'px');
+    // How much of the layout viewport's bottom edge the on-screen keyboard
+    // currently covers. body itself is deliberately NOT resized for this
+    // (see the comment above — that would reintroduce the Home Indicator
+    // gap this same script exists to avoid), so this is applied narrowly,
+    // in CSS, only to the specific fixed-bottom inputs that actually need
+    // to stay above the keyboard (.chat-compose) rather than to the shell.
+    var keyboardInset = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+    document.documentElement.style.setProperty('--keyboard-inset', keyboardInset + 'px');
     if (top || left) window.scrollTo(0, 0);
   }
   setAppOffset();

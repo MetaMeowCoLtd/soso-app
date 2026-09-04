@@ -680,7 +680,16 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           is what lets the primary action read as primary. Sits above the sheet
           so it stays reachable as the sheet expands. */}
       {!showComposer && (
-        <div className="map-rail" style={{ bottom: `calc(${sheetOffset} + 18px)` }}>
+        <div
+          className="map-rail"
+          // The sheet collapses to a real 0px (see .sheet:not(.expanded):
+          // not(.previewing) in globals.css), so "18px above the sheet"
+          // alone isn't enough on its own to clear the floating tab bar in
+          // that common state — the max() floor guarantees the rail always
+          // clears it by the same margin .feed-tab-fab already does,
+          // regardless of how short the sheet currently is.
+          style={{ bottom: `max(calc(${sheetOffset} + 18px), calc(88px + env(safe-area-inset-bottom)))` }}
+        >
           <button
             className={`rail-button ${isAtMyLocation ? "active" : ""} ${locating ? "locating" : ""}`}
             onClick={locateMe}

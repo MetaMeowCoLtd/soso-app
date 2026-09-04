@@ -310,7 +310,14 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    content plus a pinned bottom row" shape .pin-preview-body already uses
    elsewhere in this file, applied here to a compose row instead of a
    report/resolve action row. */
-.chat-compose { flex-shrink:0; display:flex; gap:7px; padding:9px 10px; padding-bottom:max(9px, env(safe-area-inset-bottom)); border-top:1px solid var(--hairline); }
+/* margin-bottom, not padding: this is a flex item inside a fixed,
+   full-height column (.chat-tab / .thought-thread) whose own height never
+   shrinks for the keyboard (see layout.tsx's script and its comment on why
+   not). Margin on this last item eats into the sibling scroll area's
+   flex:1 space instead, which is what actually moves the input above the
+   keyboard rather than just adding empty room below it. --keyboard-inset
+   is 0px whenever the keyboard is closed, so this is a no-op otherwise. */
+.chat-compose { flex-shrink:0; display:flex; gap:7px; padding:9px 10px; padding-bottom:max(9px, env(safe-area-inset-bottom)); margin-bottom:var(--keyboard-inset, 0px); border-top:1px solid var(--hairline); }
 .chat-input { flex:1; min-width:0; border:1px solid #d8e2de; border-radius:999px; padding:8px 13px; background:#fafcfb; color:var(--ink); font-size:.84rem; font-family:inherit; transition:border-color .16s, background .16s; }
 .chat-input:focus { outline:none; border-color:var(--teal); background:#fff; }
 .chat-send { flex-shrink:0; display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:var(--deep); color:#fff; transition:background .16s, transform .16s, opacity .16s; }
@@ -480,10 +487,14 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    comment) rather than reserved layout space — .feed-tab reserves its own
    bottom padding below so its scrollable content still clears it; the map,
    deliberately, does not (see the comment on .tab-hidden above). Z-index 6
-   sits below .sheet (7) and .map-rail (8) on purpose: the sheet or the "+"
-   button expanding on top of the tab bar is the same "an active sheet
-   covers the tab bar" pattern most apps with both already use, not a bug
-   to route around. */
+   sits below .sheet (7) and .map-rail (8): an EXPANDED or PREVIEWING sheet
+   is still allowed to cover the tab bar, same "an active sheet covers the
+   tab bar" pattern most apps with both already use. The "+" and locate
+   buttons are a different case, though — those are permanent controls, not
+   a transient sheet, and covering the tab bar was a real bug for them, not
+   this same intentional pattern; .map-rail's own inline style (page.tsx)
+   floors its position so it always clears the tab bar regardless of how
+   short the sheet currently is. */
 .feed-tab { position:fixed; z-index:1; inset:0; overflow-y:auto; background:#fdf3e6; padding-bottom:calc(64px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; }
 
 .feed-tab-header { position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:10px; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); background:rgba(253,243,230,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
