@@ -37,9 +37,11 @@ Supabase.
 | Construction and closures | Implemented |
 | Lost and found | Implemented |
 | Seat availability (restaurant, cafe) | Implemented |
+| Suspicious activity reporting | Implemented, enabled |
+| Location-optional posts (Threads-style feed, no pin) | Backend and data model only — schema, RPCs, and the gateway exist; there is no UI, and nothing in the app can create or view one yet. See [Location-optional posts](#location-optional-posts). |
 | Per-category expiry (TTL) | Implemented. Server-assigned; the client cannot extend it. |
 | Server-side validation (proximity, rate limits, body length, subtype) | Implemented. Enforced in Postgres, not in the client. |
-| Corroboration ("still here" / "not true") with auto-hide on disputes | Implemented |
+| Validity voting (votes fade and eventually expire a post) | Implemented, not verified end-to-end. See [Validity voting](#validity-voting). |
 | Post reporting (flagging for review) | Implemented. Reports are recorded; no moderator workflow exists yet. |
 | Reverse-geocoded addresses | Implemented, unverified end-to-end. Populated asynchronously after posting; see [Push notifications](#push-notifications) for why it shares that feature's Edge Function. |
 | Local demo mode (no backend required) | Implemented |
@@ -51,9 +53,8 @@ Supabase.
 | Photo uploads | Not implemented. The `post_media` table exists; nothing writes to it. |
 | Push notifications | Implemented, not verified end-to-end. See [Push notifications](#push-notifications). |
 | Early resolution (author's own early removal) | Implemented, not verified end-to-end. See [Early resolution](#early-resolution). |
-| Validity voting (votes fade and eventually expire a post) | Implemented, not verified end-to-end. See [Validity voting](#validity-voting). |
 | Native iOS/Android application | Not present in this repository. See [Platforms](#platforms). |
-| Drawing boards (shared canvas per pin) | Schema and tile-signing scaffolding only, shipped disabled. See [Drawing boards](#drawing-boards). |
+| Drawing boards (shared canvas per pin) | Implemented and enabled for testing. Moderation tooling is the one deliberate gap — not ready for real users yet. See [Drawing boards](#drawing-boards). |
 
 ## Platforms
 
@@ -674,6 +675,12 @@ have a case for.
   to matter, since votes can now cause expiry far more often than
   `resolve_post` alone ever did.
 
+## Location-optional posts
+
+A post can now exist with no location at all — a short text update,
+optionally with an image, closer to a Threads or Twitter post than a map
+pin, decoupled entirely from the map into its own feed.
+
 ## Presence and people
 
 Makes an area feel inhabited without publishing who is in it.
@@ -752,9 +759,9 @@ stay in sync, as with `CELL_ZOOM`.
 
 A `board` is a post category like any other — it gets a pin, an audience,
 and an expiry — except tapping it is meant to open a dedicated infinite
-canvas instead of a detail sheet. See `DRAWING_BOARDS_PLAN.md` for the full
-design (the vector-in-transit / raster-at-rest split, the concurrency model,
-access control, and the suggested build order).
+canvas instead of a detail sheet (the vector-in-transit / raster-at-rest
+split, the concurrency model, and access control are all described in
+detail below).
 
 **Status: schema/tile-index/R2-signing (step 1), the gateway (step 2), the
 single-player canvas UI (step 3), the live Broadcast layer (step 4), and
