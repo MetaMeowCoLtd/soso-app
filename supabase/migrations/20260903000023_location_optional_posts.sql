@@ -425,11 +425,7 @@ create or replace function public.list_feed_posts(
   security definer
   set search_path = public, extensions, pg_temp
 as $$
-  select jsonb_build_object(
-    'cursor', (select min(created_at) from page),
-    'posts',  coalesce((select jsonb_agg(row_json order by created_at desc) from page), '[]'::jsonb)
-  )
-  from (
+  with page as (
     select
       soso.pin(p.*) || jsonb_build_object(
         'body',    p.body,
@@ -465,7 +461,11 @@ as $$
       and soso.can_see_post(auth.uid(), p.author_id, p.audience, p.id)
     order by p.created_at desc
     limit least(greatest(coalesce(p_limit, 20), 1), 50)
-  ) page;
+  )
+  select jsonb_build_object(
+    'cursor', (select min(created_at) from page),
+    'posts',  coalesce((select jsonb_agg(row_json order by created_at desc) from page), '[]'::jsonb)
+  );
 $$;
 
 grant execute on function public.list_feed_posts(timestamptz, integer) to anon, authenticated;
