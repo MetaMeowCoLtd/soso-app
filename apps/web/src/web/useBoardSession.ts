@@ -39,6 +39,16 @@ import { demoStoreBoardTileBlob } from "./demo-gateway";
 const DEMO_UPLOAD_PREFIX = "demo-tile-upload:";
 const FLUSH_IDLE_MS = 2000;
 const FLUSH_INTERVAL_MS = 5000;
+/**
+ * How long panning has to settle before the tile index itself gets
+ * re-fetched from the server — see the camera-change effect for why this
+ * exists as a separate, debounced concern from loadVisibleTiles, which
+ * stays immediate on every camera change. Deliberately shorter than
+ * FLUSH_IDLE_MS: catching up on someone else's already-persisted change is
+ * a plain read, not a write racing anything, so there's no reason to wait
+ * as long as flushing this client's own strokes does.
+ */
+const INDEX_REFRESH_IDLE_MS = 900;
 const MAX_FLUSH_RETRIES = 3;
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 8;
@@ -305,6 +315,12 @@ export function useBoardSession(
   const loadedVersions = useRef(new Map<string, number>());
   const flushing = useRef(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Debounces refreshIndex specifically — see the camera-change effect
+   * below for why this exists as a separate timer from loadVisibleTiles
+   * itself, which stays immediate and undebounced.
+   */
+  const indexRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelled = useRef(false);
   const fitted = useRef(false);
 
@@ -673,6 +689,18 @@ export function useBoardSession(
           try {
             const image = await loadImage(signed.url);
             const key = canvasTileKey(signed.tx, signed.ty);
+            // Guards against a real race: two overlapping loadVisibleTiles()
+            // calls (e.g. two camera positions fired in quick succession
+            // while panning) can both end up fetching the same tile. If the
+            // index changed in between — this client's own flush, or
+            // refreshIndex picking up someone else's — the earlier call
+            // captured an older version number before it started and may
+            // still be in flight when the newer call's fetch finishes
+            // first. Without this check, the slower, older fetch
+            // completing last would silently overwrite the tile back to
+            // stale content — exactly the "shows an old version after
+            // panning" symptom this exists to prevent.
+            if ((loadedVersions.current.get(key) ?? -1) > signed.version) return;
             baseTiles.current.set(key, { tx: signed.tx, ty: signed.ty, version: signed.version, image });
             loadedVersions.current.set(key, signed.version);
           } catch {
@@ -892,6 +920,7 @@ export function useBoardSession(
     return () => {
       alive = false;
       cancelled.current = true;
+      if (indexRefreshTimer.current) clearTimeout(indexRefreshTimer.current);
     };
   }, [boardId, gateway, loadVisibleTiles]);
 
@@ -939,8 +968,28 @@ export function useBoardSession(
       fitted.current = true;
       setCameraState(fitCameraToBoard(boardRef.current, viewSize.width, viewSize.height));
     }
+    // Immediate and undebounced — this is what makes tiles actually
+    // appear as you pan. It only ever checks already-cached index data
+    // (indexRef.current), though, so on its own it can never discover a
+    // tile that changed version somewhere this client hasn't already
+    // heard about.
     void loadVisibleTiles();
-  }, [camera, viewSize.width, viewSize.height, loadVisibleTiles, status]);
+
+    // Debounced separately: refetches the index itself from the server,
+    // which is what actually lets a tile someone else (or this client, via
+    // some path that didn't already update indexRef directly) changed
+    // since the last refresh get noticed at all. Without this, panning
+    // away from a tile and back showed whatever version was cached at
+    // last refreshIndex — stale forever, not just briefly, since nothing
+    // else was ever re-checking it. Debounced rather than fired on every
+    // intermediate camera position during a drag, which would otherwise
+    // hit listBoardTiles continuously for the whole gesture.
+    if (indexRefreshTimer.current) clearTimeout(indexRefreshTimer.current);
+    indexRefreshTimer.current = setTimeout(() => {
+      indexRefreshTimer.current = null;
+      if (!cancelled.current) void refreshIndex();
+    }, INDEX_REFRESH_IDLE_MS);
+  }, [camera, viewSize.width, viewSize.height, loadVisibleTiles, refreshIndex, status]);
 
   useEffect(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
