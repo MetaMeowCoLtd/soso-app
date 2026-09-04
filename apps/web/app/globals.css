@@ -105,8 +105,25 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 /* Full-width, anchored, grabber-topped: the platform convention for a
    secondary surface, replacing a 365px card floating in the corner. Holds both
    the filters and the feed so they read as one system. */
-.sheet { position:absolute; z-index:7; left:0; right:0; bottom:0; display:flex; flex-direction:column; max-height:min(62vh,460px); padding-bottom:max(10px, env(safe-area-inset-bottom)); border-radius:22px 22px 0 0; background:rgba(255,255,255,.96); box-shadow:var(--e3); backdrop-filter:blur(24px) saturate(180%); transition:max-height .32s cubic-bezier(.32,.72,0,1); }
+.sheet { position:absolute; z-index:7; left:0; right:0; bottom:0; display:flex; flex-direction:column; max-height:min(62vh,460px); padding-bottom:max(10px, env(safe-area-inset-bottom)); border-radius:22px 22px 0 0; background:rgba(255,255,255,.96); box-shadow:var(--e3); backdrop-filter:blur(24px) saturate(180%); overflow:hidden; transition:max-height .32s cubic-bezier(.32,.72,0,1); }
 .sheet:not(.expanded) { max-height:132px; }
+/* The true default state — neither a pin open nor the list expanded — is
+   now collapsed to nothing rather than a 132px "N nearby" peek. That peek
+   used to always sit at the same bottom edge, same z-index stack, as the
+   tab bar underneath it, which is exactly what was burying the tab bar
+   entirely. max-height:0 rather than a transform-based slide, deliberately
+   — .map-rail's own position (see its `sheetOffset`, driven by a
+   ResizeObserver on this exact element) depends on the sheet's real,
+   measured content height; a transform would move this off-screen
+   visually without changing that measured height at all, leaving the rail
+   floating in a gap sized for a sheet that no longer actually occupies it.
+   max-height genuinely collapses the box, so the rail correctly drops back
+   down when there is nothing here to clear. `.expanded`'s own reachability
+   (its only trigger, the grabber, lives inside this now-collapsed default
+   state) is a real, deliberate consequence of this change, not an
+   oversight — the request was specifically to hide the peek and its
+   filters, not to add a second door back into them. */
+.sheet:not(.expanded):not(.previewing) { max-height:0; padding-bottom:0; }
 /*
  * A third sheet state, alongside the existing peek (:not(.expanded)) and
  * full-list (.expanded) ones. Needs its own rule rather than reusing either:

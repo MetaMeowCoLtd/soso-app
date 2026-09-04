@@ -862,26 +862,33 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         />
       )}
 
-      <nav className="tab-bar" role="tablist" aria-label="Main navigation">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "map"}
-          className={`tab-bar-button${activeTab === "map" ? " active" : ""}`}
-          onClick={() => setActiveTab("map")}
-        >
-          Map
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "feed"}
-          className={`tab-bar-button${activeTab === "feed" ? " active" : ""}`}
-          onClick={() => setActiveTab("feed")}
-        >
-          Feed
-        </button>
-      </nav>
+      {/* Hidden entirely, not merely covered, whenever a pin is open (any
+          category — a plain preview, a board, or an "update" thread) —
+          tab navigation and "something about a specific pin is open" are
+          mutually exclusive states, not two layers competing for the same
+          screen space via z-index the way the sheet and this nav used to. */}
+      {selectedPin === null && (
+        <nav className="tab-bar" role="tablist" aria-label="Main navigation">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "map"}
+            className={`tab-bar-button${activeTab === "map" ? " active" : ""}`}
+            onClick={() => setActiveTab("map")}
+          >
+            Map
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "feed"}
+            className={`tab-bar-button${activeTab === "feed" ? " active" : ""}`}
+            onClick={() => setActiveTab("feed")}
+          >
+            Feed
+          </button>
+        </nav>
+      )}
     </>
   );
 }
