@@ -312,7 +312,6 @@ function ClickHandler({
       }
 
       const latlng = e.latlng;
-      const containerPoint = e.containerPoint;
       const timer = setTimeout(() => {
         pendingClick.current = null;
         // Still worth checking this: a one-handed zoom that started slowly
@@ -334,11 +333,30 @@ function ClickHandler({
         // (Leaflet owns all input, MapLibre is only synced to match its
         // camera — see maplibre-gl-leaflet's own README), so this could
         // never be answered by a MapLibre-native click-on-layer listener;
-        // querying rendered features at Leaflet's own click point is the
-        // only way to ask "was there a POI symbol at this pixel" at all.
+        // querying rendered features at the click point is the only way
+        // to ask "was there a POI symbol here" at all.
+        //
+        // That query point must come from gl.project(), NOT from
+        // e.containerPoint directly — an earlier version of this code did
+        // that, and it was the actual bug: queryRenderedFeatures expects a
+        // pixel relative to the MapLibre map's OWN container, but that
+        // container is not aligned 1:1 with Leaflet's. maplibre-gl-leaflet
+        // renders it oversized by a 10%-per-side "padding" margin (so
+        // panning doesn't show an empty edge before the next redraw) and
+        // parks it inside Leaflet's tilePane, which Leaflet itself
+        // translates via CSS transform while panning. e.containerPoint is
+        // relative to neither of those — it's relative to Leaflet's own
+        // outer map container — so it was off by the padding margin even
+        // on a freshly-loaded, unpanned map, and by a further, growing
+        // amount after any panning. gl.project() sidesteps the whole
+        // problem: fed the click's lng/lat (a representation both
+        // libraries agree on), it returns a point in MapLibre's own
+        // current camera space, correct by construction regardless of
+        // whatever Leaflet's pane transform happens to be doing.
         const gl = glMapRef.current;
         if (gl) {
-          const features = gl.queryRenderedFeatures([containerPoint.x, containerPoint.y], {
+          const point = gl.project([latlng.lng, latlng.lat]);
+          const features = gl.queryRenderedFeatures([point.x, point.y], {
             layers: ["soso_shops", "poi_transit"],
           });
           const feature = features[0];
