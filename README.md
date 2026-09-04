@@ -84,7 +84,7 @@ support](#native-application-support).
 
 ## Prerequisites
 
-- Node.js 20 or later. Verify with `node --version`.
+- Node.js 24 or later. Verify with `node --version`.
 - A Supabase account (the free tier is sufficient). Optional: without one,
   the application runs in local demo mode.
 - The Supabase CLI, required only to run the backend locally instead of
