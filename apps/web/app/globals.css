@@ -420,3 +420,90 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .board-size-value { font-size:.72rem; font-weight:800; color:var(--deep); min-width:18px; text-align:center; }
 .board-size-range { appearance:slider-vertical; -webkit-appearance:slider-vertical; writing-mode:vertical-lr; direction:rtl; width:22px; height:130px; margin:0; accent-color:var(--deep); touch-action:none; }
 .board-size-range:disabled { opacity:.4; }
+
+/* --------------------------------------------------------------------------
+   Tab bar and the location-optional feed (Stage 2 of the post-feed plan)
+   -------------------------------------------------------------------------- */
+
+/* The map stays mounted at all times (it owns persistent GPS/composer
+   state) and is only ever hidden this way, never conditionally unrendered.
+   display:none rather than resizing .map-app's own bounds deliberately —
+   Leaflet does not automatically detect a CSS-driven container resize, and
+   verifying that a resize-and-invalidateSize dance actually works correctly
+   is not possible in this environment. The tab bar below overlays the map
+   instead of reserving layout space from it, for the same reason. */
+.tab-hidden { display:none; }
+
+.tab-bar { position:fixed; z-index:6; left:0; right:0; bottom:0; display:flex; padding-bottom:env(safe-area-inset-bottom); background:rgba(255,255,255,.92); backdrop-filter:blur(24px) saturate(180%); border-top:1px solid var(--hairline); box-shadow:0 -4px 16px rgba(16,44,37,.08); }
+.tab-bar-button { flex:1; padding:11px 0 9px; border:0; background:transparent; color:var(--muted); font-size:.72rem; font-weight:750; transition:color .16s; }
+.tab-bar-button.active { color:var(--deep); }
+
+/* A floating bar overlaying the bottom of both views (see .tab-hidden's
+   comment) rather than reserved layout space — .feed-tab reserves its own
+   bottom padding below so its scrollable content still clears it; the map,
+   deliberately, does not (see the comment on .tab-hidden above). Z-index 6
+   sits below .sheet (7) and .map-rail (8) on purpose: the sheet or the "+"
+   button expanding on top of the tab bar is the same "an active sheet
+   covers the tab bar" pattern most apps with both already use, not a bug
+   to route around. */
+.feed-tab { position:fixed; z-index:1; inset:0; overflow-y:auto; background:#fdf3e6; padding-bottom:calc(64px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; }
+
+.feed-tab-header { position:sticky; top:0; z-index:1; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); background:rgba(253,243,230,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.feed-tab-header h1 { margin:0; font-size:1.1rem; font-weight:900; color:var(--deep); }
+
+.feed-tab-status { padding:44px 20px; text-align:center; color:var(--muted); font-size:.85rem; }
+.feed-tab-retry { border:0; background:none; padding:0; color:var(--teal); font-weight:750; text-decoration:underline; }
+
+.feed-tab-list { list-style:none; margin:0; padding:0; }
+
+.feed-card { display:flex; gap:12px; padding:16px clamp(14px,3vw,28px); border-bottom:1px solid var(--hairline); }
+.feed-card-avatar { flex-shrink:0; display:grid; place-items:center; width:40px; height:40px; border-radius:50%; background:var(--teal); color:#fff; font-weight:800; font-size:.9rem; }
+.feed-card-body { min-width:0; flex:1; }
+.feed-card-byline { display:flex; align-items:baseline; gap:5px; flex-wrap:wrap; font-size:.85rem; }
+.feed-card-byline strong { color:var(--deep); }
+.feed-card-handle, .feed-card-dot, .feed-card-time { color:var(--muted); font-size:.78rem; }
+.feed-card-text { margin:4px 0 0; color:var(--ink); font-size:.92rem; line-height:1.45; white-space:pre-wrap; overflow-wrap:break-word; }
+.feed-card-meta { display:flex; gap:14px; margin-top:8px; color:var(--muted); font-size:.78rem; }
+
+.feed-tab-sentinel { display:grid; place-items:center; padding:20px; }
+
+/* --------------------------------------------------------------------------
+   The location-optional feed: composing, replying, liking (Stage 3)
+   -------------------------------------------------------------------------- */
+
+.feed-tab-fab { position:fixed; z-index:5; right:clamp(14px,3vw,28px); bottom:calc(78px + env(safe-area-inset-bottom)); display:grid; place-items:center; width:52px; height:52px; border:0; border-radius:50%; background:var(--deep); color:#fff; font-size:1.6rem; font-weight:400; line-height:1; box-shadow:var(--e2); transition:transform .16s; }
+.feed-tab-fab:active { transform:scale(.94); }
+
+.feed-tab-new-banner { display:block; width:calc(100% - 28px); margin:10px 14px 0; padding:9px 14px; border:0; border-radius:999px; background:var(--deep); color:#fff; font-size:.78rem; font-weight:750; box-shadow:var(--e1); }
+
+.feed-like-button { border:0; background:transparent; padding:2px 0; color:var(--muted); font-size:.78rem; font-weight:650; transition:color .16s; }
+.feed-like-button.active { color:var(--teal); }
+.feed-like-button:disabled { opacity:.55; }
+
+.feed-card[role="button"] { cursor:pointer; }
+.feed-card[role="button"]:hover { background:rgba(20,50,43,.02); }
+
+/* The composer — a card inside the same .composer-backdrop the pin
+   composer already uses, matching its exact width/rounding/shadow rather
+   than a second, independently-sized modal shape. */
+.thought-composer { padding:20px 20px 22px; background:#fff; }
+.thought-composer-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.thought-composer-head strong { font-size:.92rem; color:var(--deep); }
+.thought-composer-cancel { border:0; background:transparent; padding:6px 4px; color:var(--muted); font-size:.84rem; font-weight:650; }
+.thought-composer-post { padding:9px 18px; font-size:.8rem; }
+.thought-composer-body { width:100%; min-height:120px; border:1px solid #d8e2de; border-radius:14px; padding:13px 14px; background:#fafcfb; color:var(--ink); font-size:.94rem; line-height:1.5; resize:vertical; transition:border-color .16s, background .16s; }
+.thought-composer-body:focus { border-color:var(--teal); background:#fff; }
+.thought-composer-count { margin-top:5px; text-align:right; color:var(--muted); font-size:.72rem; }
+
+/* The thread view — full screen, same layering convention board-canvas-root
+   already establishes (position:absolute, inset:0, its own z-index above
+   the map/feed beneath it). Sits above .feed-tab-fab (5) so the FAB is
+   correctly hidden behind it, not floating on top of a full-screen view. */
+.thought-thread { position:absolute; z-index:20; inset:0; display:flex; flex-direction:column; background:#fdf3e6; }
+.thought-thread-head { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; padding-top:max(12px, env(safe-area-inset-top)); background:rgba(253,243,230,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.thought-thread-head strong { font-size:.92rem; color:var(--deep); }
+.thought-thread-close { border:0; background:transparent; width:28px; height:28px; color:var(--muted); font-size:1rem; }
+.thought-thread-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+.thought-thread-post { border-bottom:1px solid var(--hairline); }
+.thought-thread-own { margin-top:10px; }
+.thought-thread-replies { display:flex; flex-direction:column; gap:2px; padding-bottom:8px; }

@@ -6,6 +6,7 @@ import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-c
 import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
 import BoardCanvas from "@/src/web/BoardCanvas";
+import FeedTab from "@/src/web/FeedTab";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeoplePanel from "@/src/web/PeoplePanel";
@@ -66,6 +67,15 @@ export default function Home() {
 function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const { categories } = useCategories(gateway);
   const nowSeconds = useNowSeconds();
+
+  // 'map' | 'feed' — the map stays mounted and is only ever hidden via CSS
+  // (see the tab-hidden class on the returned <main> below), never
+  // conditionally unrendered: it owns persistent state (the in-progress pin
+  // composer, the watchPosition GPS subscription, in-flight geolocation
+  // requests) that a tab switch must not tear down. The feed tab has no
+  // equivalent persistent state of its own, so it mounts and unmounts
+  // freely with the tab itself.
+  const [activeTab, setActiveTab] = useState<"map" | "feed">("map");
 
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [locating, setLocating] = useState(false);
@@ -582,7 +592,8 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   })();
 
   return (
-    <main className="map-app">
+    <>
+      <main className={`map-app${activeTab !== "map" ? " tab-hidden" : ""}`}>
       <SosoMap
         feed={view}
         nowSeconds={nowSeconds}
@@ -818,6 +829,32 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         minimized={!showChat}
         onMinimize={() => setShowChat(false)}
       />
-    </main>
+      </main>
+
+      {activeTab === "feed" && (
+        <FeedTab gateway={gateway} nowSeconds={nowSeconds} coinBalance={coinBalance} onPosted={() => void refreshCoinBalance()} />
+      )}
+
+      <nav className="tab-bar" role="tablist" aria-label="Main navigation">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "map"}
+          className={`tab-bar-button${activeTab === "map" ? " active" : ""}`}
+          onClick={() => setActiveTab("map")}
+        >
+          Map
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "feed"}
+          className={`tab-bar-button${activeTab === "feed" ? " active" : ""}`}
+          onClick={() => setActiveTab("feed")}
+        >
+          Feed
+        </button>
+      </nav>
+    </>
   );
 }

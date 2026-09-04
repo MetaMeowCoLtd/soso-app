@@ -409,8 +409,51 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
         disputeCount: 0,
         replyCount: 0,
       },
+      // Location-optional ("thought") posts — the only seeds here with no
+      // lng/lat at all, exercising the exact branch that distinguishes this
+      // category from every other seed above. Without at least one of
+      // these, a fresh demo session's Feed tab would always show "Nothing
+      // here yet": there is no composer for this category until a later
+      // stage, so seed data is the only way this stage's own stated goal
+      // ("can I see a scrollable feed of existing posts... against the demo
+      // gateway") is actually achievable right now.
+      {
+        id: crypto.randomUUID(),
+        authorId: "seed",
+        category: "thought",
+        subtype: null,
+        body: "First one of these — no pin, no place, just a short update.",
+        lng: null,
+        lat: null,
+        status: "live" as const,
+        createdAt: now - 40 * 60,
+        expiresAt: now + 3650 * 86400 - 40 * 60,
+        updatedAt: now - 40 * 60,
+        confirmCount: 2,
+        disputeCount: 0,
+        replyCount: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        authorId: "seed",
+        category: "thought",
+        subtype: null,
+        body: "Testing whether a feed post can exist without ever touching the map at all. It can.",
+        lng: null,
+        lat: null,
+        status: "live" as const,
+        createdAt: now - 3 * 3600,
+        expiresAt: now + 3650 * 86400 - 3 * 3600,
+        updatedAt: now - 3 * 3600,
+        confirmCount: 0,
+        disputeCount: 0,
+        replyCount: 0,
+      },
     ] satisfies Array<Omit<DemoPost, "cellId">>
-  ).map((s) => ({ ...s, cellId: cellOf(s.lng, s.lat) }));
+    // Conditional rather than an unconditional cellOf(s.lng, s.lat) —
+    // mirrors soso.tg_posts_derive's own real branch (null geom -> null
+    // cell_id, not an error) now that lng/lat can genuinely be null here.
+  ).map((s) => ({ ...s, cellId: s.lng !== null && s.lat !== null ? cellOf(s.lng, s.lat) : null }));
 
   writeJSON(POSTS_KEY, seeds);
   return seeds;
