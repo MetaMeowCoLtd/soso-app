@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
 import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
+import PoiPreview, { type SelectedPoi } from "@/src/web/PoiPreview";
 import BoardCanvas from "@/src/web/BoardCanvas";
 import FeedTab from "@/src/web/FeedTab";
 import ThoughtThread from "@/src/web/ThoughtThread";
@@ -325,6 +326,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
+  const [selectedPoi, setSelectedPoi] = useState<SelectedPoi | null>(null);
   const [focusAt, setFocusAt] = useState<Coordinates | null>(null);
 
   // Transient feedback only. The old permanent "click anywhere to drop a pin"
@@ -352,6 +354,20 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const previewingPin = selectedPin !== null && selectedPin.category !== "board" && selectedPin.category !== "update";
   const viewingBoard = selectedPin?.category === "board";
   const viewingThought = selectedPin?.category === "update";
+  const viewingPoi = selectedPoi !== null;
+
+  /**
+   * A shop or transit label from the map tile itself was tapped — not an
+   * app pin at all, so there is no gateway fetch here the way selectPin
+   * has one. Closes whatever else was open first, the same tidy-up
+   * beginPin already does for its own callers, since a POI's own details
+   * are exactly as exclusive a view as a pin's.
+   */
+  function handlePoiClick(poi: SelectedPoi) {
+    deselectPin();
+    setShowPeople(false);
+    setSelectedPoi(poi);
+  }
 
   // Measured, not guessed: the preview now holds everything that used to be
   // a separate modal (voting, reporting, early resolution), so its height
@@ -403,6 +419,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     // decision belongs to handleMapTap for the ambiguous map-tap case, and
     // is never in question at all for an explicit button press.
     deselectPin();
+    setSelectedPoi(null);
     setShowPeople(false);
 
     if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
@@ -429,8 +446,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
    * "make this go away."
    */
   function handleMapTap(at: Coordinates) {
-    if (selectedPin || showPeople) {
+    if (selectedPin || selectedPoi || showPeople) {
       deselectPin();
+      setSelectedPoi(null);
       setShowPeople(false);
       return;
     }
@@ -615,6 +633,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         onViewportChange={handleViewportChange}
         onMapClick={handleMapTap}
         onPinClick={selectPin}
+        onPoiClick={handlePoiClick}
         selectedId={selectedPin?.id}
         myLocation={myLocation}
       />
@@ -720,10 +739,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           the filters; expanding reveals the list. */}
       <section
         ref={sheetRef}
-        className={`sheet ${previewingPin ? "previewing" : showFeedDrawer ? "expanded" : ""}`}
-        aria-label={previewingPin ? "Pin preview" : "Local updates"}
+        className={`sheet ${previewingPin || viewingPoi ? "previewing" : showFeedDrawer ? "expanded" : ""}`}
+        aria-label={previewingPin ? "Pin preview" : viewingPoi ? "Place details" : "Local updates"}
       >
-        {!previewingPin && (
+        {!previewingPin && !viewingPoi && (
           <button
             className="sheet-grabber"
             onClick={() => setShowFeedDrawer((open) => !open)}
@@ -755,6 +774,16 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             onVote={vote}
             onReport={report}
             onResolve={resolve}
+          />
+        ) : viewingPoi && selectedPoi ? (
+          <PoiPreview
+            key={`${selectedPoi.at.latitude},${selectedPoi.at.longitude}`}
+            poi={selectedPoi}
+            onClose={() => setSelectedPoi(null)}
+            onAddPin={(at) => {
+              setSelectedPoi(null);
+              beginPin(at);
+            }}
           />
         ) : (
           <>

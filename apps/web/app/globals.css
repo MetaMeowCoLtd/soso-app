@@ -193,6 +193,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .pin-preview-primary-action:active { transform:scale(.97); }
 .pin-preview-remove-action { background:#c0392b; }
 .pin-preview-remove-action:hover { background:#a8301f; }
+.poi-preview-name { margin:2px 0 0; font-size:1rem; font-weight:750; color:var(--deep); }
 .pin-preview-countdown, .pin-preview-corroboration { margin:0; }
 .pin-preview-address { margin:0 0 8px; }
 

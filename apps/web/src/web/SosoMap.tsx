@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
-import { setWorkerUrl, Popup, type Map as MaplibreMap, type MapGeoJSONFeature } from "maplibre-gl";
+import { setWorkerUrl, type Map as MaplibreMap } from "maplibre-gl";
 import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
 import { Circle, MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import { cellCentre, pinOpacity, pinSaturation, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
@@ -99,6 +99,8 @@ interface SosoMapProps {
   onViewportChange: (bounds: ReturnType<typeof leafletBoundsToBounds>, zoom: number) => void;
   onMapClick: (at: Coordinates) => void;
   onPinClick: (pin: Pin) => void;
+  /** A shop/transit label from the map tile itself was tapped — see ClickHandler's own poiDisplayName for how the name is derived. */
+  onPoiClick: (poi: { name: string; at: Coordinates }) => void;
   selectedId?: string;
   /** Plays the "pop" landing animation on this pin once it appears — see `pinIcon`. */
   celebrateId?: string | null;
@@ -255,25 +257,64 @@ function poiDisplayName(properties: Record<string, unknown>): string {
   return typeof name === "string" && name ? name : "";
 }
 
+const POI_LAYERS = ["soso_shops", "poi_transit"];
+
+/**
+ * Shared by both the click handler and the hover-cursor check below — both
+ * need the exact same "is there a POI symbol at this geographic point"
+ * answer, and duplicating the project-then-query pair between them would
+ * be an easy place for the two to quietly drift (one gets the coordinate
+ * fix below, the other doesn't) rather than a real reason to have two
+ * copies.
+ */
+function queryPoiFeature(gl: MaplibreMap, lng: number, lat: number) {
+  const point = gl.project([lng, lat]);
+  return gl.queryRenderedFeatures([point.x, point.y], { layers: POI_LAYERS })[0];
+}
+
 function ClickHandler({
   onMapClick,
+  onPoiClick,
   glMapRef,
-}: Pick<SosoMapProps, "onMapClick"> & { glMapRef: React.MutableRefObject<MaplibreMap | null> }) {
+}: Pick<SosoMapProps, "onMapClick" | "onPoiClick"> & { glMapRef: React.MutableRefObject<MaplibreMap | null> }) {
   const map = useMap();
   const pendingClick = useRef<{ timer: ReturnType<typeof setTimeout>; latlng: L.LatLng } | null>(null);
-  // At most one open at a time — a second POI tapped while one popup is
-  // still showing replaces it rather than stacking a new bubble on top.
-  const poiPopup = useRef<Popup | null>(null);
+  // Avoids writing to the DOM on every single mousemove — only when
+  // whether the cursor is over a POI has actually changed since the last
+  // move, not on every one of what can be dozens of events per second.
+  const hoveringPoi = useRef(false);
 
   useEffect(
     () => () => {
       if (pendingClick.current) clearTimeout(pendingClick.current.timer);
-      poiPopup.current?.remove();
     },
     [],
   );
 
   useMapEvents({
+    /**
+     * Desktop-only in effect — there is no hover state on a touchscreen,
+     * so this simply never fires there, which is the correct behaviour
+     * for a cursor hint rather than something that needs its own guard.
+     * Reuses queryPoiFeature, the exact same "project this point into
+     * MapLibre's space, then ask what's rendered there" the click handler
+     * already relies on, for the reason given on that function itself.
+     */
+    mousemove: (e) => {
+      const gl = glMapRef.current;
+      if (!gl) return;
+      const feature = queryPoiFeature(gl, e.latlng.lng, e.latlng.lat);
+      const isOverPoi = feature !== undefined;
+      if (isOverPoi === hoveringPoi.current) return;
+      hoveringPoi.current = isOverPoi;
+      // Leaflet manages its own cursor via CSS classes on this same
+      // container (.leaflet-grab while idle, .leaflet-dragging while
+      // panning) — setting the inline style here takes precedence over
+      // those without having to fight them, and clearing it back to ''
+      // rather than a specific value lets whichever of Leaflet's own
+      // classes currently applies take back over immediately.
+      map.getContainer().style.cursor = isOverPoi ? "pointer" : "";
+    },
     click: (e) => {
       /**
        * A DIFFERENT, earlier bug than the one oneHandedZoomInProgress
@@ -355,18 +396,10 @@ function ClickHandler({
         // whatever Leaflet's pane transform happens to be doing.
         const gl = glMapRef.current;
         if (gl) {
-          const point = gl.project([latlng.lng, latlng.lat]);
-          const features = gl.queryRenderedFeatures([point.x, point.y], {
-            layers: ["soso_shops", "poi_transit"],
-          });
-          const feature = features[0];
+          const feature = queryPoiFeature(gl, latlng.lng, latlng.lat);
           if (feature) {
             const name = poiDisplayName(feature.properties);
-            poiPopup.current?.remove();
-            poiPopup.current = new Popup({ closeButton: true, closeOnClick: false, offset: 12 })
-              .setLngLat([latlng.lng, latlng.lat])
-              .setText(name || "…")
-              .addTo(gl);
+            onPoiClick({ name: name || "Unnamed place", at: { latitude: latlng.lat, longitude: latlng.lng } });
             return;
           }
         }
@@ -802,6 +835,7 @@ export default function SosoMap({
   onViewportChange,
   onMapClick,
   onPinClick,
+  onPoiClick,
   selectedId,
   celebrateId,
   myLocation,
@@ -933,7 +967,7 @@ export default function SosoMap({
       <SafeAreaResizeFix />
       <OneHandedZoomConfig />
       <ViewportWatcher onViewportChange={onViewportChange} />
-      {!placing && <ClickHandler onMapClick={onMapClick} glMapRef={glMapRef} />}
+      {!placing && <ClickHandler onMapClick={onMapClick} onPoiClick={onPoiClick} glMapRef={glMapRef} />}
       <FlyToDraft at={placing ?? focusAt} />
       <FlyToSignal signal={flyToSignal} />
       {myLocation && <MyLocationMarker myLocation={myLocation} />}
