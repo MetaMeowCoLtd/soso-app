@@ -40,6 +40,7 @@ Supabase.
 | Suspicious activity reporting | Implemented, enabled |
 | Location-optional posts (Threads-style feed, no pin) | Implemented. Feed tab, composer, and reply thread, with live like/reply counts and a "new posts" banner. See [Location-optional posts](#location-optional-posts). |
 | Shared chat (one global room) | Implemented. Bubbles with reactions, replies, and a long-press action sheet. See [Shared chat](#shared-chat). |
+| Direct messages | Implemented, not verified against a live database. Mutual follows only, end-to-end encrypted. See [Direct messages](#direct-messages). |
 | Per-category expiry (TTL) | Implemented. Server-assigned; the client cannot extend it. |
 | Server-side validation (proximity, rate limits, body length, subtype) | Implemented. Enforced in Postgres, not in the client. |
 | Validity voting (votes fade and eventually expire a post) | Implemented, not verified end-to-end. See [Validity voting](#validity-voting). |
@@ -724,6 +725,94 @@ destructive action does not belong one stray tap away from a conversation.
 `subscribeChatMessagesChanged` covers both tables, so someone else's
 reaction arrives the same way their message does.
 
+## Direct messages
+
+Private, end-to-end encrypted conversations between mutual follows. Started
+from a friend's row in the People tab; read in the Chat tab's **Direct**
+view. Schema and RPCs in `supabase/migrations/20260907000026_direct_messages.sql`.
+
+### Who can message whom
+
+Mutual follows only. There is no message-request folder, no "message anyone"
+path, and no way for a stranger to put text in front of someone. This is
+deliberately stricter than Instagram, whose request folder exists precisely
+because anyone may open a thread with anyone — the class of abuse that folder
+contains cannot arise here.
+
+`soso.dm_can_message` is the single predicate every path calls, and it is
+re-checked on **every send**, not only when the thread is opened. Unfollowing
+or blocking ends a conversation immediately rather than leaving a channel
+open because it was permitted when it started. A block also removes the
+thread from both inboxes and makes its history unreadable, enforced in the
+row-level security policy rather than by the client hiding it.
+
+### What the server can read
+
+Nothing. `dm_messages` has a `ciphertext` column and no plaintext column of
+any kind. A database dump, a leaked `service_role` key, or a subpoena served
+on the host yields ciphertext.
+
+- **Key agreement:** ECDH on P-256, one static pair per account.
+- **Key derivation:** HKDF-SHA256 over the ECDH secret, with `info` binding
+  the result to the two account ids in a fixed order.
+- **Encryption:** AES-256-GCM, fresh 96-bit nonce per message, with the
+  thread id as additional authenticated data so a ciphertext cannot be
+  replayed into a different conversation.
+- **Primitives:** all from the platform's SubtleCrypto. Nothing in this
+  repository implements a cipher, a curve, or a KDF. The composition of them
+  is in `packages/core/src/domain/dm-crypto.ts` and is covered by
+  `packages/core/test/dm-crypto.test.ts`, which asserts round-trip,
+  outsider-exclusion, cross-thread replay rejection, pair binding, nonce
+  uniqueness, and tamper detection.
+- **Key storage:** the private key is generated non-extractable and kept as a
+  live `CryptoKey` in IndexedDB (`apps/web/src/web/dmCrypto.ts`). Script on
+  the origin — including injected script — can use it but cannot read its
+  bytes out, so an XSS can decrypt while it runs but cannot steal the key and
+  decrypt forever. A JWK in `localStorage`, the obvious shortcut, gives that
+  away.
+
+### What that costs
+
+Stated plainly, because these are consequences of the design and not
+oversights:
+
+- **Moderation cannot read content.** Reporting works the way Instagram's
+  does under E2EE: the reporter's own client attaches the plaintext it
+  already holds, and `dm_message_reports.disclosed_plaintext` stores what a
+  participant chose to disclose. The report UI says so before sending. A
+  report with no disclosure is still accepted.
+- **Push notifications cannot preview.** The server has nothing to preview.
+- **No escrow, no recovery.** The key exists in one browser profile. Clearing
+  site data loses the history — though in this app that also destroys the
+  anonymous account itself, which lives in the same storage, so the marginal
+  loss is smaller than it first appears.
+- **Messages that cannot be decrypted are shown as such**, in place, rather
+  than hidden or treated as an error.
+
+### What this is not
+
+Not the Signal protocol, and the gap is worth being precise about:
+
+- **No forward secrecy.** One static ECDH agreement per pair means a private
+  key recovered later decrypts everything captured earlier. A double ratchet
+  is what fixes this.
+- **No key verification.** Nothing proves the public key the server handed
+  you belongs to the person you think it does; a server that lied could sit
+  in the middle. Safety numbers or key transparency close this.
+- **One device.** The key lives in one browser profile. Another browser is a
+  different key, and messages encrypted to the old one stay unreadable there.
+
+Both gaps need a protocol, not more calls into SubtleCrypto. They are named
+here so that "end-to-end encrypted" is not read as more than what is built.
+
+### Not verified end-to-end
+
+The schema and RPCs in migration 0026 have **not been run against a live
+database** — this workspace has neither the Supabase CLI nor Docker, so
+`supabase db reset` could not be executed. The TypeScript, the cryptography,
+and the browser-side key handling are all tested; the SQL is reviewed but
+unexecuted. Run the migration against a local stack before relying on it.
+
 ## Presence and people
 
 Makes an area feel inhabited without publishing who is in it.
@@ -801,10 +890,6 @@ stay in sync, as with `CELL_ZOOM`.
 
 ### Not implemented
 
-- **No messaging.** Contacts can see each other's online status; there is no
-  way to send anything. Direct messaging between anonymous accounts in a
-  location-aware app is a significantly larger safety problem and is not
-  addressed here.
 - **No block list management UI.** Blocking works and is enforced, but there is
   no screen listing who you have blocked or letting you unblock. `unblock_user`
   exists and is reachable only via the API.

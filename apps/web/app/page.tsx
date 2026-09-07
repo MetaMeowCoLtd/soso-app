@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
+import type { DmThread, NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
 import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
 import PoiPreview, { type SelectedPoi } from "@/src/web/PoiPreview";
@@ -12,6 +12,7 @@ import ThoughtThread from "@/src/web/ThoughtThread";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeopleTab from "@/src/web/PeopleTab";
+import DmThreadView from "@/src/web/DmThreadView";
 import ChatPanel from "@/src/web/ChatPanel";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { usePresence } from "@/src/web/usePresence";
@@ -246,7 +247,13 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // count answers "is where I'm looking busy", and tying it to the viewport
   // means it works without a second location permission prompt.
   const [presenceCentre, setPresenceCentre] = useState<{ lng: number; lat: number } | null>(null);
-  const presence = usePresence(gateway, true, presenceCentre);
+  // The open direct-message conversation, if any. Held here rather than in
+  // PeopleTab or ChatPanel because both of them open it and it covers the
+  // whole screen either way — the same reasoning ThoughtThread's placement
+  // already follows.
+  const [dmThread, setDmThread] = useState<DmThread | null>(null);
+  const [dmError, setDmError] = useState<string | null>(null);
+  const presence = usePresence(gateway, mode === "supabase", presenceCentre);
 
   useEffect(() => {
     if (mode !== "supabase" || pushAvailability !== "available") return;
@@ -356,6 +363,24 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
    * beginPin already does for its own callers, since a POI's own details
    * are exactly as exclusive a view as a pin's.
    */
+  /**
+   * Opens (or creates) the one thread with a friend. The mutual-follow and
+   * block checks are the server's — `open_dm_thread` rejects anything else
+   * — so this only has to turn the refusal into something readable.
+   */
+  async function openDm(userId: string) {
+    setDmError(null);
+    try {
+      const thread = await gateway.openDmThread(userId);
+      setDmThread(thread);
+    } catch (err) {
+      const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
+      setDmError(
+        code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"],
+      );
+    }
+  }
+
   function handlePoiClick(poi: SelectedPoi) {
     deselectPin();
     setSelectedPoi(poi);
@@ -885,9 +910,40 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         />
       )}
 
-      {activeTab === "chat" && <ChatPanel gateway={gateway} demoMode={mode !== "supabase"} />}
+      {activeTab === "chat" && (
+        <ChatPanel
+          gateway={gateway}
+          demoMode={mode !== "supabase"}
+          myId={presence.me?.id ?? null}
+          onOpenThread={setDmThread}
+        />
+      )}
 
-      {activeTab === "people" && <PeopleTab presence={presence} demoMode={false} />}
+      {activeTab === "people" && (
+        <PeopleTab
+          presence={presence}
+          demoMode={mode !== "supabase"}
+          onMessage={(userId) => void openDm(userId)}
+        />
+      )}
+
+      {/* Above the tab bar and every tab, like the thread and board views:
+          a conversation is an exclusive surface, not a panel over one. */}
+      {dmError && (
+        <p className="dm-error-toast" role="status" onClick={() => setDmError(null)}>
+          {dmError}
+        </p>
+      )}
+
+      {dmThread && presence.me && (
+        <DmThreadView
+          key={dmThread.id}
+          thread={dmThread}
+          gateway={gateway}
+          myId={presence.me.id}
+          onClose={() => setDmThread(null)}
+        />
+      )}
 
       {/* Hidden entirely, not merely covered, whenever a pin is open (any
           category — a plain preview, a board, or an "update" thread) —

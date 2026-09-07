@@ -18,6 +18,8 @@ import {
   decodePin,
   decodePostDetail,
   decodeChatMessage,
+  decodeDmMessage,
+  decodeDmThread,
   decodeWalkResult,
   type CategoryConfig,
   type CellCount,
@@ -40,6 +42,10 @@ import {
   type NewZone,
   type FriendTier,
   type ChatMessage,
+  type DmMessage,
+  type DmThread,
+  type WireDmMessage,
+  type WireDmThread,
   type WireChatMessage,
   decodeBoard,
   decodeBoardTileMeta,
@@ -517,6 +523,93 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_emoji: emoji,
       });
       if (error) throw toSosoError(error);
+    },
+
+    // --- Direct messages -------------------------------------------------
+    //
+    // Note what is absent: any method here that takes or returns a message
+    // body. `sendDm` takes bytes the caller already encrypted, and the list
+    // methods hand back bytes. That is not a stylistic choice — the server
+    // has no plaintext column to write one to (migration 0026).
+
+    async publishUserKey(publicKey: string, algorithm?: string): Promise<void> {
+      const { error } = await client.rpc('publish_user_key', {
+        p_public_key: publicKey,
+        p_algorithm: algorithm ?? null,
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    async dmPublicKeyOf(userId: string): Promise<string | null> {
+      const { data, error } = await client.rpc('dm_public_key_of', { p_user_id: userId });
+      if (error) throw toSosoError(error);
+      return (data as string | null) ?? null;
+    },
+
+    async openDmThread(userId: string): Promise<DmThread> {
+      const { data, error } = await client.rpc('open_dm_thread', { p_user_id: userId });
+      if (error) throw toSosoError(error);
+      return decodeDmThread(data as WireDmThread);
+    },
+
+    async listDmThreads(): Promise<DmThread[]> {
+      const { data, error } = await client.rpc('list_dm_threads');
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WireDmThread[]).map(decodeDmThread);
+    },
+
+    async listDmMessages(threadId: string, before?: string, limit?: number): Promise<DmMessage[]> {
+      const { data, error } = await client.rpc('list_dm_messages', {
+        p_thread_id: threadId,
+        p_before: before ?? null,
+        p_limit: limit ?? null,
+      });
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WireDmMessage[]).map(decodeDmMessage);
+    },
+
+    async sendDm(threadId: string, ciphertext: string, iv: string): Promise<DmMessage> {
+      const { data, error } = await client.rpc('send_dm', {
+        p_thread_id: threadId,
+        p_ciphertext: ciphertext,
+        p_iv: iv,
+      });
+      if (error) throw toSosoError(error);
+      return decodeDmMessage(data as WireDmMessage);
+    },
+
+    async markDmRead(threadId: string): Promise<void> {
+      const { error } = await client.rpc('mark_dm_read', { p_thread_id: threadId });
+      if (error) throw toSosoError(error);
+    },
+
+    async deleteDmMessage(messageId: string): Promise<void> {
+      const { error } = await client.rpc('delete_dm_message', { p_message_id: messageId });
+      if (error) throw toSosoError(error);
+    },
+
+    async reportDmMessage(
+      messageId: string,
+      reason: string,
+      disclosedPlaintext?: string | null,
+    ): Promise<void> {
+      const { error } = await client.rpc('report_dm_message', {
+        p_message_id: messageId,
+        p_reason: reason,
+        p_disclosed: disclosedPlaintext ?? null,
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    subscribeDmMessagesChanged(onChange: () => void): () => void {
+      const channel = client
+        .channel(`dm-changed-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_messages' }, () => onChange())
+        .subscribe();
+
+      return () => {
+        void client.removeChannel(channel);
+      };
     },
 
     subscribeChatMessagesChanged(onChange: () => void): () => void {

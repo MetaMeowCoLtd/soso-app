@@ -63,6 +63,8 @@ import type {
   BoardTileMeta,
   BoardTilePutRequest,
   ChatMessage,
+  DmMessage,
+  DmThread,
   FeedPostsPage,
   FeedQuery,
   FlushedBoardTile,
@@ -1003,21 +1005,13 @@ export function createDemoGateway(): SosoGateway {
     },
 
     async areaPresenceCount(): Promise<number> {
-      return 12;
+      // Zero, not a fabricated number. In demo mode nobody else is here,
+      // and the UI says so rather than showing invented activity.
+      return 0;
     },
 
     async friendsPresence(): Promise<Friend[]> {
-      const iso = (m: number) => new Date(Date.now() - m * 60000).toISOString();
-      return [
-        { id: "f1", handle: "mika.ysd", displayName: "Mika Yoshida", isOnline: true, tier: "close", lastSeenAt: iso(1), sameArea: true },
-        { id: "f2", handle: "dan_okafor", displayName: "Daniel Okafor", isOnline: true, tier: "standard", lastSeenAt: iso(3), sameArea: false },
-        { id: "f3", handle: "yukinaka22", displayName: "Yuki Nakamura", isOnline: true, tier: "standard", lastSeenAt: iso(2), sameArea: true },
-        { id: "f4", handle: "elena.rossi", displayName: "Elena Rossi", isOnline: false, tier: "close", lastSeenAt: null, sameArea: false },
-        { id: "f5", handle: "kenji_walks", displayName: "Kenji Sato", isOnline: false, tier: "standard", lastSeenAt: null, sameArea: false },
-        { id: "f6", handle: "priya.rmn", displayName: "Priya Raman", isOnline: false, tier: "standard", lastSeenAt: null, sameArea: false },
-        { id: "f7", handle: "tomo_bakes", displayName: "Tomoko Arai", isOnline: false, tier: "close", lastSeenAt: null, sameArea: false },
-        { id: "f8", handle: "l.bergstrom", displayName: "Linus Bergstrom", isOnline: false, tier: "standard", lastSeenAt: null, sameArea: false },
-      ];
+      return [];
     },
 
     async followByHandle(): Promise<FollowResult> {
@@ -1279,6 +1273,46 @@ export function createDemoGateway(): SosoGateway {
     },
 
     subscribeChatMessagesChanged(): () => void {
+      return () => {};
+    },
+
+    // Direct messages need two real accounts that follow each other, which
+    // demo mode has no way to produce — `followByHandle` above already
+    // throws for the same reason. These reject rather than pretending: a DM
+    // that appears to send and reaches nobody would be a worse lie here than
+    // the chat room's local echo, because the whole point of a DM is that
+    // somebody else receives it.
+    async publishUserKey(): Promise<void> {
+      // The exception: publishing a key is harmless and local-only in
+      // effect, so this succeeds silently rather than making the UI handle
+      // an error for a step that has no observable result in demo mode.
+    },
+
+    async dmPublicKeyOf(): Promise<string | null> {
+      return null;
+    },
+
+    async openDmThread(): Promise<DmThread> {
+      throw new SosoError("soso/not_friends");
+    },
+
+    async listDmThreads(): Promise<DmThread[]> {
+      return [];
+    },
+
+    async listDmMessages(): Promise<DmMessage[]> {
+      return [];
+    },
+
+    async sendDm(): Promise<DmMessage> {
+      throw new SosoError("soso/thread_not_found");
+    },
+
+    async markDmRead(): Promise<void> {},
+    async deleteDmMessage(): Promise<void> {},
+    async reportDmMessage(): Promise<void> {},
+
+    subscribeDmMessagesChanged(): () => void {
       return () => {};
     },
 

@@ -560,6 +560,64 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .avatar-dot { position:absolute; right:0; bottom:0; width:12px; height:12px; border-radius:50%; border:2.5px solid #fff; background:#c3ccc8; }
 .avatar-dot.online { background:#34d399; }
 
+/* --------------------------------------------------- direct messages --- */
+/* The Room/Direct switch at the top of the Chat tab. Segmented rather than
+   a second row of tabs in the nav bar: the two are one activity. */
+.chat-switch { flex-shrink:0; display:flex; gap:4px; margin:10px clamp(12px,3vw,20px) 2px; padding:3px; border-radius:999px; background:#f0f2f5; }
+.chat-switch-option { flex:1; padding:8px 10px; border:0; border-radius:999px; background:transparent; color:var(--muted); font-size:.82rem; font-weight:750; transition:background .16s, color .16s; }
+.chat-switch-option.active { background:#fff; color:var(--deep); box-shadow:0 1px 3px rgba(16,44,37,.12); }
+
+.dm-inbox-scroll { padding:6px 0 14px; }
+
+.dm-list { list-style:none; margin:0; padding:0; }
+.dm-row { display:flex; align-items:center; gap:12px; width:100%; padding:10px clamp(12px,3vw,20px); border:0; background:transparent; text-align:left; transition:background .14s; }
+.dm-row:hover { background:rgba(20,50,43,.03); }
+.dm-row-main { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
+.dm-row-top { display:flex; align-items:baseline; gap:8px; }
+.dm-row-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--deep); font-size:.89rem; font-weight:750; }
+.dm-row-time { flex-shrink:0; margin-left:auto; color:var(--muted); font-size:.72rem; }
+.dm-row-preview { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:.79rem; }
+/* Unread is carried by weight and colour on the preview plus the pill, not
+   by a dot: the preview is the thing you actually read to decide whether to
+   open it. */
+.dm-row-preview.unread { color:var(--deep); font-weight:700; }
+.dm-row-preview em { font-style:normal; opacity:.75; }
+.dm-row-you { color:var(--muted); font-weight:600; }
+.dm-unread { flex-shrink:0; display:grid; place-items:center; min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:var(--teal); color:#fff; font-size:.7rem; font-weight:800; }
+.dm-blank { margin-top:34px; }
+
+/* The conversation itself: full-screen and above the tab bar, like the
+   thread and board views — z-index 20 matches .thought-thread. */
+.dm-thread { position:fixed; z-index:20; inset:0; display:flex; flex-direction:column; background:#fff; }
+.dm-thread-head { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:10px clamp(10px,3vw,16px); padding-top:max(10px, env(safe-area-inset-top)); background:rgba(255,255,255,.94); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.dm-thread-back { flex-shrink:0; display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:50%; background:transparent; color:var(--deep); }
+.dm-thread-back:hover { background:#f0f2f5; }
+.dm-thread-who { min-width:0; display:flex; flex-direction:column; }
+.dm-thread-who strong { color:var(--deep); font-size:.9rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-thread-who span { color:var(--muted); font-size:.74rem; }
+
+/* Said at the top of every conversation rather than in a settings page:
+   the guarantee is only worth anything if the person relying on it knows
+   it is there. */
+.dm-thread-notice { flex-shrink:0; display:flex; align-items:flex-start; gap:6px; margin:0; padding:9px clamp(12px,3vw,18px); background:rgba(0,167,143,.06); color:#2f6b60; font-size:.72rem; line-height:1.45; }
+.dm-thread-notice .icon { margin-top:2px; flex-shrink:0; }
+.dm-thread-messages { flex:1; }
+
+/* A message this device has no key for. Deliberately styled as a state
+   rather than an error — see DmThreadView's own comment. */
+.chat-bubble.unreadable { background:repeating-linear-gradient(135deg, #f2f4f6, #f2f4f6 6px, #eceff2 6px, #eceff2 12px); color:var(--muted); font-style:italic; }
+.chat-row.mine .chat-bubble.unreadable { background:repeating-linear-gradient(135deg, #d9e9e5, #d9e9e5 6px, #cfe3de 6px, #cfe3de 12px); color:#4a6a63; }
+
+.people-message { flex-shrink:0; display:inline-flex; align-items:center; gap:5px; padding:7px 12px; border:1px solid var(--hairline); border-radius:999px; background:#fff; color:var(--deep); font-size:.75rem; font-weight:750; transition:background .16s, transform .16s; }
+.people-message:hover { background:#eef1f0; }
+.people-message:active { transform:scale(.95); }
+
+/* Rendered outside .map-app, because the tabs that can raise it (People,
+   Chat) replace that container — the existing .map-notice would be
+   display:none at exactly the moment this needs to be seen. */
+.dm-error-toast { position:fixed; z-index:35; left:50%; top:max(14px, env(safe-area-inset-top)); transform:translateX(-50%); max-width:min(92vw, 420px); margin:0; padding:10px 16px; border-radius:14px; background:var(--deep); color:#fff; font-size:.78rem; line-height:1.4; text-align:center; box-shadow:var(--e2); animation:sheet-pop .2s cubic-bezier(.32,.72,0,1); }
+
+
 
 /* Drawing board — full-screen, sits above map chrome. Pan/zoom is local to
    this surface (see BoardCanvas.tsx); the map underneath is not involved. */

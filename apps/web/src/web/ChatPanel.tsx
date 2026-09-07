@@ -6,8 +6,10 @@ import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
   type ChatMessage,
+  type DmThread,
   type SosoGateway,
 } from "soso-core";
+import DmInbox from "./DmInbox";
 import { useLongPress } from "./useLongPress";
 import { Icon, ICONS } from "./Icon";
 
@@ -49,6 +51,10 @@ import { Icon, ICONS } from "./Icon";
 interface ChatPanelProps {
   gateway: SosoGateway;
   demoMode: boolean;
+  /** Null until the profile loads (and always, in demo mode) — DMs need it to derive keys. */
+  myId: string | null;
+  /** Opens a conversation full-screen; page.tsx owns that surface. */
+  onOpenThread: (thread: DmThread) => void;
 }
 
 /**
@@ -97,7 +103,13 @@ interface OpenMenu {
   rect: DOMRect;
 }
 
-export default function ChatPanel({ gateway, demoMode }: ChatPanelProps) {
+export default function ChatPanel({ gateway, demoMode, myId, onOpenThread }: ChatPanelProps) {
+  // Two things live under one tab: the single global room this app started
+  // with, and direct messages. They are the same activity from the user's
+  // side ("talking to people") and splitting them into a fifth tab would
+  // have made the nav bar longer to say something the segmented control
+  // says in one line.
+  const [view, setView] = useState<"room" | "direct">("room");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
@@ -236,6 +248,34 @@ export default function ChatPanel({ gateway, demoMode }: ChatPanelProps) {
         <h1>Chat</h1>
       </header>
 
+      <div className="chat-switch" role="tablist" aria-label="Chat view">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "room"}
+          className={`chat-switch-option${view === "room" ? " active" : ""}`}
+          onClick={() => setView("room")}
+        >
+          Room
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "direct"}
+          className={`chat-switch-option${view === "direct" ? " active" : ""}`}
+          onClick={() => setView("direct")}
+        >
+          Direct
+        </button>
+      </div>
+
+      {view === "direct" ? (
+        <div className="chat-thread dm-inbox-scroll">
+          <DmInbox gateway={gateway} myId={myId} demoMode={demoMode} onOpenThread={onOpenThread} />
+        </div>
+      ) : (
+      <>
+
       <div className="chat-thread" ref={listRef}>
         {empty}
         {messages.map((message, i) => {
@@ -318,6 +358,9 @@ export default function ChatPanel({ gateway, demoMode }: ChatPanelProps) {
         .tab-bar (z-index 6) that is .chat-tab's sibling. The sheet showed
         up dimmed underneath the tab bar until this moved out.
       */}
+      </>
+      )}
+
       {menu &&
         createPortal(
           <MessageActionSheet

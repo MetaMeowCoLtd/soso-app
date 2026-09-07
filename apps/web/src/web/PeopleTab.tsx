@@ -42,6 +42,13 @@ import type { UsePresenceResult } from "./usePresence";
 interface PeopleTabProps {
   presence: UsePresenceResult;
   demoMode: boolean;
+  /**
+   * Opens a direct-message thread with a friend. Handled by page.tsx rather
+   * than here because the thread view is a full-screen surface that must
+   * also be reachable from the Chat tab's inbox — the same reason
+   * ThoughtThread lives up there instead of inside FeedTab.
+   */
+  onMessage: (userId: string) => void;
 }
 
 type Filter = "all" | "online" | "close";
@@ -61,7 +68,7 @@ function statusOf(friend: Friend, nowSeconds: number): string | null {
     : null;
 }
 
-export default function PeopleTab({ presence, demoMode }: PeopleTabProps) {
+export default function PeopleTab({ presence, demoMode, onMessage }: PeopleTabProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
@@ -313,6 +320,19 @@ export default function PeopleTab({ presence, demoMode }: PeopleTabProps) {
                           </span>
                         )}
                       </div>
+                      {/* The primary action on a friend row, so it is a
+                          labelled button rather than an item buried in the
+                          "⋯" sheet: messaging someone is the thing you
+                          most often came here to do. */}
+                      <button
+                        type="button"
+                        className="people-message"
+                        onClick={() => onMessage(friend.id)}
+                        aria-label={`Message ${friend.displayName}`}
+                      >
+                        <Icon src={ICONS.send} size={15} />
+                        Message
+                      </button>
                       <button
                         type="button"
                         className={`people-star${friend.tier === "close" ? " active" : ""}`}

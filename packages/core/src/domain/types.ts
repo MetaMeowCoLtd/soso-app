@@ -678,3 +678,93 @@ export function decodeFeedPostsPage(w: WireFeedPostsPage): FeedPostsPage {
     posts: (w.posts ?? []).map(decodePostDetail),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Direct messages (migration 0026)
+// ---------------------------------------------------------------------------
+
+/**
+ * A thread, as the server can describe it — which is deliberately not very
+ * much. `lastCiphertext` is here instead of a preview string because the
+ * server holds no plaintext to build a preview from; whoever renders the
+ * inbox decrypts that one message itself. See the migration's own comment.
+ */
+export interface DmThread {
+  id: string;
+  otherId: string;
+  otherHandle: string;
+  otherName: string;
+  /** Their ECDH public key, base64 SPKI. Null until they've opened messages once. */
+  otherKey: string | null;
+  lastMessageAt: string | null;
+  lastCiphertext: string | null;
+  lastIv: string | null;
+  lastSenderId: string | null;
+  unread: number;
+}
+
+export interface WireDmThread {
+  id: string;
+  other_id: string;
+  other_handle: string;
+  other_name: string;
+  other_key: string | null;
+  last_message_at: string | null;
+  last_ciphertext?: string | null;
+  last_iv?: string | null;
+  last_sender_id?: string | null;
+  unread: number | string;
+}
+
+export function decodeDmThread(w: WireDmThread): DmThread {
+  return {
+    id: w.id,
+    otherId: w.other_id,
+    otherHandle: w.other_handle,
+    otherName: w.other_name,
+    otherKey: w.other_key ?? null,
+    lastMessageAt: w.last_message_at ?? null,
+    lastCiphertext: w.last_ciphertext ?? null,
+    lastIv: w.last_iv ?? null,
+    lastSenderId: w.last_sender_id ?? null,
+    // `count(*)` comes back as a string from PostgREST for bigint columns.
+    unread: Number(w.unread) || 0,
+  };
+}
+
+/**
+ * A message as stored: ciphertext and nonce, never a body. Decryption is a
+ * client concern — nothing in core can decrypt this, and nothing on the
+ * server can either.
+ */
+export interface DmMessage {
+  id: string;
+  threadId: string;
+  senderId: string;
+  ciphertext: string;
+  iv: string;
+  createdAt: string;
+  mine: boolean;
+}
+
+export interface WireDmMessage {
+  id: string;
+  thread_id: string;
+  sender_id: string;
+  ciphertext: string;
+  iv: string;
+  created_at: string;
+  mine: boolean;
+}
+
+export function decodeDmMessage(w: WireDmMessage): DmMessage {
+  return {
+    id: w.id,
+    threadId: w.thread_id,
+    senderId: w.sender_id,
+    ciphertext: w.ciphertext,
+    iv: w.iv,
+    createdAt: w.created_at,
+    mine: w.mine,
+  };
+}

@@ -53,6 +53,10 @@ export const SOSO_ERROR_CODES = [
   'soso/reply_too_long',
   'soso/message_not_found',
   'soso/invalid_reaction',
+  'soso/thread_not_found',
+  'soso/invalid_key',
+  'soso/no_key_yet',
+  'soso/undecryptable',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -136,5 +140,9 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/reply_too_long': "That reply is too long — keep it under 500 characters.",
   'soso/message_not_found': "That message isn't there any more.",
   'soso/invalid_reaction': "That reaction didn't go through — try again.",
+  'soso/thread_not_found': 'That conversation is no longer available.',
+  'soso/invalid_key': "This browser's messaging key looks wrong. Reload and try again.",
+  'soso/no_key_yet': "They haven't opened messages yet, so there's no key to encrypt to. Try again once they have.",
+  'soso/undecryptable': "This message can't be read on this device — it was encrypted for a key this browser no longer has.",
   'soso/unknown': 'Something went wrong. Try again.',
 };

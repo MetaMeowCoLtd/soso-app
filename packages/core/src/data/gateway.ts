@@ -23,6 +23,8 @@ import type {
   BoardTileMeta,
   BoardTilePutRequest,
   ChatMessage,
+  DmMessage,
+  DmThread,
   FeedPostsPage,
   FlushedBoardTile,
   FriendTier,
@@ -300,6 +302,52 @@ export interface SosoGateway {
 
   /** Fires when any chat_messages or chat_message_reactions row changes — same signal-then-refetch contract as the other subscribe* methods. */
   subscribeChatMessagesChanged(onChange: () => void): () => void;
+
+  // --- Direct messages -----------------------------------------------------
+  // Mutual follows only, and end-to-end encrypted: every method here moves
+  // ciphertext, and nothing in core (or on the server) can read a body. The
+  // encryption itself is a client concern — see apps/web/src/web/dmCrypto.ts,
+  // which is web-only because it depends on SubtleCrypto and IndexedDB, the
+  // same reason demo-gateway lives outside this package.
+  //
+  // Every one of these re-checks the mutual follow server-side rather than
+  // trusting that it held when the thread was opened; see migration 0026.
+
+  /** Publishes this device's ECDH public key so friends can encrypt to it. Idempotent. */
+  publishUserKey(publicKey: string, algorithm?: string): Promise<void>;
+
+  /** A friend's public key, or null if they have not opened messages yet. Throws soso/not_friends otherwise. */
+  dmPublicKeyOf(userId: string): Promise<string | null>;
+
+  /** Opens (or returns) the single thread with a friend. Throws soso/not_friends if you are not mutual follows. */
+  openDmThread(userId: string): Promise<DmThread>;
+
+  /** Your inbox, newest first. Carries each thread's newest ciphertext so the caller can render its own preview. */
+  listDmThreads(): Promise<DmThread[]>;
+
+  /** One thread's messages, oldest first. Pass a prior page's oldest `createdAt` to page back. */
+  listDmMessages(threadId: string, before?: string, limit?: number): Promise<DmMessage[]>;
+
+  /** Sends pre-encrypted bytes. This interface never sees a plaintext body. */
+  sendDm(threadId: string, ciphertext: string, iv: string): Promise<DmMessage>;
+
+  /** Moves your read cursor to now, clearing the thread's unread count. */
+  markDmRead(threadId: string): Promise<void>;
+
+  /** Unsends your own message — for both sides, since there is only one copy of the ciphertext. */
+  deleteDmMessage(messageId: string): Promise<void>;
+
+  /**
+   * Reports a message. `disclosedPlaintext` is what the reporter's own
+   * client decrypted: under end-to-end encryption the server cannot read the
+   * message, so a report is a participant disclosing it, never the platform
+   * inspecting it. Optional — a report without it still records the
+   * complaint.
+   */
+  reportDmMessage(messageId: string, reason: string, disclosedPlaintext?: string | null): Promise<void>;
+
+  /** Fires when any dm_messages row you can see changes. Payload-free, like every other subscribe*. */
+  subscribeDmMessagesChanged(onChange: () => void): () => void;
 
   // --- Drawing boards --------------------------------------------------
   // Step 1 (schema, tile index, R2 signing, already live — see migration

@@ -96,6 +96,28 @@ class FakeGateway implements SosoGateway {
   async deleteChatMessage() {}
   async reportChatMessage() {}
   async toggleChatReaction() {}
+  async publishUserKey() {}
+  async dmPublicKeyOf() {
+    return null;
+  }
+  async openDmThread() {
+    return {} as never;
+  }
+  async listDmThreads() {
+    return [];
+  }
+  async listDmMessages() {
+    return [];
+  }
+  async sendDm() {
+    return {} as never;
+  }
+  async markDmRead() {}
+  async deleteDmMessage() {}
+  async reportDmMessage() {}
+  subscribeDmMessagesChanged() {
+    return () => {};
+  }
   subscribeChatMessagesChanged() {
     return () => {};
   }
