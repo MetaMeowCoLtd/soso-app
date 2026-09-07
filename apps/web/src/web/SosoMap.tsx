@@ -900,7 +900,7 @@ export default function SosoMap({
     () =>
       feed.mode === "pins" && !placing
         ? feed.pins
-            // A location-optional post ("update", see post_categories
+            // A location-optional post ("thought", see post_categories
             // .requires_location) never has a cell, so feed_delta's own
             // viewport query never returns one — this filter is a type-level
             // formality for TypeScript's benefit given Pin.lat/lng are now

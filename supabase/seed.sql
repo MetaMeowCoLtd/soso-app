@@ -178,6 +178,30 @@ insert into public.post_categories (
  true);
 
 
+-- --------------------------------------------------------------------------
+-- "Thought" — the location-optional role "update" played until migration
+-- 0027, now under its own key. See that migration and 0030 for why this
+-- is a fresh category rather than a second flip on "update"'s own flag.
+-- Same reasoning as "update"'s own comment above for every column here:
+-- no proximity (a thought is about a place, not "I am standing here"),
+-- and a long fixed TTL rather than a default/max spread.
+-- --------------------------------------------------------------------------
+insert into public.post_categories (
+  key, label_ja, label_en,
+  default_ttl, max_ttl,
+  location_precision_m, requires_proximity, proximity_radius_m,
+  allows_body, body_max_length, allows_media,
+  min_reputation, hourly_post_limit, is_enabled, sort_order,
+  requires_location
+) values
+('thought', 'つぶやき', 'Thought',
+ interval '180 days', interval '180 days',
+ 0, false, 500,
+ true, 280, true,
+ 0, 20, true, 100,
+ false);
+
+
 insert into public.post_subtypes (category_key, key, label_ja, label_en, sort_order) values
   ('incident', 'traffic_accident', '交通事故',   'Traffic accident',  10),
   ('incident', 'road_hazard',      '道路の危険', 'Road hazard',       20),

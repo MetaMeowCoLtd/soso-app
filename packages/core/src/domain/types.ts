@@ -231,7 +231,7 @@ export interface NewPost {
   body?: string | null;
   /**
    * What the post is about. Omit for a location-optional category
-   * (post_categories.requires_location = false, e.g. "update") — every
+   * (post_categories.requires_location = false, e.g. "thought") — every
    * other category still requires this; the server enforces that, not this
    * type, since which categories require it is server-authoritative
    * config, not something the client should hardcode a list of.

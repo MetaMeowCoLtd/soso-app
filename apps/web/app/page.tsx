@@ -357,9 +357,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // A pin preview takes visual priority over whatever browse state the
   // sheet was already in — selecting a pin always shows it, regardless of
   // whether the feed list happened to be expanded at the time.
-  const previewingPin = selectedPin !== null && selectedPin.category !== "board" && selectedPin.category !== "update";
+  const previewingPin = selectedPin !== null && selectedPin.category !== "board" && selectedPin.category !== "thought";
   const viewingBoard = selectedPin?.category === "board";
-  const viewingThought = selectedPin?.category === "update";
+  const viewingThought = selectedPin?.category === "thought";
   const viewingPoi = selectedPoi !== null;
 
   /**
@@ -498,7 +498,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   function selectPin(pin: Pin) {
     setSelectedPin(pin);
     setSelectedDetail(null);
-    // A location-optional post ("update") reaching this function at all
+    // A location-optional post ("thought") reaching this function at all
     // isn't possible today — SosoMap only ever renders pins with a
     // location as markers to tap (see its own pinMarkers filter) — but
     // Pin.lat/lng are honestly nullable now, so this guards the type
@@ -540,7 +540,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       if (detail.lat !== null && detail.lng !== null) {
         setFocusAt({ latitude: detail.lat, longitude: detail.lng });
       }
-      // A board or an "update" thread render as their own tab-independent,
+      // A board or a "thought" thread render as their own tab-independent,
       // fixed-position overlay now (see globals.css) and show correctly
       // whatever tab is active. A plain pin's preview does not — it's
       // .sheet, still nested inside <main className="map-app">, which is
@@ -548,7 +548,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       // that remaining case needs switching back to the Map tab explicitly;
       // forcing it for the other two would undo the fix above by yanking
       // someone back to Map after they open a board/thread from Chat.
-      if (detail.category !== "board" && detail.category !== "update") {
+      if (detail.category !== "board" && detail.category !== "thought") {
         setActiveTab("map");
       }
     } catch {
@@ -877,7 +877,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         Moved out from inside <main className="map-app"> (where these used to
         live, right after the header) — that container gets display:none via
         .tab-hidden whenever activeTab isn't "map" (see .tab-hidden in
-        globals.css), and a board or an "update" thread is reachable from the
+        globals.css), and a board or a "thought" thread is reachable from the
         Feed tab and from a push-notification deep link just as often as from
         the map itself. Nested inside .map-app, either one would mount,
         hold correct state, and be completely invisible the moment someone
@@ -911,7 +911,13 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       )}
 
       {activeTab === "feed" && (
-        <FeedTab gateway={gateway} nowSeconds={nowSeconds} onOpenPost={selectPin} />
+        <FeedTab
+          gateway={gateway}
+          nowSeconds={nowSeconds}
+          coinBalance={coinBalance}
+          onPosted={() => void refreshCoinBalance()}
+          onOpenPost={selectPin}
+        />
       )}
 
       {activeTab === "chat" && (
@@ -950,7 +956,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       )}
 
       {/* Hidden entirely, not merely covered, whenever a pin is open (any
-          category — a plain preview, a board, or an "update" thread) —
+          category — a plain preview, a board, or a "thought" thread) —
           tab navigation and "something about a specific pin is open" are
           mutually exclusive states, not two layers competing for the same
           screen space via z-index the way the sheet and this nav used to. */}

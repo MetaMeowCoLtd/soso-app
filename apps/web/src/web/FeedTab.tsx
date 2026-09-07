@@ -4,10 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { formatAgoShort, type Pin, type PostDetail, type SosoGateway } from "soso-core";
 import { useFeedPosts } from "./hooks";
 import { Icon, ICONS } from "./Icon";
+import ThoughtComposer from "./ThoughtComposer";
 
 interface FeedTabProps {
   gateway: SosoGateway;
   nowSeconds: number;
+  coinBalance: number | null;
+  onPosted: () => void;
   /**
    * Opening a post's full thread is handled at page.tsx's own top level
    * (see its viewingThought branch), not inside this component — the exact
@@ -29,6 +32,12 @@ interface FeedTabProps {
  * that's what distinguishes this category from every pin category the map
  * already shows.
  *
+ * The "+" here composes a "thought" (migration 0030) — the location-optional
+ * category that took over this role once migration 0027 gave "update" a
+ * real map pin instead. This composer is the ONLY way to create one; the
+ * map's own drop-a-pin flow has no reason to offer a category with nothing
+ * to drop a pin for.
+ *
  * Realtime here is two separate mechanisms, deliberately not one:
  *   - New posts (subscribeNewPost, in useFeedPosts) surface as a
  *     "N new posts" banner rather than auto-inserting items and disrupting
@@ -46,8 +55,9 @@ interface FeedTabProps {
  * different signals with different UI treatments, which is why they're two
  * gateway subscriptions instead of one broader one.
  */
-export default function FeedTab({ gateway, nowSeconds, onOpenPost }: FeedTabProps) {
+export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, onOpenPost }: FeedTabProps) {
   const { posts, loading, loadingMore, atEnd, error, loadMore, refresh, hasNewPosts } = useFeedPosts(gateway);
+  const [composing, setComposing] = useState(false);
   // A card the thread view has since deleted or changed, applied locally
   // rather than waiting for the next refresh() — mirrors how submitReport's
   // own callers elsewhere in this app reconcile local state instead of
@@ -119,13 +129,7 @@ export default function FeedTab({ gateway, nowSeconds, onOpenPost }: FeedTabProp
           </button>
         </p>
       ) : visiblePosts.length === 0 ? (
-        // Explains itself rather than saying "Nothing here yet", which
-        // would now be permanently true and permanently mysterious:
-        // migration 0027 gave "update" posts a location, and this list
-        // selects on `cell_id is null`, so nothing can reach it any more.
-        <p className="feed-tab-status">
-          Updates have a place on the map now, so they show up there rather than here.
-        </p>
+        <p className="feed-tab-status">Nothing here yet.</p>
       ) : (
         <ul className="feed-tab-list">
           {visiblePosts.map((post) => (
@@ -150,6 +154,27 @@ export default function FeedTab({ gateway, nowSeconds, onOpenPost }: FeedTabProp
         </div>
       )}
 
+      <button type="button" className="feed-tab-fab" onClick={() => setComposing(true)} aria-label="New post">
+        <Icon src={ICONS.plus} size={24} />
+      </button>
+
+      {composing && (
+        <ThoughtComposer
+          gateway={gateway}
+          coinBalance={coinBalance}
+          onCancel={() => setComposing(false)}
+          onPosted={(post) => {
+            setComposing(false);
+            // Prepended locally rather than waiting for refresh() — the
+            // coin balance callback (onPosted from page.tsx) already
+            // reflects the charge immediately elsewhere in this app on the
+            // same principle: the person who just acted should see the
+            // result of their own action without a round trip.
+            setLocalPosts((current) => [post, ...(current ?? posts)]);
+            onPosted();
+          }}
+        />
+      )}
     </div>
   );
 }

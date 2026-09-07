@@ -220,6 +220,25 @@ const DEMO_CATEGORIES: CategoryConfig[] = [
     sortOrder: 100,
     subtypes: [],
   },
+  // Migration 0030's "thought" — the location-optional role "update" left
+  // behind when 0027 gave it a pin. Values mirror seed.sql's own row.
+  {
+    key: "thought",
+    labelJa: "つぶやき",
+    labelEn: "Thought",
+    defaultTtlSeconds: 180 * 86400,
+    maxTtlSeconds: 180 * 86400,
+    locationPrecisionM: 0,
+    requiresProximity: false,
+    proximityRadiusM: 500,
+    allowsBody: true,
+    bodyMaxLength: 280,
+    allowsMedia: true,
+    minReputation: 0,
+    hourlyPostLimit: 20,
+    sortOrder: 110,
+    subtypes: [],
+  },
 ];
 
 const DISPUTE_THRESHOLD = 3; // mirrors soso.dispute_threshold()
@@ -410,20 +429,18 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
         disputeCount: 0,
         replyCount: 0,
       },
-      // Location-optional ("update") posts — the only seeds here with no
+      // Location-optional ("thought") posts — the only seeds here with no
       // lng/lat at all, exercising the exact branch that distinguishes this
       // category from every other seed above. Without at least one of
-      // these, a fresh demo session's Feed tab would always show "Nothing
-      // here yet": there is no composer for this category until a later
-      // stage, so seed data is the only way this stage's own stated goal
-      // ("can I see a scrollable feed of existing posts... against the demo
-      // gateway") is actually achievable right now.
+      // these, a fresh demo session's Feed tab would show "Nothing here
+      // yet" even though the FAB right there on the tab can create one —
+      // seed data just means there's something to see before you do.
       {
         id: crypto.randomUUID(),
         authorId: "seed",
-        category: "update",
+        category: "thought",
         subtype: null,
-        body: "First one of these — no pin, no place, just a short update.",
+        body: "First one of these — no pin, no place, just a short thought.",
         lng: null,
         lat: null,
         status: "live" as const,
@@ -437,7 +454,7 @@ function seedIfEmpty(posts: DemoPost[]): DemoPost[] {
       {
         id: crypto.randomUUID(),
         authorId: "seed",
-        category: "update",
+        category: "thought",
         subtype: null,
         body: "Testing whether a feed post can exist without ever touching the map at all. It can.",
         lng: null,
@@ -821,14 +838,14 @@ export function createDemoGateway(): SosoGateway {
       ).length;
       if (recentCount >= category.hourlyPostLimit) throw new SosoError("soso/rate_limited");
 
-      // "update" is the one location-optional category demo mode knows
-      // Every enabled category needs one as of migration 0027, which
-      // flipped "update" — the only exception there had ever been — to
-      // requires_location = true. Kept as a named constant rather than
-      // deleted along with the branch below: `requires_location` is still a
-      // real column any future category can set false, and the branch is
-      // the only thing here that mirrors what create_post does with it.
-      const needsLocation = true;
+      // "thought" is the one location-optional category demo mode knows —
+      // migration 0027 took that role away from "update" (giving it a real
+      // pin instead) and migration 0030 gave it to this new key. Checked by
+      // name here rather than threading a requiresLocation flag through
+      // CategoryConfig, matching how DEMO_CATEGORIES already hardcodes
+      // every other category's quirks locally rather than faking a full
+      // config-driven pipeline nothing here reads generically yet.
+      const needsLocation = category.key !== "thought";
 
       let fuzzed: { lng: number; lat: number } | null = null;
       if (needsLocation) {
@@ -1069,7 +1086,7 @@ export function createDemoGateway(): SosoGateway {
 
     // --- Location-optional feed ---------------------------------------------
     // Fully functional in demo mode, unlike the social-graph methods just
-    // above — an "update" post and its replies are content a single local
+    // above — a "thought" post and its replies are content a single local
     // user can create and read back, the same reason posts/votes/chat are
     // already fully faked here rather than rejecting.
 
