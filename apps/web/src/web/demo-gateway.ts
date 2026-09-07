@@ -199,12 +199,10 @@ const DEMO_CATEGORIES: CategoryConfig[] = [
     sortOrder: 90,
     subtypes: [],
   },
-  // Location-optional — see POST_FEED_PLAN.md Stage 1. Values mirror the
-  // "update" row in seed.sql / 20260903000023_location_optional_posts.sql
-  // exactly. createPost above checks `category.key === "update"` directly
-  // to skip its location handling entirely for this one; there is
-  // otherwise nothing location-specific about how this category is
-  // configured here.
+  // Values mirror the "update" row in seed.sql exactly. It was the one
+  // location-optional category until migration 0027 gave it a location;
+  // it is now an ordinary pin category that happens to allow a longer
+  // body and a much longer TTL than the rest.
   {
     key: "update",
     labelJa: "近況アップデート",
@@ -792,14 +790,13 @@ export function createDemoGateway(): SosoGateway {
       if (recentCount >= category.hourlyPostLimit) throw new SosoError("soso/rate_limited");
 
       // "update" is the one location-optional category demo mode knows
-      // about (see post_categories.requires_location, migration 0023) —
-      // checked by key here rather than threading a requiresLocation flag
-      // through CategoryConfig, matching how DEMO_CATEGORIES already
-      // hardcodes every other category's quirks locally rather than
-      // faking a full config-driven pipeline nothing here reads generically
-      // yet. Revisit if a UI ever needs to ask "does this category need a
-      // location" generically — Stage 1 doesn't.
-      const needsLocation = category.key !== "update";
+      // Every enabled category needs one as of migration 0027, which
+      // flipped "update" — the only exception there had ever been — to
+      // requires_location = true. Kept as a named constant rather than
+      // deleted along with the branch below: `requires_location` is still a
+      // real column any future category can set false, and the branch is
+      // the only thing here that mirrors what create_post does with it.
+      const needsLocation = true;
 
       let fuzzed: { lng: number; lat: number } | null = null;
       if (needsLocation) {

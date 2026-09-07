@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { ERROR_MESSAGES_EN, type DmThread, type SosoGateway } from "soso-core";
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
-import { openMessage, sealMessage, threadKeyFor } from "./dmCrypto";
+import { ensurePublishedKey, openMessage, sealMessage, threadKeyFor } from "./dmCrypto";
 import { useLongPress } from "./useLongPress";
 
 /**
@@ -34,8 +34,6 @@ interface DmThreadViewProps {
   /** Needed to derive the conversation key — it is bound to both ids. */
   myId: string;
   onClose: () => void;
-  /** Lets the inbox behind this refresh its preview and unread count on the way out. */
-  onChanged?: () => void;
 }
 
 interface DecryptedMessage {
@@ -46,7 +44,17 @@ interface DecryptedMessage {
   text: string | null;
 }
 
-const DM_MAX_LENGTH = 2000;
+/**
+ * Characters, not bytes — and the gap between those is why this is 1000 and
+ * not something rounder. `dm_messages.ciphertext` is capped at 6000 base64
+ * characters, which is 4484 bytes of plaintext once the GCM tag and base64
+ * expansion are accounted for. A character can be up to 4 bytes in UTF-8, so
+ * 1000 characters is the largest limit that cannot overflow the column. At
+ * the old 2000 it took only ~1500 Japanese characters to get a send rejected
+ * by a constraint the UI had already told the user they were within — which
+ * in a Tokyo-facing app is not an edge case.
+ */
+const DM_MAX_LENGTH = 1000;
 
 const REPORT_REASONS = [
   { label: "Harassment", value: "harassment" },
@@ -54,12 +62,15 @@ const REPORT_REASONS = [
   { label: "Something else", value: "other" },
 ] as const;
 
-export default function DmThreadView({ thread, gateway, myId, onClose, onChanged }: DmThreadViewProps) {
+export default function DmThreadView({ thread, gateway, myId, onClose }: DmThreadViewProps) {
   const [messages, setMessages] = useState<DecryptedMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Separate from `error`: a completed report is good news, and rendering it
+  // through the error slot painted it red.
+  const [notice, setNotice] = useState<string | null>(null);
   const [sheetFor, setSheetFor] = useState<DecryptedMessage | null>(null);
   const [reporting, setReporting] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -97,6 +108,10 @@ export default function DmThreadView({ thread, gateway, myId, onClose, onChanged
   }, [gateway, thread.id, decryptAll]);
 
   useEffect(() => {
+    // Both entry points into a conversation have to do this, not just the
+    // inbox: without our public key published, everything sent from here is
+    // undecryptable for the person receiving it.
+    void ensurePublishedKey(gateway).catch(() => {});
     void reload();
     void gateway.markDmRead(thread.id).catch(() => {});
 
@@ -114,7 +129,6 @@ export default function DmThreadView({ thread, gateway, myId, onClose, onChanged
     return () => {
       if (debounce) clearTimeout(debounce);
       unsubscribe();
-      onChanged?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.id]);
@@ -168,7 +182,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose, onChanged
       // has no way to obtain it otherwise — see migration 0026 on why an
       // E2EE report is a disclosure by a participant, not an inspection.
       await gateway.reportDmMessage(message.id, reason, message.text);
-      setError("Reported. Thanks — we'll look at it.");
+      setNotice("Reported. Thanks — we'll look at it.");
     } catch {
       setError("Couldn't send that report. Try again.");
     }
@@ -237,6 +251,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose, onChanged
         })}
       </div>
 
+      {notice && <p className="dm-thread-notice-ok">{notice}</p>}
       {error && <p className="chat-error">{error}</p>}
 
       <form

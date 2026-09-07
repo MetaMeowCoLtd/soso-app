@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatAgoShort, type DmThread, type SosoGateway } from "soso-core";
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
-import { getSelfKeys, openMessage, threadKeyFor } from "./dmCrypto";
+import { ensurePublishedKey, openMessage, threadKeyFor } from "./dmCrypto";
 
 /**
  * The direct-message inbox.
@@ -27,6 +27,13 @@ interface DmInboxProps {
   myId: string | null;
   demoMode: boolean;
   onOpenThread: (thread: DmThread) => void;
+  /**
+   * Changes whenever a conversation is closed. Reading a thread updates
+   * `dm_threads`, which is deliberately NOT in the realtime publication
+   * (only `dm_messages` is), so nothing would otherwise tell this list its
+   * unread badge is now wrong.
+   */
+  refreshToken: number;
 }
 
 interface InboxRow {
@@ -36,7 +43,7 @@ interface InboxRow {
   unreadable: boolean;
 }
 
-export default function DmInbox({ gateway, myId, demoMode, onOpenThread }: DmInboxProps) {
+export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refreshToken }: DmInboxProps) {
   const [rows, setRows] = useState<InboxRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -68,15 +75,17 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread }: DmInb
   }, [gateway, myId]);
 
   useEffect(() => {
-    if (demoMode || !myId) {
+    if (demoMode) {
       setLoaded(true);
       return;
     }
+    // Still waiting on the profile: stay in the loading state rather than
+    // flashing "No conversations yet" at someone who has plenty.
+    if (!myId) return;
 
     // Publish this device's public key before listing, so that by the time
     // anyone looks at their friends list this account is messageable.
-    void getSelfKeys()
-      .then((keys) => gateway.publishUserKey(keys.publicKeySpki))
+    void ensurePublishedKey(gateway)
       .catch(() => {})
       .then(() => reload());
 
@@ -93,7 +102,7 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread }: DmInb
       if (debounce) clearTimeout(debounce);
       unsubscribe();
     };
-  }, [gateway, myId, demoMode, reload]);
+  }, [gateway, myId, demoMode, reload, refreshToken]);
 
   if (demoMode) {
     return (

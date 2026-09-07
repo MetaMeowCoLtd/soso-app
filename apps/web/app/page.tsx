@@ -13,6 +13,7 @@ import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeopleTab from "@/src/web/PeopleTab";
 import DmThreadView from "@/src/web/DmThreadView";
+import { ensurePublishedKey } from "@/src/web/dmCrypto";
 import ChatPanel from "@/src/web/ChatPanel";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { usePresence } from "@/src/web/usePresence";
@@ -253,6 +254,11 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // already follows.
   const [dmThread, setDmThread] = useState<DmThread | null>(null);
   const [dmError, setDmError] = useState<string | null>(null);
+  // Bumped when a conversation closes, so the inbox behind it re-reads its
+  // unread counts. Reading a thread writes to dm_threads, which is not in
+  // the realtime publication (only dm_messages is), so without this the
+  // badge would sit there stale until something else happened.
+  const [dmRefresh, setDmRefresh] = useState(0);
   const presence = usePresence(gateway, mode === "supabase", presenceCentre);
 
   useEffect(() => {
@@ -371,6 +377,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   async function openDm(userId: string) {
     setDmError(null);
     try {
+      // Publishing our own key is what makes messages sent from here
+      // readable by the recipient — see ensurePublishedKey. Not fatal if it
+      // fails; the conversation still opens and the next attempt retries.
+      await ensurePublishedKey(gateway).catch(() => {});
       const thread = await gateway.openDmThread(userId);
       setDmThread(thread);
     } catch (err) {
@@ -901,13 +911,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
       )}
 
       {activeTab === "feed" && (
-        <FeedTab
-          gateway={gateway}
-          nowSeconds={nowSeconds}
-          coinBalance={coinBalance}
-          onPosted={() => void refreshCoinBalance()}
-          onOpenPost={selectPin}
-        />
+        <FeedTab gateway={gateway} nowSeconds={nowSeconds} onOpenPost={selectPin} />
       )}
 
       {activeTab === "chat" && (
@@ -916,6 +920,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           demoMode={mode !== "supabase"}
           myId={presence.me?.id ?? null}
           onOpenThread={setDmThread}
+          refreshToken={dmRefresh}
         />
       )}
 
@@ -929,11 +934,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
       {/* Above the tab bar and every tab, like the thread and board views:
           a conversation is an exclusive surface, not a panel over one. */}
-      {dmError && (
-        <p className="dm-error-toast" role="status" onClick={() => setDmError(null)}>
-          {dmError}
-        </p>
-      )}
+      {dmError && <DmErrorToast message={dmError} onDismiss={() => setDmError(null)} />}
 
       {dmThread && presence.me && (
         <DmThreadView
@@ -941,7 +942,10 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           thread={dmThread}
           gateway={gateway}
           myId={presence.me.id}
-          onClose={() => setDmThread(null)}
+          onClose={() => {
+            setDmThread(null);
+            setDmRefresh((n) => n + 1);
+          }}
         />
       )}
 
@@ -995,5 +999,23 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         </nav>
       )}
     </>
+  );
+}
+
+/**
+ * Clears itself after a few seconds as well as on tap. A toast that only
+ * goes away when clicked is a toast that is still on screen two screens
+ * later, over content it has nothing to do with.
+ */
+function DmErrorToast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(timer);
+  }, [message, onDismiss]);
+
+  return (
+    <p className="dm-error-toast" role="status" onClick={onDismiss}>
+      {message}
+    </p>
   );
 }

@@ -149,12 +149,19 @@ insert into public.post_categories (
 -- 20260903000023_location_optional_posts.sql for the full design and
 -- POST_FEED_PLAN.md for the three-stage plan this is Stage 1 of.
 -- --------------------------------------------------------------------------
--- requires_location = false is the only thing that makes this category
--- different from every other row above: no lng/lat, no proximity check, no
--- zone-based audience inheritance. TTL is a long fixed window rather than a
--- default/max spread, since there is no real reason to let an update linger
--- shorter or longer than any other — it reads as effectively permanent
--- without actually special-casing "no expiry" anywhere in the schema.
+-- requires_location was false here until migration 0027, which flipped it:
+-- an update now carries a point and renders as a map pin like every other
+-- category. This row has to agree with that migration, because `supabase
+-- db reset` applies the migrations and THEN this file — a stale `false`
+-- here would silently undo 0027 on every fresh database while leaving an
+-- already-migrated one correct, which is the worst version of that bug.
+--
+-- Proximity stays false: an update is "something about this place", not "I
+-- am standing here", so it can be posted about a spot the author is not at.
+-- TTL is a long fixed window rather than a default/max spread, since there
+-- is no real reason to let an update linger shorter or longer than any
+-- other — it reads as effectively permanent without actually special-casing
+-- "no expiry" anywhere in the schema.
 insert into public.post_categories (
   key, label_ja, label_en,
   default_ttl, max_ttl,
@@ -168,7 +175,7 @@ insert into public.post_categories (
  0, false, 500,
  true, 280, true,
  0, 20, true, 100,
- false);
+ true);
 
 
 insert into public.post_subtypes (category_key, key, label_ja, label_en, sort_order) values

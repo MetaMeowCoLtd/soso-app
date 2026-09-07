@@ -615,6 +615,9 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 /* Rendered outside .map-app, because the tabs that can raise it (People,
    Chat) replace that container — the existing .map-notice would be
    display:none at exactly the moment this needs to be seen. */
+/* The counterpart to .chat-error, for something that went right — a
+   completed report used to be rendered through the red error slot. */
+.dm-thread-notice-ok { margin:0; padding:8px 14px; background:rgba(0,167,143,.09); color:#26685c; font-size:.75rem; }
 .dm-error-toast { position:fixed; z-index:35; left:50%; top:max(14px, env(safe-area-inset-top)); transform:translateX(-50%); max-width:min(92vw, 420px); margin:0; padding:10px 16px; border-radius:14px; background:var(--deep); color:#fff; font-size:.78rem; line-height:1.4; text-align:center; box-shadow:var(--e2); animation:sheet-pop .2s cubic-bezier(.32,.72,0,1); }
 
 

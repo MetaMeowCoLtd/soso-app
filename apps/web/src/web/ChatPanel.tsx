@@ -55,6 +55,8 @@ interface ChatPanelProps {
   myId: string | null;
   /** Opens a conversation full-screen; page.tsx owns that surface. */
   onOpenThread: (thread: DmThread) => void;
+  /** Passed through to the inbox — see DmInbox's own note on why it exists. */
+  refreshToken: number;
 }
 
 /**
@@ -103,7 +105,7 @@ interface OpenMenu {
   rect: DOMRect;
 }
 
-export default function ChatPanel({ gateway, demoMode, myId, onOpenThread }: ChatPanelProps) {
+export default function ChatPanel({ gateway, demoMode, myId, onOpenThread, refreshToken }: ChatPanelProps) {
   // Two things live under one tab: the single global room this app started
   // with, and direct messages. They are the same activity from the user's
   // side ("talking to people") and splitting them into a fifth tab would
@@ -271,7 +273,13 @@ export default function ChatPanel({ gateway, demoMode, myId, onOpenThread }: Cha
 
       {view === "direct" ? (
         <div className="chat-thread dm-inbox-scroll">
-          <DmInbox gateway={gateway} myId={myId} demoMode={demoMode} onOpenThread={onOpenThread} />
+          <DmInbox
+            gateway={gateway}
+            myId={myId}
+            demoMode={demoMode}
+            onOpenThread={onOpenThread}
+            refreshToken={refreshToken}
+          />
         </div>
       ) : (
       <>

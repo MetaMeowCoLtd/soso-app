@@ -38,7 +38,7 @@ Supabase.
 | Lost and found | Implemented |
 | Seat availability (restaurant, cafe) | Implemented |
 | Suspicious activity reporting | Implemented, enabled |
-| Location-optional posts (Threads-style feed, no pin) | Implemented. Feed tab, composer, and reply thread, with live like/reply counts and a "new posts" banner. See [Location-optional posts](#location-optional-posts). |
+| Location-optional posts (Threads-style feed, no pin) | Withdrawn in migration 0027: "update" now requires a location and renders as a map pin, so no enabled category is location-optional and the feed has no content source. The Feed tab, its RPC and its thread view all still work — see [Location-optional posts](#location-optional-posts). |
 | Shared chat (one global room) | Implemented. Bubbles with reactions, replies, and a long-press action sheet. See [Shared chat](#shared-chat). |
 | Direct messages | Implemented, not verified against a live database. Mutual follows only, end-to-end encrypted. See [Direct messages](#direct-messages). |
 | Per-category expiry (TTL) | Implemented. Server-assigned; the client cannot extend it. |
@@ -679,9 +679,33 @@ have a case for.
 
 ## Location-optional posts
 
-A post can now exist with no location at all — a short text update,
+A post *could* exist with no location at all — a short text update,
 optionally with an image, closer to a Threads or Twitter post than a map
 pin, decoupled entirely from the map into its own feed.
+
+**Migration 0027 reversed that for the only category that used it.** An
+`update` now requires a location and renders as a map pin, because choosing
+"Update" in the map composer had been silently discarding the point the
+user had just dropped. `create_post` only assigns `cell_id` when
+`requires_location` is true, and `list_feed_posts` selects on
+`cell_id is null` — one switch drives both, so updates left the feed the
+moment they gained pins.
+
+What that leaves behind, stated plainly:
+
+- **No enabled category is location-optional**, so `list_feed_posts` has
+  nothing new to return. Updates created before 0027 keep their absent
+  location and stay feed-only until their TTL expires them (180 days), so
+  an existing database drains rather than emptying at once.
+- **The Feed tab, `list_feed_posts`, the reply thread and the realtime
+  wiring are all intact and working.** They are unfed, not broken. What the
+  feed should show next is an open product question.
+- **`ThoughtComposer` is currently unused.** It composed a location-less
+  update from the Feed tab; that would now fail server-side every time, so
+  the Feed's compose button is gone. The component is left in the tree
+  because it is the obvious starting point if the feed gets a purpose
+  again. The map composer already offers the same audience picker, so
+  posting an update lost no capability.
 
 ### Live updates
 

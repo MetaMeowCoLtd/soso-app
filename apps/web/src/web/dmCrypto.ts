@@ -5,6 +5,7 @@ import {
   exportPublicKey,
   generateDmKeyPair,
   type SealedMessage,
+  type SosoGateway,
 } from "soso-core";
 
 /**
@@ -125,6 +126,36 @@ export async function threadKeyFor(
   );
   threadKeys.set(cacheKey, derived);
   return derived;
+}
+
+let publishing: Promise<void> | null = null;
+
+/**
+ * Publishes this device's public key, once per session.
+ *
+ * Must be called on EVERY path into a conversation, not just the one that
+ * happens to list them. The asymmetry is easy to miss and the failure is
+ * silent and permanent-looking: you encrypt with ECDH(your private, their
+ * public), and they decrypt with ECDH(their private, YOUR public) — so a
+ * sender who never published is sending messages the recipient cannot read.
+ * Nothing surfaces as an error at either end; the recipient just sees an
+ * unreadable bubble. (Publishing later does repair it, since the key is
+ * static, but "eventually readable once you happen to open the right tab"
+ * is not a delivery guarantee.)
+ *
+ * Cleared on failure so a later attempt retries rather than caching a
+ * rejection for the rest of the session.
+ */
+export function ensurePublishedKey(gateway: SosoGateway): Promise<void> {
+  if (!publishing) {
+    publishing = getSelfKeys()
+      .then((keys) => gateway.publishUserKey(keys.publicKeySpki))
+      .catch((err) => {
+        publishing = null;
+        throw err;
+      });
+  }
+  return publishing;
 }
 
 /** True where the APIs this needs exist at all — they require a secure context. */
