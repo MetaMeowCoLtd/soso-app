@@ -197,6 +197,61 @@ export function MapIcon({ className }: IconProps) {
 }
 
 /**
+ * The feed card's like control, in both states: a stroked outline by
+ * default and a solid fill once you've liked something, which is the one
+ * place in this icon set that deliberately breaks the stroke-only rule
+ * above. That break is the whole point — every social feed people already
+ * use signals "liked" by filling the heart, and a heart that only changes
+ * colour reads as a hover state rather than a committed action.
+ *
+ * Sized 22 rather than 20: it sits in a row of its own under a post, not
+ * in a 38px header button, and 20 looked undersized against the body text
+ * beside it.
+ */
+export function HeartIcon({ className, filled }: IconProps & { filled?: boolean }) {
+  return (
+    <svg
+      className={className}
+      width="22"
+      height="22"
+      viewBox="0 0 22 22"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M11 18.6s-6.9-4-8.3-8.2C1.6 7.1 3.4 4.2 6.4 3.8c1.9-.25 3.6.8 4.6 2.3 1-1.5 2.7-2.55 4.6-2.3 3 .4 4.8 3.3 3.7 6.6-1.4 4.2-8.3 8.2-8.3 8.2Z" />
+    </svg>
+  );
+}
+
+/**
+ * The feed card's reply control. A rounder, tail-less oval next to
+ * ChatIcon's squarer bubble above, matching HeartIcon's 22px canvas so the
+ * two sit level in the same action row.
+ */
+export function CommentIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width="22"
+      height="22"
+      viewBox="0 0 22 22"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M11 3.4c4.4 0 8 3.06 8 6.84 0 3.78-3.6 6.85-8 6.85a9.5 9.5 0 0 1-2.2-.26L4.3 18.6l.9-3.2c-1.4-1.25-2.2-2.94-2.2-4.76C3 6.46 6.6 3.4 11 3.4Z" />
+    </svg>
+  );
+}
+
+/**
  * Three stacked cards, standing in for a scrollable feed of posts rather
  * than a generic hamburger/list glyph — FeedTab.tsx's own content is
  * literally a vertical stack of post cards, so the icon mirrors what the

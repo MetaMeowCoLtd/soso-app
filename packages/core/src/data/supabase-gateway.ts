@@ -480,8 +480,11 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       };
     },
 
-    async sendChatMessage(body: string): Promise<ChatMessage> {
-      const { data, error } = await client.rpc('send_chat_message', { p_body: body });
+    async sendChatMessage(body: string, replyToId?: string | null): Promise<ChatMessage> {
+      const { data, error } = await client.rpc('send_chat_message', {
+        p_body: body,
+        p_reply_to: replyToId ?? null,
+      });
       if (error) throw toSosoError(error);
       return decodeChatMessage(data as WireChatMessage);
     },
@@ -508,10 +511,23 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       if (error) throw toSosoError(error);
     },
 
+    async toggleChatReaction(messageId: string, emoji: string): Promise<void> {
+      const { error } = await client.rpc('toggle_chat_reaction', {
+        p_message_id: messageId,
+        p_emoji: emoji,
+      });
+      if (error) throw toSosoError(error);
+    },
+
     subscribeChatMessagesChanged(onChange: () => void): () => void {
       const channel = client
         .channel(`chat-changed-${Math.random().toString(36).slice(2)}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => onChange())
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_message_reactions' },
+          () => onChange(),
+        )
         .subscribe();
 
       return () => {

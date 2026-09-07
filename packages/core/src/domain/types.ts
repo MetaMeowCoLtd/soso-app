@@ -399,6 +399,20 @@ export interface NewZone {
  * to compare `authorId` against its own session id to decide whether to
  * show a delete affordance.
  */
+export interface ChatMessageReaction {
+  emoji: string;
+  count: number;
+  /** True when the signed-in user is one of the people behind `count`. */
+  mine: boolean;
+}
+
+/** A quoted preview of the message being replied to — null once it's been deleted, same as no reply at all. */
+export interface ChatReplyPreview {
+  id: string;
+  body: string;
+  authorName: string;
+}
+
 export interface ChatMessage {
   id: string;
   body: string;
@@ -407,6 +421,8 @@ export interface ChatMessage {
   authorHandle: string;
   authorName: string;
   mine: boolean;
+  replyTo: ChatReplyPreview | null;
+  reactions: ChatMessageReaction[];
 }
 
 export interface WireChatMessage {
@@ -417,6 +433,8 @@ export interface WireChatMessage {
   author_handle: string;
   author_name: string;
   mine: boolean;
+  reply_to?: { id: string; body: string; author_name: string } | null;
+  reactions?: { emoji: string; count: number; mine: boolean }[] | null;
 }
 
 export function decodeChatMessage(w: WireChatMessage): ChatMessage {
@@ -428,6 +446,10 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
     authorHandle: w.author_handle,
     authorName: w.author_name,
     mine: w.mine,
+    replyTo: w.reply_to
+      ? { id: w.reply_to.id, body: w.reply_to.body, authorName: w.reply_to.author_name }
+      : null,
+    reactions: (w.reactions ?? []).map((r) => ({ emoji: r.emoji, count: r.count, mine: r.mine })),
   };
 }
 

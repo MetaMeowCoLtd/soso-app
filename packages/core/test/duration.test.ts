@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   formatAgo,
+  formatAgoShort,
   formatCountdown,
   formatDuration,
   remainingFraction,
@@ -69,5 +70,28 @@ describe('formatAgo', () => {
 
   it('never reads as the future when the client clock is behind the server', () => {
     assert.equal(formatAgo(NOW + 60, NOW), 'just now');
+  });
+});
+
+describe('formatAgoShort', () => {
+  it('stays one or two characters at every scale a feed byline shows', () => {
+    assert.equal(formatAgoShort(NOW, NOW), 'now');
+    assert.equal(formatAgoShort(NOW - 13 * 60, NOW), '13m');
+    assert.equal(formatAgoShort(NOW - 11 * 3600, NOW), '11h');
+    assert.equal(formatAgoShort(NOW - 2 * 86400, NOW), '2d');
+    assert.equal(formatAgoShort(NOW - 21 * 86400, NOW), '3w');
+  });
+
+  it('switches units at the boundary rather than showing "60m" or "24h"', () => {
+    assert.equal(formatAgoShort(NOW - 59 * 60, NOW), '59m');
+    assert.equal(formatAgoShort(NOW - 60 * 60, NOW), '1h');
+    assert.equal(formatAgoShort(NOW - 23 * 3600, NOW), '23h');
+    assert.equal(formatAgoShort(NOW - 24 * 3600, NOW), '1d');
+    assert.equal(formatAgoShort(NOW - 6 * 86400, NOW), '6d');
+    assert.equal(formatAgoShort(NOW - 7 * 86400, NOW), '1w');
+  });
+
+  it('clamps a skewed clock the same way formatAgo does', () => {
+    assert.equal(formatAgoShort(NOW + 60, NOW), 'now');
   });
 });

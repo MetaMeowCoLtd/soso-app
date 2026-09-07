@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatAgo, type Pin, type PostDetail, type SosoGateway } from "soso-core";
+import { formatAgoShort, type Pin, type PostDetail, type SosoGateway } from "soso-core";
 import { useFeedPosts } from "./hooks";
+import { CommentIcon, HeartIcon } from "./icons";
 import ThoughtComposer from "./ThoughtComposer";
 
 interface FeedTabProps {
@@ -91,9 +92,17 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, on
         <h1>Feed</h1>
       </header>
 
+      {/* A floating pill over the list rather than a block pushing it down,
+          which is what every feed that has this control actually does — the
+          list underneath must not reflow the moment someone else posts,
+          because the whole reason this control exists instead of an
+          auto-insert is to leave the reading position alone. */}
       {hasNewPosts && (
         <button type="button" className="feed-tab-new-banner" onClick={refresh}>
-          New posts — tap to refresh
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
+          </svg>
+          New posts
         </button>
       )}
 
@@ -237,8 +246,11 @@ function FeedCard({
         <div className="feed-card-byline">
           <strong>{post.author.displayName}</strong>
           <span className="feed-card-handle">@{post.author.handle}</span>
-          <span className="feed-card-dot">·</span>
-          <span className="feed-card-time">{formatAgo(post.createdAt, nowSeconds)}</span>
+          {/* Pushed to the far right rather than trailing the handle: a
+              long display name and handle together already fill a phone's
+              width, and a time that wraps onto its own line under the name
+              is the thing that made the old byline look unfinished. */}
+          <span className="feed-card-time">{formatAgoShort(post.createdAt, nowSeconds)}</span>
         </div>
         {post.body && <p className="feed-card-text">{post.body}</p>}
         {/*
@@ -251,17 +263,33 @@ function FeedCard({
           just for this card, unverified, felt worse than leaving the slot
           out until photo uploads themselves exist.
         */}
-        <div className="feed-card-meta">
+        {/*
+          An icon row, not the old "👍 3 / 💬 1" text pair. Two icons, not
+          the four every big feed shows: repost and share have nothing
+          behind them in this app (no gateway method, no post URL to
+          share), and a button that looks live but does nothing when
+          tapped is worse than an honest gap in the row.
+
+          Counts sit beside their icon and disappear at zero, matching how
+          these read everywhere else — "0" next to every post on a quiet
+          feed is noise that makes the whole list look dead.
+        */}
+        <div className="feed-card-actions">
           <button
             type="button"
-            className={`feed-like-button ${liked ? "active" : ""}`}
+            className={`feed-action feed-action-like ${liked ? "active" : ""}`}
             disabled={voting || post.mine}
             onClick={(e) => void toggleLike(e)}
             aria-pressed={liked}
+            aria-label={liked ? "Undo like" : "Like"}
           >
-            👍 {post.confirmCount}
+            <HeartIcon filled={liked} />
+            {post.confirmCount > 0 && <span>{post.confirmCount}</span>}
           </button>
-          <span>💬 {post.replyCount}</span>
+          <button type="button" className="feed-action" onClick={onOpen} aria-label="Replies">
+            <CommentIcon />
+            {post.replyCount > 0 && <span>{post.replyCount}</span>}
+          </button>
         </div>
       </div>
     </li>

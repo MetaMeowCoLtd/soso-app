@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ERROR_MESSAGES_EN, formatAgo, type PostDetail, type PostReply, type ReportReason, type SosoGateway } from "soso-core";
+import { ERROR_MESSAGES_EN, formatAgoShort, type PostDetail, type PostReply, type ReportReason, type SosoGateway } from "soso-core";
+import { CommentIcon, HeartIcon } from "./icons";
 
 interface ThoughtThreadProps {
   post: PostDetail;
@@ -196,21 +197,30 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
             <div className="feed-card-byline">
               <strong>{post.author.displayName}</strong>
               <span className="feed-card-handle">@{post.author.handle}</span>
-              <span className="feed-card-dot">·</span>
-              <span className="feed-card-time">{formatAgo(post.createdAt, nowSeconds)}</span>
+              <span className="feed-card-time">{formatAgoShort(post.createdAt, nowSeconds)}</span>
             </div>
             {post.body && <p className="feed-card-text">{post.body}</p>}
-            <div className="feed-card-meta">
+            {/* The same action row FeedTab renders, so a post looks
+                identical whether you are reading it in the list or in its
+                own thread. The reply icon is inert here on purpose: you
+                are already in the replies, and the composer is at the
+                bottom of this very screen. */}
+            <div className="feed-card-actions">
               <button
                 type="button"
-                className={`feed-like-button ${liked ? "active" : ""}`}
+                className={`feed-action feed-action-like ${liked ? "active" : ""}`}
                 disabled={voting || post.mine}
                 onClick={() => void toggleLike()}
                 aria-pressed={liked}
+                aria-label={liked ? "Undo like" : "Like"}
               >
-                👍 {confirmCount}
+                <HeartIcon filled={liked} />
+                {confirmCount > 0 && <span>{confirmCount}</span>}
               </button>
-              <span>💬 {post.replyCount}</span>
+              <span className="feed-action" aria-label={`${post.replyCount} replies`}>
+                <CommentIcon />
+                {post.replyCount > 0 && <span>{post.replyCount}</span>}
+              </span>
             </div>
             {voteError && <p className="detail-vote-notice">{voteError}</p>}
 
@@ -278,19 +288,40 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
             <p className="chat-empty">No replies yet — be the first.</p>
           ) : (
             replies.map((r) => (
-              <div key={r.id} className={`chat-message ${r.mine ? "mine" : ""}`}>
-                <div className="chat-message-meta">
-                  <span className="chat-message-author">{r.mine ? "You" : r.authorName || r.authorHandle}</span>
-                  <span className="chat-message-time">
-                    {formatAgo(Math.floor(new Date(r.createdAt).getTime() / 1000), nowSeconds)}
-                  </span>
-                </div>
-                <span className="chat-message-body">{r.body}</span>
-                {r.mine && (
-                  <button className="chat-message-delete" type="button" onClick={() => void removeReply(r.id)}>
-                    Delete
-                  </button>
+              // The same bubbles ChatPanel renders (see .thought-thread-replies
+              // in globals.css) — a reply thread and a chat are the same
+              // thing on screen, and this view already borrowed that
+              // component's shape wholesale before the bubbles were
+              // redesigned. What it does NOT borrow is the long-press
+              // action sheet: reactions and replies-to-replies do not
+              // exist for post replies (no post_reply_reactions table, no
+              // parent column), so a sheet here would be one live action —
+              // delete — behind a hidden gesture. Hence the small ✕ beside
+              // your own reply instead.
+              <div key={r.id} className={`chat-row ${r.mine ? "mine" : "theirs"} run-end`}>
+                {!r.mine && (
+                  <div className="chat-row-avatar" aria-hidden="true">
+                    {(r.authorName || r.authorHandle).trim().charAt(0).toUpperCase() || "?"}
+                  </div>
                 )}
+                <div className="chat-row-stack">
+                  {!r.mine && <span className="chat-row-author">{r.authorName || r.authorHandle}</span>}
+                  <div className="chat-row-bubble-line">
+                    <div className="chat-bubble">
+                      <span className="chat-bubble-text">{r.body}</span>
+                    </div>
+                    {r.mine && (
+                      <button
+                        className="chat-row-delete"
+                        type="button"
+                        onClick={() => void removeReply(r.id)}
+                        aria-label="Delete reply"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             ))
           )}

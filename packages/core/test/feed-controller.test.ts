@@ -95,6 +95,7 @@ class FakeGateway implements SosoGateway {
   }
   async deleteChatMessage() {}
   async reportChatMessage() {}
+  async toggleChatReaction() {}
   subscribeChatMessagesChanged() {
     return () => {};
   }

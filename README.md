@@ -38,7 +38,8 @@ Supabase.
 | Lost and found | Implemented |
 | Seat availability (restaurant, cafe) | Implemented |
 | Suspicious activity reporting | Implemented, enabled |
-| Location-optional posts (Threads-style feed, no pin) | Backend and data model only — schema, RPCs, and the gateway exist; there is no UI, and nothing in the app can create or view one yet. See [Location-optional posts](#location-optional-posts). |
+| Location-optional posts (Threads-style feed, no pin) | Implemented. Feed tab, composer, and reply thread, with live like/reply counts and a "new posts" banner. See [Location-optional posts](#location-optional-posts). |
+| Shared chat (one global room) | Implemented. Bubbles with reactions, replies, and a long-press action sheet. See [Shared chat](#shared-chat). |
 | Per-category expiry (TTL) | Implemented. Server-assigned; the client cannot extend it. |
 | Server-side validation (proximity, rate limits, body length, subtype) | Implemented. Enforced in Postgres, not in the client. |
 | Validity voting (votes fade and eventually expire a post) | Implemented, not verified end-to-end. See [Validity voting](#validity-voting). |
@@ -680,6 +681,48 @@ have a case for.
 A post can now exist with no location at all — a short text update,
 optionally with an image, closer to a Threads or Twitter post than a map
 pin, decoupled entirely from the map into its own feed.
+
+### Live updates
+
+Two separate realtime signals, deliberately not one, because they answer
+different questions and so earn different treatment on screen:
+
+- **A post you don't have yet** (`subscribePostsChanged`) surfaces as a
+  floating "New posts" pill. It never inserts anything on its own: the
+  list must not reflow under someone mid-read, which is the entire reason
+  this is a button rather than an automatic refresh.
+- **A post already on screen changed** (`subscribePostUpdated`) re-fetches
+  that one post through `postDetail` — the same audience-checked path the
+  page load used — and swaps it in place. No banner, no scroll movement,
+  because nothing about the list itself changed. A post that comes back
+  `null` (deleted, or no longer visible to you) is dropped from the list.
+
+Neither trusts the realtime payload. The id in the second one is used only
+to decide what to re-fetch; the row's own columns are ignored, matching
+the signal-then-refetch contract every other `subscribe*` method follows.
+
+## Shared chat
+
+One global room, not scoped to an area — see migration 0015's own comment
+on why that is a deliberate departure from the hyperlocal model.
+
+Everything you can do to a single message — react, reply, copy, delete —
+lives behind a press-and-hold on the message itself (right-click, or a
+hover-revealed "⋯", on desktop). Delete in particular is *only* there: a
+destructive action does not belong one stray tap away from a conversation.
+
+- **Reactions** are one emoji per person per message, the iMessage/Instagram
+  rule: tapping a different emoji moves your reaction, tapping the same one
+  clears it. `toggle_chat_reaction` enforces that server-side with a
+  `(message_id, user_id)` primary key; `applyReactionToggle` in core mirrors
+  it exactly for the optimistic update, and is tested against those cases so
+  the two cannot drift apart.
+- **Replies** quote the message they answer inline. `reply_to_id` is
+  `ON DELETE SET NULL`, so deleting a quoted message leaves the reply
+  readable and simply drops its quote rather than orphaning it.
+
+`subscribeChatMessagesChanged` covers both tables, so someone else's
+reaction arrives the same way their message does.
 
 ## Presence and people
 

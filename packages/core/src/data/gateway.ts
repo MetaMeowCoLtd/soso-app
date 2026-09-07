@@ -273,8 +273,13 @@ export interface SosoGateway {
   // on why this is a deliberate departure from the hyperlocal model
   // everything else in this interface follows.
 
-  /** Sends a message and returns it (server-assigned id/timestamp/author fields, mine: true). */
-  sendChatMessage(body: string): Promise<ChatMessage>;
+  /**
+   * Sends a message and returns it (server-assigned id/timestamp/author
+   * fields, mine: true). Pass `replyToId` to quote another message — the
+   * server resolves it into `replyTo`'s preview, so the sender doesn't need
+   * to already have that message's body on hand to show its own reply.
+   */
+  sendChatMessage(body: string, replyToId?: string | null): Promise<ChatMessage>;
 
   /** Most recent messages, oldest first. Pass a prior page's oldest `createdAt` to page further back. */
   listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]>;
@@ -284,7 +289,16 @@ export interface SosoGateway {
 
   reportChatMessage(messageId: string, reason: string): Promise<void>;
 
-  /** Fires when any chat_messages row changes — same signal-then-refetch contract as the other subscribe* methods. */
+  /**
+   * Sets the caller's own reaction on a message to `emoji` — one per
+   * (message, caller). Sending the emoji you already reacted with clears
+   * it; sending a different one replaces it. There is no separate "remove"
+   * method because there is nothing a remove call would need beyond
+   * calling this again with the same emoji.
+   */
+  toggleChatReaction(messageId: string, emoji: string): Promise<void>;
+
+  /** Fires when any chat_messages or chat_message_reactions row changes — same signal-then-refetch contract as the other subscribe* methods. */
   subscribeChatMessagesChanged(onChange: () => void): () => void;
 
   // --- Drawing boards --------------------------------------------------

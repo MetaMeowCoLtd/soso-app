@@ -305,23 +305,115 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    mirrors .feed-tab (fixed, full-viewport, bottom padding to clear the
    floating .tab-bar) but as a flex column rather than one scrolling list,
    since chat additionally needs a pinned compose row at the bottom rather
-   than everything scrolling as one region — .chat-messages below is the
+   than everything scrolling as one region — .chat-thread below is the
    only part that actually scrolls. */
-.chat-tab { position:fixed; z-index:1; inset:0; display:flex; flex-direction:column; background:#f4f8f6; padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
-.chat-tab-header { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); background:rgba(244,248,246,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.chat-tab { position:fixed; z-index:1; inset:0; display:flex; flex-direction:column; background:#fff; padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
+.chat-tab-header { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); background:rgba(255,255,255,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
 .chat-tab-header h1 { margin:0; font-size:1.1rem; font-weight:900; color:var(--deep); }
 
-.chat-messages { flex:1; min-height:120px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:2px 12px; display:flex; flex-direction:column; gap:9px; }
+/* The message list.
+   `gap:0` with per-row margins instead of a uniform gap: consecutive
+   messages from one person sit tight against each other (2px) while the
+   space between two people's runs is larger (see .run-end), which is what
+   makes a conversation read as turns rather than as an evenly-spaced list
+   of records. A single flex gap cannot express both. */
+.chat-thread { flex:1; min-height:120px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:8px 10px 14px; display:flex; flex-direction:column; }
 .chat-empty { margin:auto; padding:16px 8px; color:var(--muted); font-size:.78rem; text-align:center; line-height:1.5; }
-.chat-message { max-width:88%; }
-.chat-message.mine { align-self:flex-end; text-align:right; }
-.chat-message-meta { display:flex; align-items:baseline; gap:6px; margin-bottom:2px; }
-.chat-message.mine .chat-message-meta { justify-content:flex-end; }
-.chat-message-author { font-size:.7rem; font-weight:700; color:var(--deep); }
-.chat-message-time { font-size:.64rem; color:var(--muted); }
-.chat-message-body { display:inline-block; padding:7px 10px; border-radius:14px; background:#f1f4f2; color:var(--ink); font-size:.82rem; line-height:1.4; word-break:break-word; text-align:left; }
-.chat-message.mine .chat-message-body { background:var(--teal); color:#fff; }
-.chat-message-delete { margin-top:2px; padding:0; border:0; background:transparent; color:var(--muted); font-size:.64rem; text-decoration:underline; }
+
+.chat-divider { align-self:center; margin:16px 0 10px; color:var(--muted); font-size:.66rem; font-weight:750; letter-spacing:.02em; }
+
+.chat-row { display:flex; align-items:flex-end; gap:7px; max-width:100%; margin-top:2px; }
+.chat-row.mine { flex-direction:row-reverse; }
+.chat-row.run-end { margin-bottom:9px; }
+.chat-row-avatar { flex-shrink:0; display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:var(--deep); color:#fff; font-size:.64rem; font-weight:800; }
+/* The run's earlier rows keep the indent but show no circle — one avatar
+   per run, on the last message, the way every threaded chat does it. */
+.chat-row-avatar:empty { background:transparent; }
+.chat-row-stack { display:flex; flex-direction:column; min-width:0; max-width:min(78%, 460px); }
+.chat-row.mine .chat-row-stack { align-items:flex-end; }
+.chat-row-author { margin:8px 0 3px 12px; color:var(--muted); font-size:.66rem; font-weight:750; }
+.chat-row-bubble-line { display:flex; align-items:center; gap:2px; max-width:100%; }
+.chat-row.mine .chat-row-bubble-line { flex-direction:row-reverse; }
+
+/* user-select/touch-callout off: a press-and-hold on selectable text pops
+   the platform's own selection handles and magnifier, which fights the
+   action sheet the same gesture is opening. */
+.chat-bubble { min-width:0; padding:8px 13px; border-radius:20px; background:#f0f2f5; color:var(--ink); font-size:.88rem; line-height:1.4; word-break:break-word; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; transition:transform .12s; }
+.chat-bubble:active { transform:scale(.98); }
+.chat-row.mine .chat-bubble { background:var(--teal); color:#fff; }
+/* Square off the corner nearest the speaker, but only on the run's last
+   bubble — the "tail" that tells you where a run ends without drawing one. */
+.chat-row.theirs.run-end .chat-bubble { border-bottom-left-radius:7px; }
+.chat-row.mine.run-end .chat-bubble { border-bottom-right-radius:7px; }
+.chat-bubble-text { white-space:pre-wrap; }
+
+.chat-bubble-quote { display:block; margin:0 0 6px; padding:5px 9px; border-radius:11px; background:rgba(20,50,43,.07); }
+.chat-row.mine .chat-bubble-quote, .chat-sheet-anchor.mine .chat-bubble-quote { background:rgba(255,255,255,.2); }
+.chat-quote-author { display:block; font-size:.67rem; font-weight:800; opacity:.85; }
+/* Two lines maximum: a reply quoting a long message should show enough to
+   identify it, not repeat the whole thing above the actual reply. */
+.chat-quote-body { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:.76rem; line-height:1.32; opacity:.78; }
+
+/* Pulled up over the bubble's bottom edge so a reaction reads as attached
+   to that message rather than floating between two of them. */
+.chat-reactions { display:flex; gap:3px; margin:-8px 0 0; padding:0 6px; }
+.chat-row.mine .chat-reactions { justify-content:flex-end; }
+.chat-reaction { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border:0; border-radius:999px; background:#fff; box-shadow:0 1px 3px rgba(16,44,37,.2); font-size:.74rem; line-height:1.25; transition:transform .12s; }
+.chat-reaction.mine { box-shadow:0 1px 3px rgba(16,44,37,.2), inset 0 0 0 1.4px var(--teal); }
+.chat-reaction:active { transform:scale(.9); }
+.chat-reaction-count { color:var(--muted); font-size:.66rem; font-weight:750; }
+
+/* Pointer-only affordance: press-and-hold is the gesture on touch, and a
+   permanently visible button next to every bubble is exactly the clutter
+   this redesign removes. Hidden outright where hover does not exist. */
+.chat-row-more { flex-shrink:0; display:grid; place-items:center; width:24px; height:24px; border:0; border-radius:50%; background:transparent; color:var(--muted); font-size:.95rem; line-height:1; opacity:0; transition:opacity .14s, background .14s; }
+.chat-row:hover .chat-row-more { opacity:1; }
+.chat-row-more:hover { background:#eef1ef; }
+@media (hover:none) { .chat-row-more { display:none; } }
+
+/* ThoughtThread's own reply-delete affordance. Unlike .chat-row-more it
+   stays visible on touch — it is the only way to remove a reply, so it
+   cannot be hover-gated — but sits at low opacity until pointed at. */
+.chat-row-delete { flex-shrink:0; display:grid; place-items:center; width:22px; height:22px; border:0; border-radius:50%; background:transparent; color:var(--muted); font-size:.62rem; opacity:.45; transition:opacity .14s, background .14s; }
+.chat-row-delete:hover { opacity:1; background:#eef1ef; }
+
+/* --- the long-press action sheet --- */
+/* The pressed message is drawn again inside the sheet, so the original
+   has to stop being drawn — otherwise the same bubble appears twice, once
+   dimmed under the scrim and once lifted above it. Visibility, not
+   display: the row keeps its space so the list behind the scrim does not
+   reflow while the sheet is open. */
+.chat-row.pressed .chat-row-bubble-line, .chat-row.pressed .chat-reactions { visibility:hidden; }
+.chat-sheet { position:fixed; inset:0; z-index:30; }
+.chat-sheet-scrim { position:absolute; inset:0; background:rgba(10,26,22,.42); backdrop-filter:blur(2px); touch-action:none; animation:sheet-fade .16s ease-out; }
+/* Positioned inline from the pressed bubble's own rect (see
+   MessageActionSheet) so the message stays exactly where it was and the
+   sheet grows around it. */
+.chat-sheet-anchor { position:absolute; animation:sheet-pop .18s cubic-bezier(.32,.72,0,1); }
+.chat-sheet-strip { position:absolute; bottom:calc(100% + 10px); display:flex; gap:1px; padding:5px 7px; border-radius:999px; background:#fff; box-shadow:var(--e2); }
+.chat-sheet-anchor.theirs .chat-sheet-strip { left:0; }
+.chat-sheet-anchor.mine .chat-sheet-strip { right:0; }
+.chat-sheet-emoji { display:grid; place-items:center; width:38px; height:38px; border:0; border-radius:50%; background:transparent; font-size:1.3rem; line-height:1; transition:transform .14s, background .14s; }
+.chat-sheet-emoji:hover { background:#f2f5f3; }
+.chat-sheet-emoji:active { transform:scale(1.24); }
+.chat-sheet-emoji.active { background:rgba(0,167,143,.16); }
+.chat-sheet-clone { overflow:hidden; padding:8px 13px; border-radius:20px; background:#f0f2f5; color:var(--ink); font-size:.88rem; line-height:1.4; word-break:break-word; box-shadow:var(--e2); }
+.chat-sheet-anchor.mine .chat-sheet-clone { background:var(--teal); color:#fff; }
+.chat-sheet-menu { position:absolute; top:calc(100% + 10px); min-width:196px; padding:6px; border-radius:16px; background:rgba(255,255,255,.98); box-shadow:var(--e3); backdrop-filter:blur(20px) saturate(180%); }
+.chat-sheet-anchor.theirs .chat-sheet-menu { left:0; }
+.chat-sheet-anchor.mine .chat-sheet-menu { right:0; }
+.chat-sheet-row { display:flex; align-items:center; justify-content:space-between; gap:22px; width:100%; padding:11px 12px; border:0; border-radius:11px; background:transparent; color:var(--deep); font-size:.86rem; font-weight:650; text-align:left; }
+.chat-sheet-row:hover { background:#f1f4f2; }
+.chat-sheet-row.destructive { color:#d1394b; }
+@keyframes sheet-pop { from { opacity:0; transform:scale(.92); } to { opacity:1; transform:scale(1); } }
+@keyframes sheet-fade { from { opacity:0; } to { opacity:1; } }
+
+/* --- replying: the quoted bar above the composer --- */
+.chat-reply-bar { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:8px 13px; background:#f7f9f8; border-top:1px solid var(--hairline); }
+.chat-reply-bar-body { flex:1; min-width:0; display:flex; flex-direction:column; padding-left:9px; border-left:3px solid var(--teal); }
+.chat-reply-bar-label { color:var(--deep); font-size:.69rem; font-weight:800; }
+.chat-reply-bar-text { color:var(--muted); font-size:.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.chat-reply-bar-cancel { flex-shrink:0; display:grid; place-items:center; width:24px; height:24px; border:0; border-radius:50%; background:#e9edeb; color:var(--muted); font-size:.68rem; }
 
 /* Fixed footer, not part of the scrolling list — the same "scrollable
    content plus a pinned bottom row" shape .pin-preview-body already uses
@@ -334,11 +426,11 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    flex:1 space instead, which is what actually moves the input above the
    keyboard rather than just adding empty room below it. --keyboard-inset
    is 0px whenever the keyboard is closed, so this is a no-op otherwise. */
-.chat-compose { flex-shrink:0; display:flex; gap:7px; padding:9px 10px; padding-bottom:max(9px, env(safe-area-inset-bottom)); margin-bottom:var(--keyboard-inset, 0px); border-top:1px solid var(--hairline); }
-.chat-input { flex:1; min-width:0; border:1px solid #d8e2de; border-radius:999px; padding:8px 13px; background:#fafcfb; color:var(--ink); font-size:.84rem; font-family:inherit; transition:border-color .16s, background .16s; }
+.chat-compose { flex-shrink:0; display:flex; align-items:center; gap:8px; padding:9px 10px; padding-bottom:max(9px, env(safe-area-inset-bottom)); margin-bottom:var(--keyboard-inset, 0px); background:#fff; border-top:1px solid var(--hairline); }
+.chat-input { flex:1; min-width:0; border:1px solid transparent; border-radius:999px; padding:9px 15px; background:#f0f2f5; color:var(--ink); font-size:.86rem; font-family:inherit; transition:border-color .16s, background .16s; }
 .chat-input:focus { outline:none; border-color:var(--teal); background:#fff; }
-.chat-send { flex-shrink:0; display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:var(--deep); color:#fff; transition:background .16s, transform .16s, opacity .16s; }
-.chat-send:hover:not(:disabled) { background:#0a1d1a; }
+.chat-send { flex-shrink:0; display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:var(--teal); color:#fff; transition:background .16s, transform .16s, opacity .16s; }
+.chat-send:hover:not(:disabled) { background:#00907c; }
 .chat-send:active:not(:disabled) { transform:scale(.92); }
 .chat-send:disabled { opacity:.4; }
 .chat-error { margin:0; padding:6px 12px; color:#b5442d; font-size:.72rem; }
@@ -512,9 +604,9 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    this same intentional pattern; .map-rail's own inline style (page.tsx)
    floors its position so it always clears the tab bar regardless of how
    short the sheet currently is. */
-.feed-tab { position:fixed; z-index:1; inset:0; overflow-y:auto; background:#fdf3e6; padding-bottom:calc(64px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; }
+.feed-tab { position:fixed; z-index:1; inset:0; overflow-y:auto; background:#fff; padding-bottom:calc(64px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; }
 
-.feed-tab-header { position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:10px; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); background:rgba(253,243,230,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.feed-tab-header { position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:10px; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); background:rgba(255,255,255,.9); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
 .feed-tab-header h1 { margin:0; font-size:1.1rem; font-weight:900; color:var(--deep); }
 
 .feed-tab-status { padding:44px 20px; text-align:center; color:var(--muted); font-size:.85rem; }
@@ -522,14 +614,32 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 
 .feed-tab-list { list-style:none; margin:0; padding:0; }
 
-.feed-card { display:flex; gap:12px; padding:16px clamp(14px,3vw,28px); border-bottom:1px solid var(--hairline); }
-.feed-card-avatar { flex-shrink:0; display:grid; place-items:center; width:40px; height:40px; border-radius:50%; background:var(--teal); color:#fff; font-weight:800; font-size:.9rem; }
+/* One post: avatar rail, then everything else in a column beside it, with
+   a hairline under the whole row rather than a card outline. A feed of
+   separately outlined cards reads as a list of database rows; the
+   divider-only treatment is what makes a stream of posts read as one
+   continuous surface. */
+.feed-card { display:flex; gap:11px; padding:14px clamp(14px,3vw,22px) 8px; background:#fff; border-bottom:1px solid var(--hairline); }
+.feed-card-avatar { flex-shrink:0; display:grid; place-items:center; width:38px; height:38px; border-radius:50%; background:var(--teal); color:#fff; font-weight:800; font-size:.88rem; }
 .feed-card-body { min-width:0; flex:1; }
-.feed-card-byline { display:flex; align-items:baseline; gap:5px; flex-wrap:wrap; font-size:.85rem; }
-.feed-card-byline strong { color:var(--deep); }
-.feed-card-handle, .feed-card-dot, .feed-card-time { color:var(--muted); font-size:.78rem; }
-.feed-card-text { margin:4px 0 0; color:var(--ink); font-size:.92rem; line-height:1.45; white-space:pre-wrap; overflow-wrap:break-word; }
-.feed-card-meta { display:flex; gap:14px; margin-top:8px; color:var(--muted); font-size:.78rem; }
+.feed-card-byline { display:flex; align-items:baseline; gap:5px; font-size:.86rem; }
+.feed-card-byline strong { flex-shrink:0; color:var(--deep); font-weight:800; }
+.feed-card-handle { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.feed-card-handle, .feed-card-time { color:var(--muted); font-size:.78rem; }
+/* Right-aligned, so a long name/handle pair never pushes the age onto a
+   second line — see FeedTab's own comment on the byline. */
+.feed-card-time { flex-shrink:0; margin-left:auto; padding-left:8px; }
+.feed-card-text { margin:3px 0 0; color:var(--ink); font-size:.92rem; line-height:1.45; white-space:pre-wrap; overflow-wrap:break-word; }
+
+/* The action row. Negative left margin pulls the first icon's tap padding
+   back so the icon itself lines up with the text above it, not the
+   padding around it. */
+.feed-card-actions { display:flex; align-items:center; gap:2px; margin:7px 0 0 -7px; }
+.feed-action { display:inline-flex; align-items:center; gap:5px; padding:7px; border:0; border-radius:999px; background:transparent; color:#54655f; font-size:.79rem; font-weight:700; transition:background .14s, color .14s, transform .14s; }
+.feed-action:hover:not(:disabled) { background:rgba(20,50,43,.05); }
+.feed-action:active:not(:disabled) { transform:scale(.9); }
+.feed-action:disabled { opacity:.85; }
+.feed-action-like.active { color:var(--hot); }
 
 .feed-tab-sentinel { display:grid; place-items:center; padding:20px; }
 
@@ -545,11 +655,12 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .feed-tab-fab { position:fixed; z-index:5; right:clamp(14px,3vw,28px); bottom:calc(88px + env(safe-area-inset-bottom)); display:grid; place-items:center; width:52px; height:52px; border:0; border-radius:50%; background:var(--deep); color:#fff; font-size:1.6rem; font-weight:400; line-height:1; box-shadow:var(--e2); transition:transform .16s; }
 .feed-tab-fab:active { transform:scale(.94); }
 
-.feed-tab-new-banner { display:block; width:calc(100% - 28px); margin:10px 14px 0; padding:9px 14px; border:0; border-radius:999px; background:var(--deep); color:#fff; font-size:.78rem; font-weight:750; box-shadow:var(--e1); }
-
-.feed-like-button { border:0; background:transparent; padding:2px 0; color:var(--muted); font-size:.78rem; font-weight:650; transition:color .16s; }
-.feed-like-button.active { color:var(--teal); }
-.feed-like-button:disabled { opacity:.55; }
+/* Floats over the list rather than sitting in it: the list must not
+   reflow under someone's thumb the moment a stranger posts — see
+   FeedTab's own comment where this is rendered. Fixed, not sticky,
+   because .feed-tab is itself the scroll container and a sticky child
+   would scroll away with the content. */
+.feed-tab-new-banner { position:fixed; z-index:4; top:calc(max(14px, env(safe-area-inset-top)) + 58px); left:50%; transform:translateX(-50%); display:inline-flex; align-items:center; gap:6px; padding:8px 15px; border:0; border-radius:999px; background:var(--deep); color:#fff; font-size:.77rem; font-weight:750; box-shadow:var(--e2); animation:sheet-pop .2s cubic-bezier(.32,.72,0,1); }
 
 .feed-card[role="button"] { cursor:pointer; }
 .feed-card[role="button"]:hover { background:rgba(20,50,43,.02); }
@@ -570,18 +681,22 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    already establishes (position:absolute, inset:0, its own z-index above
    the map/feed beneath it). Sits above .feed-tab-fab (5) so the FAB is
    correctly hidden behind it, not floating on top of a full-screen view. */
-.thought-thread { position:fixed; z-index:20; inset:0; display:flex; flex-direction:column; background:#fdf3e6; }
-.thought-thread-head { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; padding-top:max(12px, env(safe-area-inset-top)); background:rgba(253,243,230,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.thought-thread { position:fixed; z-index:20; inset:0; display:flex; flex-direction:column; background:#fff; }
+.thought-thread-head { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; padding-top:max(12px, env(safe-area-inset-top)); background:rgba(255,255,255,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
 .thought-thread-head strong { font-size:.92rem; color:var(--deep); }
 .thought-thread-close { border:0; background:transparent; width:28px; height:28px; color:var(--muted); font-size:1rem; }
 .thought-thread-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
 .thought-thread-post { border-bottom:1px solid var(--hairline); }
 .thought-thread-own { margin-top:10px; }
-.thought-thread-replies { display:flex; flex-direction:column; gap:2px; padding-bottom:8px; }
+/* Replies reuse the chat bubbles wholesale (.chat-row and friends above) —
+   a reply thread and a chat are the same thing on screen, and this view
+   already borrowed ChatPanel's list-plus-composer shape before the
+   bubbles were redesigned. Only the outer padding differs. */
+.thought-thread-replies { display:flex; flex-direction:column; padding:12px 10px 10px; }
 
 /* Loading skeletons for the feed's initial fetch */
 @keyframes shimmer { 0% { background-position:-120% 0; } 100% { background-position:120% 0; } }
-.skeleton-block { background:linear-gradient(90deg, #ece4d5 25%, #f6efe2 37%, #ece4d5 63%); background-size:400% 100%; animation:shimmer 1.4s ease-in-out infinite; border-radius:8px; }
+.skeleton-block { background:linear-gradient(90deg, #eef1f0 25%, #f8faf9 37%, #eef1f0 63%); background-size:400% 100%; animation:shimmer 1.4s ease-in-out infinite; border-radius:8px; }
 .feed-card-skeleton .skeleton-avatar { flex-shrink:0; width:40px; height:40px; border-radius:50%; }
 .feed-card-skeleton .skeleton-line { height:11px; margin-top:8px; }
 .feed-card-skeleton .skeleton-line-byline { width:45%; margin-top:2px; }

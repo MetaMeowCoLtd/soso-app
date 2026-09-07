@@ -48,3 +48,25 @@ export function formatAgo(createdAt: number, now: number): string {
   if (h < 48) return `${h} hr ago`;
   return `${Math.floor(h / 24)} days ago`;
 }
+
+/**
+ * The same instant as `formatAgo`, in the one-or-two-character form a
+ * social feed byline uses ("13m", "11h", "2d") rather than a sentence.
+ *
+ * A second formatter rather than a flag on the first one because the two
+ * have genuinely different jobs: `formatAgo` reads as prose next to a
+ * countdown or inside a sentence, this one has to survive being crammed
+ * after a handle on a narrow phone. Both stay coarse for the reason the
+ * module comment gives; neither ever ticks by the second.
+ */
+export function formatAgoShort(createdAt: number, now: number): string {
+  const s = Math.max(0, now - createdAt);
+  if (s < 60) return 'now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  return `${Math.floor(d / 7)}w`;
+}

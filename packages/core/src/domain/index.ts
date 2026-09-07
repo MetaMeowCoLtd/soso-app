@@ -6,3 +6,4 @@ export * from './feed';
 export * from './duration';
 export * from './coins';
 export * from './validity';
+export * from './chat';

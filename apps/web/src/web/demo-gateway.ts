@@ -269,6 +269,7 @@ const POSTS_KEY = "soso-demo:posts:v1";
 const VOTES_KEY = "soso-demo:votes:v1";
 const ME_KEY = "soso-demo:me:v1";
 const CHAT_KEY = "soso-demo:chat:v1";
+const CHAT_REACTIONS_KEY = "soso-demo:chat-reactions:v1";
 const COINS_KEY = "soso-demo:coins:v1";
 const WALKS_KEY = "soso-demo:walks:v1";
 const BOARDS_KEY = "soso-demo:boards:v1";
@@ -490,6 +491,7 @@ interface DemoChatMessage {
   body: string;
   createdAt: string;
   authorId: string;
+  replyToId: string | null;
 }
 
 function loadChatMessages(): DemoChatMessage[] {
@@ -498,6 +500,50 @@ function loadChatMessages(): DemoChatMessage[] {
 
 function saveChatMessages(messages: DemoChatMessage[]): void {
   writeJSON(CHAT_KEY, messages);
+}
+
+/** One reaction per (messageId, userId) — same shape as toggle_chat_reaction's real table. */
+interface DemoChatReaction {
+  messageId: string;
+  userId: string;
+  emoji: string;
+}
+
+function loadChatReactions(): DemoChatReaction[] {
+  return readJSON<DemoChatReaction[]>(CHAT_REACTIONS_KEY, []);
+}
+
+function saveChatReactions(reactions: DemoChatReaction[]): void {
+  writeJSON(CHAT_REACTIONS_KEY, reactions);
+}
+
+function chatReplyPreview(
+  id: string | null,
+  me: string,
+): { id: string; body: string; author_name: string } | null {
+  if (!id) return null;
+  const target = loadChatMessages().find((m) => m.id === id);
+  if (!target) return null;
+  // Same naming rule as listRecentChatMessages below, for the same reason.
+  return {
+    id: target.id,
+    body: target.body,
+    author_name: target.authorId === me ? "You" : "A neighbour",
+  };
+}
+
+function chatReactionsFor(messageId: string, me: string): { emoji: string; count: number; mine: boolean }[] {
+  const byEmoji = new Map<string, { count: number; mine: boolean }>();
+  for (const r of loadChatReactions()) {
+    if (r.messageId !== messageId) continue;
+    const entry = byEmoji.get(r.emoji) ?? { count: 0, mine: false };
+    entry.count += 1;
+    if (r.userId === me) entry.mine = true;
+    byEmoji.set(r.emoji, entry);
+  }
+  return [...byEmoji.entries()]
+    .map(([emoji, v]) => ({ emoji, ...v }))
+    .sort((a, b) => a.emoji.localeCompare(b.emoji));
 }
 
 // Mirrors the 500-coin starting grant every profile gets from
@@ -1124,10 +1170,13 @@ export function createDemoGateway(): SosoGateway {
     // sense of the UI without pretending to share anything. Rate limiting
     // and reporting exist server-side for real accounts; neither applies
     // when the only participant is you.
-    async sendChatMessage(body: string): Promise<ChatMessage> {
+    async sendChatMessage(body: string, replyToId?: string | null): Promise<ChatMessage> {
       const trimmed = body.trim();
       if (trimmed.length === 0) throw new SosoError("soso/empty_message");
       if (trimmed.length > 500) throw new SosoError("soso/message_too_long");
+      if (replyToId && !loadChatMessages().some((m) => m.id === replyToId)) {
+        throw new SosoError("soso/message_not_found");
+      }
 
       const me = getMe();
       const message: DemoChatMessage = {
@@ -1135,9 +1184,11 @@ export function createDemoGateway(): SosoGateway {
         body: trimmed,
         createdAt: new Date().toISOString(),
         authorId: me,
+        replyToId: replyToId ?? null,
       };
       saveChatMessages([...loadChatMessages(), message]);
 
+      const preview = chatReplyPreview(message.replyToId, me);
       return {
         id: message.id,
         body: message.body,
@@ -1146,6 +1197,10 @@ export function createDemoGateway(): SosoGateway {
         authorHandle: "you",
         authorName: "You",
         mine: true,
+        replyTo: preview
+          ? { id: preview.id, body: preview.body, authorName: preview.author_name }
+          : null,
+        reactions: [],
       };
     },
 
@@ -1154,25 +1209,65 @@ export function createDemoGateway(): SosoGateway {
       const cap = Math.min(Math.max(limit ?? 50, 1), 100);
       let messages = loadChatMessages();
       if (before) messages = messages.filter((m) => m.createdAt < before);
-      return messages
-        .slice(-cap)
-        .map((m) => ({
+      return messages.slice(-cap).map((m) => {
+        const preview = chatReplyPreview(m.replyToId, me);
+        const mine = m.authorId === me;
+        return {
           id: m.id,
           body: m.body,
           createdAt: m.createdAt,
           authorId: m.authorId,
-          authorHandle: "you",
-          authorName: "You",
-          mine: m.authorId === me,
-        }));
+          // Everything you send in demo mode is yours, so this is almost
+          // always "You" — but a row from some other author (seeded, or
+          // left behind by an earlier demo identity) used to be labelled
+          // "You" as well, directly contradicting its own `mine: false`.
+          // Falls back to the same "A neighbour"/@demo the demo posts use.
+          authorHandle: mine ? "you" : "demo",
+          authorName: mine ? "You" : "A neighbour",
+          mine,
+          replyTo: preview
+            ? { id: preview.id, body: preview.body, authorName: preview.author_name }
+            : null,
+          reactions: chatReactionsFor(m.id, me),
+        };
+      });
     },
 
     async deleteChatMessage(messageId: string): Promise<void> {
-      saveChatMessages(loadChatMessages().filter((m) => m.id !== messageId));
+      // Mirrors reply_to_id's ON DELETE SET NULL and the reactions table's
+      // ON DELETE CASCADE from migration 0025 — a demo message going away
+      // shouldn't leave a reply quoting a body that no longer exists, or a
+      // reaction pointing at nothing.
+      saveChatMessages(
+        loadChatMessages()
+          .filter((m) => m.id !== messageId)
+          .map((m) => (m.replyToId === messageId ? { ...m, replyToId: null } : m)),
+      );
+      saveChatReactions(loadChatReactions().filter((r) => r.messageId !== messageId));
     },
 
     async reportChatMessage(): Promise<void> {
       // Nobody else's message ever appears in demo mode to report.
+    },
+
+    async toggleChatReaction(messageId: string, emoji: string): Promise<void> {
+      const trimmed = emoji.trim();
+      if (trimmed.length === 0 || trimmed.length > 16) throw new SosoError("soso/invalid_reaction");
+      if (!loadChatMessages().some((m) => m.id === messageId)) {
+        throw new SosoError("soso/message_not_found");
+      }
+      const me = getMe();
+      const reactions = loadChatReactions();
+      const existing = reactions.find((r) => r.messageId === messageId && r.userId === me);
+      if (!existing) {
+        saveChatReactions([...reactions, { messageId, userId: me, emoji: trimmed }]);
+      } else if (existing.emoji === trimmed) {
+        saveChatReactions(reactions.filter((r) => r !== existing));
+      } else {
+        saveChatReactions(
+          reactions.map((r) => (r === existing ? { ...r, emoji: trimmed } : r)),
+        );
+      }
     },
 
     subscribeChatMessagesChanged(): () => void {
