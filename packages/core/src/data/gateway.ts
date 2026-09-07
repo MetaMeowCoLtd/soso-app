@@ -348,8 +348,15 @@ export interface SosoGateway {
   /** One thread's messages, oldest first. Pass a prior page's oldest `createdAt` to page back. */
   listDmMessages(threadId: string, before?: string, limit?: number): Promise<DmMessage[]>;
 
-  /** Sends pre-encrypted bytes. This interface never sees a plaintext body. */
-  sendDm(threadId: string, ciphertext: string, iv: string): Promise<DmMessage>;
+  /**
+   * Sends pre-encrypted bytes. This interface never sees a plaintext body.
+   * Pass `replyToId` to quote another message in this same thread — the
+   * server resolves it into `replyTo`'s ciphertext, mirroring
+   * `sendChatMessage`'s own `replyToId` for the room, except there is no
+   * plaintext preview to resolve it into: the caller decrypts `replyTo`
+   * itself, with the same thread key it already used for the message body.
+   */
+  sendDm(threadId: string, ciphertext: string, iv: string, replyToId?: string | null): Promise<DmMessage>;
 
   /** Moves your read cursor to now, clearing the thread's unread count. */
   markDmRead(threadId: string): Promise<void>;
@@ -366,7 +373,24 @@ export interface SosoGateway {
    */
   reportDmMessage(messageId: string, reason: string, disclosedPlaintext?: string | null): Promise<void>;
 
-  /** Fires when any dm_messages row you can see changes. Payload-free, like every other subscribe*. */
+  /**
+   * Sets the caller's own reaction on a DM to a pre-encrypted emoji — one
+   * per (message, caller), same shape as `toggleChatReaction` for the
+   * room. Genuinely a different operation from that one, not just an
+   * encrypted version of it: `toggleChatReaction` lets the SERVER decide
+   * add/replace/clear by comparing plaintext emoji, which is exactly what
+   * it cannot do here (two encryptions of the same emoji are two
+   * different ciphertexts). The caller — which already decrypted its own
+   * previous reaction, if any — makes that decision instead: call this to
+   * set a reaction, `clearDmReaction` to remove it. There is no single
+   * "toggle" entry point for DMs.
+   */
+  setDmReaction(messageId: string, ciphertext: string, iv: string): Promise<void>;
+
+  /** Removes the caller's own reaction from a DM. A no-op, not an error, if there wasn't one. */
+  clearDmReaction(messageId: string): Promise<void>;
+
+  /** Fires when any dm_messages or dm_message_reactions row you can see changes. Payload-free, like every other subscribe*. */
   subscribeDmMessagesChanged(onChange: () => void): () => void;
 
   // --- Drawing boards --------------------------------------------------

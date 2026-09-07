@@ -859,13 +859,48 @@ Not the Signal protocol, and the gap is worth being precise about:
 Both gaps need a protocol, not more calls into SubtleCrypto. They are named
 here so that "end-to-end encrypted" is not read as more than what is built.
 
+### Replies and reactions
+
+Both features the shared room has, added in migration
+`20260907000029_dm_replies_and_reactions.sql`, and both had to be adapted
+for encryption rather than copied from the room's own version of them:
+
+- **Replies quote ciphertext, not a body.** The room's reply preview
+  (`soso.chat_reply_preview`) returns the quoted message's plaintext,
+  because the room has plaintext to return. A DM has none — so
+  `soso.dm_reply_preview` returns the quoted message's ciphertext and
+  nonce instead, and the client decrypts it with the same per-thread key
+  it already uses for everything else in that thread.
+- **Reactions have no counts.** A DM thread has exactly two possible
+  reactors, ever, so "how many people reacted with ❤️" isn't a question
+  that means anything here — only "did each of us react, and with what".
+  That shape is also what makes an encrypted reaction tractable at all:
+  the room's `toggle_chat_reaction` decides add/replace/clear by comparing
+  the incoming plaintext emoji against the caller's existing one, which
+  the server cannot do when both are independently-nonced ciphertext (two
+  encryptions of the same emoji are two different byte strings). The
+  client — which already decrypted its own previous reaction, if any —
+  makes that decision instead, through two honest, non-comparing calls:
+  `set_dm_reaction` and `clear_dm_reaction`.
+
+### One sheet, one gesture, both surfaces
+
+The long-press action sheet (reply, react, copy, delete/report) and the
+drag-right-to-reply gesture are the same components in both places —
+`MessageActionSheet.tsx` and `useSwipeToReply.ts` — not two copies kept in
+sync by hand. A change to either changes both surfaces at once, which is
+also the standing rule for anything added to the room from here on:
+DMs pick it up the same way, through the same shared pieces, rather than
+needing a matching PR against a second implementation.
+
 ### Not verified end-to-end
 
-The schema and RPCs in migration 0026 have **not been run against a live
-database** — this workspace has neither the Supabase CLI nor Docker, so
-`supabase db reset` could not be executed. The TypeScript, the cryptography,
-and the browser-side key handling are all tested; the SQL is reviewed but
-unexecuted. Run the migration against a local stack before relying on it.
+The schema and RPCs in migrations 0026 and 0029 have **not been run against
+a live database** — this workspace has neither the Supabase CLI nor Docker,
+so `supabase db reset` could not be executed. The TypeScript, the
+cryptography, and the browser-side key handling are all tested; the SQL is
+reviewed but unexecuted. Run the migrations against a local stack before
+relying on them.
 
 ## Presence and people
 

@@ -1340,6 +1340,8 @@ export function createDemoGateway(): SosoGateway {
     async markDmRead(): Promise<void> {},
     async deleteDmMessage(): Promise<void> {},
     async reportDmMessage(): Promise<void> {},
+    async setDmReaction(): Promise<void> {},
+    async clearDmReaction(): Promise<void> {},
 
     subscribeDmMessagesChanged(): () => void {
       return () => {};

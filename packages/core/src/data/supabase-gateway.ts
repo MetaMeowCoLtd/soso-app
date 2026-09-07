@@ -592,11 +592,17 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return ((data ?? []) as WireDmMessage[]).map(decodeDmMessage);
     },
 
-    async sendDm(threadId: string, ciphertext: string, iv: string): Promise<DmMessage> {
+    async sendDm(
+      threadId: string,
+      ciphertext: string,
+      iv: string,
+      replyToId?: string | null,
+    ): Promise<DmMessage> {
       const { data, error } = await client.rpc('send_dm', {
         p_thread_id: threadId,
         p_ciphertext: ciphertext,
         p_iv: iv,
+        p_reply_to: replyToId ?? null,
       });
       if (error) throw toSosoError(error);
       return decodeDmMessage(data as WireDmMessage);
@@ -625,10 +631,29 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       if (error) throw toSosoError(error);
     },
 
+    async setDmReaction(messageId: string, ciphertext: string, iv: string): Promise<void> {
+      const { error } = await client.rpc('set_dm_reaction', {
+        p_message_id: messageId,
+        p_ciphertext: ciphertext,
+        p_iv: iv,
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    async clearDmReaction(messageId: string): Promise<void> {
+      const { error } = await client.rpc('clear_dm_reaction', { p_message_id: messageId });
+      if (error) throw toSosoError(error);
+    },
+
     subscribeDmMessagesChanged(onChange: () => void): () => void {
       const channel = client
         .channel(`dm-changed-${Math.random().toString(36).slice(2)}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_messages' }, () => onChange())
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'dm_message_reactions' },
+          () => onChange(),
+        )
         .subscribe();
 
       return () => {

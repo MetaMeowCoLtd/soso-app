@@ -116,6 +116,8 @@ class FakeGateway implements SosoGateway {
   async markDmRead() {}
   async deleteDmMessage() {}
   async reportDmMessage() {}
+  async setDmReaction() {}
+  async clearDmReaction() {}
   subscribeDmMessagesChanged() {
     return () => {};
   }

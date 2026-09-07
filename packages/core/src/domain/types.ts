@@ -748,6 +748,34 @@ export function decodeDmThread(w: WireDmThread): DmThread {
  * client concern — nothing in core can decrypt this, and nothing on the
  * server can either.
  */
+/**
+ * A quoted message, as far as anything outside the browser that holds the
+ * thread key can describe it: which message, and its ciphertext. There is
+ * no body here for the same reason `DmMessage` itself has none — the
+ * server that produced this has never had one to give.
+ */
+export interface DmReplyPreview {
+  id: string;
+  ciphertext: string;
+  iv: string;
+  senderId: string;
+}
+
+/**
+ * One side's reaction to a DM. Unlike `ChatMessageReaction`, there is no
+ * `count` — a DM thread has exactly two possible reactors, ever, so
+ * `mine` (this reaction) plus its absence (no reaction from the other
+ * side) already says everything a count could. `ciphertext`/`iv` decrypt
+ * to a single emoji with the thread's own key, the same key every other
+ * field on `DmMessage` uses.
+ */
+export interface DmMessageReaction {
+  userId: string;
+  ciphertext: string;
+  iv: string;
+  mine: boolean;
+}
+
 export interface DmMessage {
   id: string;
   threadId: string;
@@ -756,6 +784,9 @@ export interface DmMessage {
   iv: string;
   createdAt: string;
   mine: boolean;
+  /** Null once the quoted message is deleted (ON DELETE SET NULL), same as no reply at all. */
+  replyTo: DmReplyPreview | null;
+  reactions: DmMessageReaction[];
 }
 
 export interface WireDmMessage {
@@ -766,6 +797,8 @@ export interface WireDmMessage {
   iv: string;
   created_at: string;
   mine: boolean;
+  reply_to?: { id: string; ciphertext: string; iv: string; sender_id: string } | null;
+  reactions?: { user_id: string; ciphertext: string; iv: string; mine: boolean }[] | null;
 }
 
 export function decodeDmMessage(w: WireDmMessage): DmMessage {
@@ -777,5 +810,14 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
     iv: w.iv,
     createdAt: w.created_at,
     mine: w.mine,
+    replyTo: w.reply_to
+      ? { id: w.reply_to.id, ciphertext: w.reply_to.ciphertext, iv: w.reply_to.iv, senderId: w.reply_to.sender_id }
+      : null,
+    reactions: (w.reactions ?? []).map((r) => ({
+      userId: r.user_id,
+      ciphertext: r.ciphertext,
+      iv: r.iv,
+      mine: r.mine,
+    })),
   };
 }

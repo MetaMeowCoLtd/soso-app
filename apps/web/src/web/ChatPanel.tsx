@@ -10,6 +10,7 @@ import {
   type SosoGateway,
 } from "soso-core";
 import DmInbox from "./DmInbox";
+import { MessageActionSheet } from "./MessageActionSheet";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
 import { Icon, ICONS } from "./Icon";
@@ -64,14 +65,6 @@ interface ChatPanelProps {
   /** Passed through to the inbox — see DmInbox's own note on why it exists. */
   refreshToken: number;
 }
-
-/**
- * The emoji offered in the action sheet's quick row. Six, because that is
- * what fits across a narrow phone at a comfortable tap size, and no "+"
- * to open a full picker: this app has no emoji picker component, and a
- * button that opens nothing is worse than a shorter row.
- */
-const QUICK_REACTIONS = ["❤️", "😂", "😮", "😢", "🙏", "👍"];
 
 /** Consecutive messages from one person inside this window render as a single run. */
 const GROUP_WINDOW_SECONDS = 5 * 60;
@@ -379,13 +372,24 @@ export default function ChatPanel({ gateway, demoMode, myId, onOpenThread, refre
       {menu &&
         createPortal(
           <MessageActionSheet
-            message={menu.message}
             rect={menu.rect}
+            mine={menu.message.mine}
+            bodyText={menu.message.body}
+            quotedText={
+              menu.message.replyTo
+                ? { authorLabel: menu.message.replyTo.authorName, text: menu.message.replyTo.body }
+                : null
+            }
+            activeReaction={menu.message.reactions.find((r) => r.mine)?.emoji ?? null}
             onClose={() => setMenu(null)}
             onReact={(emoji) => void react(menu.message, emoji)}
             onReply={() => startReply(menu.message)}
             onCopy={() => void copy(menu.message)}
-            onDelete={() => void remove(menu.message.id)}
+            primaryAction={
+              menu.message.mine
+                ? { label: "Delete", icon: ICONS.trash, onClick: () => void remove(menu.message.id) }
+                : undefined
+            }
           />,
           document.body,
         )}
@@ -527,121 +531,3 @@ function ChatMessageRow({
   );
 }
 
-/**
- * The long-press sheet: quick reactions above the message, actions below
- * it, everything else dimmed — the shape iOS and every messaging app on it
- * uses, so the pressed message stays put and in context rather than being
- * replaced by a menu somewhere else on screen.
- *
- * Positioning is computed from the bubble's own rect at press time rather
- * than by portalling the live element, which keeps this a plain overlay
- * with no layout coupling to the list underneath. The clone is
- * deliberately a copy: the original stays in the scrolling list, untouched.
- */
-function MessageActionSheet({
-  message,
-  rect,
-  onClose,
-  onReact,
-  onReply,
-  onCopy,
-  onDelete,
-}: {
-  message: ChatMessage;
-  rect: DOMRect;
-  onClose: () => void;
-  onReact: (emoji: string) => void;
-  onReply: () => void;
-  onCopy: () => void;
-  onDelete: () => void;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const rowCount = message.mine ? 3 : 2;
-  const viewportHeight = window.innerHeight;
-
-  // Measurements below match the CSS; they only decide whether the whole
-  // group needs nudging to stay on screen, so being a few pixels out
-  // shifts the arrangement slightly rather than breaking it.
-  const STRIP_HEIGHT = 54;
-  const ROW_HEIGHT = 46;
-  const MENU_PADDING = 12;
-  const GAP = 10;
-  const EDGE = 24;
-  const TOP_LIMIT = 72;
-
-  const menuHeight = rowCount * ROW_HEIGHT + MENU_PADDING;
-  // A very tall message scrolls inside its own clone rather than pushing
-  // the menu off screen entirely.
-  const bubbleHeight = Math.min(rect.height, viewportHeight * 0.38);
-  const stripTop = rect.top - GAP - STRIP_HEIGHT;
-  const menuBottom = rect.top + bubbleHeight + GAP + menuHeight;
-
-  let shift = 0;
-  if (menuBottom > viewportHeight - EDGE) shift = viewportHeight - EDGE - menuBottom;
-  // The top constraint wins on a conflict: losing the reaction row off the
-  // top of the screen is worse than the menu running past the bottom.
-  if (stripTop + shift < TOP_LIMIT) shift = TOP_LIMIT - stripTop;
-
-  return (
-    <div className="chat-sheet" role="dialog" aria-modal="true" aria-label="Message actions" onClick={onClose}>
-      <div className="chat-sheet-scrim" />
-      <div
-        className={`chat-sheet-anchor ${message.mine ? "mine" : "theirs"}`}
-        style={{ top: rect.top + shift, left: rect.left, width: rect.width }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="chat-sheet-strip">
-          {QUICK_REACTIONS.map((emoji) => {
-            const active = message.reactions.some((r) => r.mine && r.emoji === emoji);
-            return (
-              <button
-                key={emoji}
-                type="button"
-                className={`chat-sheet-emoji${active ? " active" : ""}`}
-                onClick={() => onReact(emoji)}
-                aria-label={emoji}
-                aria-pressed={active}
-              >
-                {emoji}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="chat-sheet-clone" style={{ maxHeight: bubbleHeight }}>
-          {message.replyTo && (
-            <div className="chat-bubble-quote">
-              <span className="chat-quote-author">{message.replyTo.authorName}</span>
-              <span className="chat-quote-body">{message.replyTo.body}</span>
-            </div>
-          )}
-          <span className="chat-bubble-text">{message.body}</span>
-        </div>
-
-        <div className="chat-sheet-menu">
-          <button type="button" className="chat-sheet-row" onClick={onReply}>
-            Reply
-            <Icon src={ICONS.reply} size={17} />
-          </button>
-          <button type="button" className="chat-sheet-row" onClick={onCopy}>
-            Copy
-            <Icon src={ICONS.copy} size={17} />
-          </button>
-          {message.mine && (
-            <button type="button" className="chat-sheet-row destructive" onClick={onDelete}>
-              Delete
-              <Icon src={ICONS.trash} size={17} />
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
