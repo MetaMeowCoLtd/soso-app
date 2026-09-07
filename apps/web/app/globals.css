@@ -358,6 +358,18 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .chat-row.mine.run-end .chat-bubble { border-bottom-right-radius:7px; }
 .chat-bubble-text { white-space:pre-wrap; }
 
+/* Drag-right-to-reply (useSwipeToReply.ts). The zone is what the bubble's
+   transform moves WITHIN — a plain relatively-positioned wrapper, not a
+   flex container, so it imposes no layout opinion of its own beyond
+   `min-width:0` (needed so the flex row this sits in can still shrink the
+   bubble down to wrap long text, the same job `.chat-bubble` itself used
+   to do before this wrapper existed). */
+.chat-bubble-drag-zone { position:relative; min-width:0; }
+/* Positioned off the drag zone's own (untransformed) box, not the bubble's
+   moving one — see the hook's own comment on why that means this needs no
+   JS-driven horizontal movement of its own, only opacity/scale. */
+.chat-swipe-indicator { position:absolute; top:50%; right:100%; margin-right:8px; opacity:0; transform:translateY(-50%) scale(.5); display:grid; place-items:center; width:30px; height:30px; border-radius:50%; background:#fff; color:var(--teal); box-shadow:var(--e1); pointer-events:none; }
+
 .chat-bubble-quote { display:block; margin:0 0 6px; padding:5px 9px; border-radius:11px; background:rgba(20,50,43,.07); }
 .chat-row.mine .chat-bubble-quote, .chat-sheet-anchor.mine .chat-bubble-quote { background:rgba(255,255,255,.2); }
 .chat-quote-author { display:block; font-size:.67rem; font-weight:800; opacity:.85; }

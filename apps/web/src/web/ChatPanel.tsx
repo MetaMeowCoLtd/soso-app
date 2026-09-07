@@ -11,6 +11,7 @@ import {
 } from "soso-core";
 import DmInbox from "./DmInbox";
 import { useLongPress } from "./useLongPress";
+import { useSwipeToReply } from "./useSwipeToReply";
 import { Icon, ICONS } from "./Icon";
 
 /**
@@ -46,6 +47,11 @@ import { Icon, ICONS } from "./Icon";
  * "⋯" button — holding a mouse button down is not a gesture anyone
  * performs, and a feature reachable only by a gesture the platform does
  * not have is a feature that does not exist there.
+ *
+ * Reply alone also has its own, faster path: drag any bubble to the right
+ * (`useSwipeToReply`) to reply to it directly, without opening the sheet
+ * at all — the one action in the sheet common enough, in every chat app
+ * that has both gestures, to earn a dedicated shortcut past it.
  */
 
 interface ChatPanelProps {
@@ -310,6 +316,7 @@ export default function ChatPanel({ gateway, demoMode, myId, onOpenThread, refre
                 pressed={menu?.message.id === message.id}
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onToggleReaction={(emoji) => void react(message, emoji)}
+                onSwipeReply={() => startReply(message)}
               />
             </Fragment>
           );
@@ -393,6 +400,7 @@ function ChatMessageRow({
   pressed,
   onOpenMenu,
   onToggleReaction,
+  onSwipeReply,
 }: {
   message: ChatMessage;
   startsRun: boolean;
@@ -401,6 +409,7 @@ function ChatMessageRow({
   pressed: boolean;
   onOpenMenu: (rect: DOMRect) => void;
   onToggleReaction: (emoji: string) => void;
+  onSwipeReply: () => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
 
@@ -414,8 +423,41 @@ function ChatMessageRow({
     onOpenMenu(rect);
   }
 
-  const { handlers } = useLongPress(openMenu);
+  const longPress = useLongPress(openMenu);
+  // Same element, two independent gestures — see useSwipeToReply's own doc
+  // comment on why a long press and a reply-swipe never actually race each
+  // other despite sharing the bubble.
+  const swipe = useSwipeToReply(bubbleRef, onSwipeReply);
   const author = message.authorName || message.authorHandle;
+
+  // Merges both hooks' handlers onto the one element they share. Each event
+  // name here belongs to both gestures, so both get a look at every event —
+  // there is no shared state between the two hooks for this to corrupt.
+  const bubbleHandlers = {
+    onTouchStart: (e: React.TouchEvent) => {
+      swipe.handlers.onTouchStart(e);
+      longPress.handlers.onTouchStart(e);
+    },
+    onTouchMove: (e: React.TouchEvent) => {
+      swipe.handlers.onTouchMove(e);
+      longPress.handlers.onTouchMove(e);
+    },
+    onTouchEnd: () => {
+      swipe.handlers.onTouchEnd();
+      longPress.handlers.onTouchEnd();
+    },
+    onTouchCancel: () => {
+      swipe.handlers.onTouchCancel();
+      longPress.handlers.onTouchCancel();
+    },
+    onMouseDown: (e: React.MouseEvent) => {
+      swipe.handlers.onMouseDown(e);
+      longPress.handlers.onMouseDown(e);
+    },
+    onMouseUp: longPress.handlers.onMouseUp,
+    onMouseLeave: longPress.handlers.onMouseLeave,
+    onContextMenu: longPress.handlers.onContextMenu,
+  };
 
   return (
     <div
@@ -434,14 +476,24 @@ function ChatMessageRow({
         {startsRun && !message.mine && <span className="chat-row-author">{author}</span>}
 
         <div className="chat-row-bubble-line">
-          <div ref={bubbleRef} className="chat-bubble" {...handlers}>
-            {message.replyTo && (
-              <div className="chat-bubble-quote">
-                <span className="chat-quote-author">{message.replyTo.authorName}</span>
-                <span className="chat-quote-body">{message.replyTo.body}</span>
-              </div>
-            )}
-            <span className="chat-bubble-text">{message.body}</span>
+          {/* The drag zone is the positioning root for the reply
+              indicator (`right: 100%`, see globals.css) — it, not the row,
+              because the row's own layout differs between "mine" (row-
+              reverse) and "theirs", while the indicator's job is always
+              simply "just left of this bubble's own box", regardless. */}
+          <div className="chat-bubble-drag-zone">
+            <span ref={swipe.indicatorRef} className="chat-swipe-indicator" aria-hidden="true">
+              <Icon src={ICONS.reply} size={16} />
+            </span>
+            <div ref={bubbleRef} className="chat-bubble" {...bubbleHandlers}>
+              {message.replyTo && (
+                <div className="chat-bubble-quote">
+                  <span className="chat-quote-author">{message.replyTo.authorName}</span>
+                  <span className="chat-quote-body">{message.replyTo.body}</span>
+                </div>
+              )}
+              <span className="chat-bubble-text">{message.body}</span>
+            </div>
           </div>
 
           {/* Hover-only, pointer-only: the same sheet the long press
