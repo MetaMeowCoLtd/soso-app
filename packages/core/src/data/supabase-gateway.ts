@@ -248,6 +248,11 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       if (error) throw toSosoError(error);
     },
 
+    async unvotePost(postId: string): Promise<void> {
+      const { error } = await client.rpc('unvote_post', { p_post_id: postId });
+      if (error) throw toSosoError(error);
+    },
+
     async reportPost(postId: string, reason: ReportReason, detail?: string): Promise<void> {
       const { error } = await client.rpc('report_post', {
         p_post_id: postId,
@@ -468,6 +473,25 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
           { event: '*', schema: 'public', table: 'post_media' },
           emitMediaPostId,
         )
+        .subscribe();
+
+      return () => {
+        void client.removeChannel(channel);
+      };
+    },
+
+    /**
+     * INSERT-only, and only on `posts` — deliberately narrower than
+     * `subscribePostsChanged` above. That one also fires on every UPDATE
+     * (a vote, a reply count) and on `post_media`, which is exactly right
+     * for the map's cheap incremental refresh but wrong for a "new post"
+     * banner: a like on a post already in view is not a new post. See
+     * this method's own doc comment on `SosoGateway`.
+     */
+    subscribeNewPost(onNew: () => void): () => void {
+      const channel = client
+        .channel(`new-post-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, () => onNew())
         .subscribe();
 
       return () => {

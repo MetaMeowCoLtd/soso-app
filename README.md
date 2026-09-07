@@ -709,22 +709,52 @@ What that leaves behind, stated plainly:
 
 ### Live updates
 
-Two separate realtime signals, deliberately not one, because they answer
-different questions and so earn different treatment on screen:
+Three realtime signals, not one, because they answer three different
+questions and earn three different treatments on screen:
 
-- **A post you don't have yet** (`subscribePostsChanged`) surfaces as a
-  floating "New posts" pill. It never inserts anything on its own: the
-  list must not reflow under someone mid-read, which is the entire reason
-  this is a button rather than an automatic refresh.
-- **A post already on screen changed** (`subscribePostUpdated`) re-fetches
-  that one post through `postDetail` — the same audience-checked path the
-  page load used — and swaps it in place. No banner, no scroll movement,
-  because nothing about the list itself changed. A post that comes back
-  `null` (deleted, or no longer visible to you) is dropped from the list.
+- **A post you don't have yet** (`subscribeNewPost`) surfaces as a floating
+  "New posts" pill. It never inserts anything on its own: the list must
+  not reflow under someone mid-read, which is the entire reason this is a
+  button rather than an automatic refresh. Deliberately scoped to an
+  INSERT into `posts` and nothing broader — an earlier version of this
+  reused the all-events `subscribePostsChanged` below, which meant a vote
+  or a reply landing on a post already in the list (including your own
+  like on your own screen) set the "new posts" banner off too. That was a
+  bug, not a feature: nothing new existed, so nothing should have claimed
+  otherwise.
+- **A post already on screen changed** (`subscribePostUpdated`, still
+  all-events) re-fetches that one post through `postDetail` — the same
+  audience-checked path the page load used — and swaps it in place. No
+  banner, no scroll movement, because nothing about the list itself
+  changed. A post that comes back `null` (deleted, or no longer visible to
+  you) is dropped from the list.
+- **The map's own pins** (`subscribePostsChanged`) trigger a cheap
+  incremental `feedDelta` refetch on any change at all — an UPDATE from a
+  vote is exactly what should move a pin's opacity, so this one stays
+  broad on purpose. It has no banner of its own to accidentally trip.
 
-Neither trusts the realtime payload. The id in the second one is used only
-to decide what to re-fetch; the row's own columns are ignored, matching
-the signal-then-refetch contract every other `subscribe*` method follows.
+Nothing here trusts the realtime payload. An id is used only to decide
+what to re-fetch; a row's own columns are ignored, matching the
+signal-then-refetch contract every `subscribe*` method in this app
+follows.
+
+### Liking a post is a vote, and now behaves like one
+
+`PostDetail.liked` reports whether the signed-in user already has a
+"still valid" (`vote_post(id, 1)`) vote recorded in `post_votes` — read
+back from `post_detail`/`list_feed_posts`, not guessed by the client. Two
+consequences that used to not hold:
+
+- **A like survives a refresh.** The heart used to be component-local
+  state that started unliked on every mount, so reopening a post you'd
+  already liked showed an outline heart, and tapping it just re-cast the
+  same vote rather than undoing it.
+- **A second tap removes the vote.** `vote_post` is an upsert with no way
+  to express "take this back" — a second `vote_post(id, 1)` was a no-op
+  against an unchanged row. `unvote_post` is the missing operation: it
+  deletes the caller's own `post_votes` row (a no-op, not an error, if
+  there wasn't one), which is what actually lets someone remove a like
+  rather than being stuck with it once cast.
 
 ## Shared chat
 

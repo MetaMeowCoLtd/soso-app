@@ -179,12 +179,12 @@ export interface UseFeedPostsResult {
   /** Replaces the list from the start, discarding the current cursor. */
   refresh: () => void;
   /**
-   * True once `subscribePostsChanged` has fired since the last `refresh()`
-   * — the signal for the "N new posts" banner. Deliberately not "N": the
+   * True once `subscribeNewPost` has fired since the last `refresh()` —
+   * the signal for the "N new posts" banner. Deliberately not "N": the
    * signal-then-refetch contract this shares with every other
    * `subscribe*` in this app is a payload-free "something changed," never
-   * a count to trust directly (see subscribePostsChanged's own doc
-   * comment) — a real count would need a second round trip to earn
+   * a count to trust directly (see subscribeNewPost's own doc comment on
+   * `SosoGateway`) — a real count would need a second round trip to earn
    * honestly, and a boolean banner ("New posts — tap to refresh") reads
    * the same to the person tapping it either way.
    */
@@ -265,22 +265,22 @@ export function useFeedPosts(gateway: SosoGateway): UseFeedPostsResult {
   useEffect(() => {
     refresh();
 
-    // Reuses the exact same posts-changed signal useFeed already
-    // subscribes to for the map — a location-optional post's insert fires
-    // it too (the trigger behind it is not scoped to a category or a
-    // cell), so one subscription correctly covers both feeds without
-    // either needing to know the other exists. Debounced for the same
-    // reason useFeed's own copy of this is: a burst of nearby edits should
-    // set the banner once, not flicker it on every row.
+    // `subscribeNewPost` fires only on an INSERT into `posts` — not the
+    // broader `subscribePostsChanged` useFeed uses for the map, which also
+    // fires on every UPDATE (a vote, a reply count bumping). That
+    // distinction is the whole point here: this banner means "something
+    // you don't have yet exists," and a like landing on a post already in
+    // the list is not that. Debounced so a burst of near-simultaneous
+    // posts sets the banner once, not once per row.
     let debounce: ReturnType<typeof setTimeout> | null = null;
-    const onPostsChanged = () => {
+    const onNewPost = () => {
       if (debounce) return;
       debounce = setTimeout(() => {
         debounce = null;
         setHasNewPosts(true);
       }, 500);
     };
-    const unsubscribe = gateway.subscribePostsChanged(onPostsChanged);
+    const unsubscribe = gateway.subscribeNewPost(onNewPost);
 
     // Separate from the banner above: this is for a post already on
     // screen whose like/reply count changed elsewhere (someone else voted

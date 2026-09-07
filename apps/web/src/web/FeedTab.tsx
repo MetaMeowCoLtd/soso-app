@@ -30,13 +30,18 @@ interface FeedTabProps {
  * already shows.
  *
  * Realtime here is two separate mechanisms, deliberately not one:
- *   - New posts (subscribePostsChanged, in useFeedPosts) surface as a
+ *   - New posts (subscribeNewPost, in useFeedPosts) surface as a
  *     "N new posts" banner rather than auto-inserting items and disrupting
- *     scroll position — the Twitter/Threads convention.
+ *     scroll position — the Twitter/Threads convention. Deliberately
+ *     INSERT-only: a vote or reply landing on a post already in the list
+ *     is not "something you don't have yet," and used to set this banner
+ *     off incorrectly before `subscribeNewPost` existed.
  *   - Likes/replies on a post already on screen (subscribePostUpdated,
  *     also in useFeedPosts) splice a fresh `postDetail` into that one card
  *     in place, with no banner and no scroll disruption, since nothing
- *     about the list itself changed.
+ *     about the list itself changed. `PostDetail.liked` in that fresh
+ *     fetch is what lets FeedCard's heart survive a refresh and be undone
+ *     with a second tap, rather than resetting to unliked every time.
  * "Know the list is stale" and "a card I'm already looking at changed" are
  * different signals with different UI treatments, which is why they're two
  * gateway subscriptions instead of one broader one.
@@ -190,26 +195,28 @@ function FeedCard({
   onOpen: () => void;
   onChanged: (post: PostDetail) => void;
 }) {
-  const [liked, setLiked] = useState(false);
   const [voting, setVoting] = useState(false);
 
-  // Deliberately local, ephemeral "did I just like this" state, not
-  // fetched from or persisted by the server — the same choice PinPreview's
-  // own vote button already makes for pins (see its own comment on this).
-  // Reopening this same post later (or seeing it again after a refresh)
-  // starts from unliked again either way, in both places, consistently.
+  // `post.liked` comes from the server (`post_detail`/`list_feed_posts`,
+  // backed by `post_votes`) rather than a component-local guess, so it
+  // survives a refresh and correctly reopens as filled if you liked this
+  // post on a previous visit. A second tap has to mean "undo," which is
+  // why this calls `unvotePost` rather than casting the same vote again —
+  // `votePost` is an upsert with no way to express removing a vote.
   async function toggleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (voting || post.mine) return;
     setVoting(true);
-    const next = !liked;
-    setLiked(next);
-    const optimistic = { ...post, confirmCount: post.confirmCount + (next ? 1 : -1) };
+    const next = !post.liked;
+    const optimistic = { ...post, liked: next, confirmCount: post.confirmCount + (next ? 1 : -1) };
     onChanged(optimistic);
     try {
-      await gateway.votePost(post.id, 1);
+      if (next) {
+        await gateway.votePost(post.id, 1);
+      } else {
+        await gateway.unvotePost(post.id);
+      }
     } catch {
-      setLiked(!next);
       onChanged(post);
     } finally {
       setVoting(false);
@@ -256,13 +263,13 @@ function FeedCard({
         <div className="feed-card-actions">
           <button
             type="button"
-            className={`feed-action feed-action-like ${liked ? "active" : ""}`}
+            className={`feed-action feed-action-like ${post.liked ? "active" : ""}`}
             disabled={voting || post.mine}
             onClick={(e) => void toggleLike(e)}
-            aria-pressed={liked}
-            aria-label={liked ? "Undo like" : "Like"}
+            aria-pressed={post.liked}
+            aria-label={post.liked ? "Undo like" : "Like"}
           >
-            <Icon src={liked ? ICONS.heartFilled : ICONS.heart} size={22} />
+            <Icon src={post.liked ? ICONS.heartFilled : ICONS.heart} size={22} />
             {post.confirmCount > 0 && <span>{post.confirmCount}</span>}
           </button>
           <button type="button" className="feed-action" onClick={onOpen} aria-label="Replies">

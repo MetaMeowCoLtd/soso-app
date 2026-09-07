@@ -486,6 +486,37 @@ function saveVotes(votes: DemoVote[]): void {
   writeJSON(VOTES_KEY, votes);
 }
 
+/** Whether `voterId` has a "still valid" (+1) vote on `postId` — the demo mirror of post_detail's `liked`. */
+function hasLiked(postId: string, voterId: string): boolean {
+  return loadVotes().some((v) => v.postId === postId && v.voterId === voterId && v.vote === 1);
+}
+
+/**
+ * Persists `votes` (the full table, already reflecting whatever vote or
+ * unvote just happened) and recomputes one post's counts and hide state
+ * from it — shared by `votePost` and `unvotePost` so the two can never
+ * drift into recounting differently. Mirrors `soso.tg_votes_recount`'s own
+ * rule: enough disputes, outnumbering confirmations more than 2:1, hides
+ * the post pending review.
+ */
+function recountVotes(postId: string, votes: DemoVote[], posts: DemoPost[], now: number): void {
+  saveVotes(votes);
+
+  const post = posts.find((p) => p.id === postId);
+  const confirmCount = votes.filter((v) => v.postId === postId && v.vote === 1).length;
+  const disputeCount = votes.filter((v) => v.postId === postId && v.vote === -1).length;
+  const shouldHide =
+    post?.status === "live" && disputeCount >= DISPUTE_THRESHOLD && disputeCount > confirmCount * 2;
+
+  savePosts(
+    posts.map((p) =>
+      p.id === postId
+        ? { ...p, confirmCount, disputeCount, status: shouldHide ? "hidden" : p.status, updatedAt: now }
+        : p,
+    ),
+  );
+}
+
 interface DemoChatMessage {
   id: string;
   body: string;
@@ -758,6 +789,7 @@ export function createDemoGateway(): SosoGateway {
         author: { id: post.authorId, handle: "demo", displayName: post.authorId === me ? "You" : "A neighbour" },
         media: [],
         replyCount: post.replyCount,
+        liked: hasLiked(post.id, me),
       };
     },
 
@@ -869,23 +901,18 @@ export function createDemoGateway(): SosoGateway {
 
       const votes = loadVotes().filter((v) => !(v.postId === postId && v.voterId === me));
       votes.push({ postId, voterId: me, vote });
-      saveVotes(votes);
+      recountVotes(postId, votes, posts, now);
+    },
 
-      const confirmCount = votes.filter((v) => v.postId === postId && v.vote === 1).length;
-      const disputeCount = votes.filter((v) => v.postId === postId && v.vote === -1).length;
-
-      // Same rule as soso.tg_votes_recount: enough disputes, and disputes
-      // outnumbering confirmations more than 2:1, hides the post pending review.
-      const shouldHide =
-        post.status === "live" && disputeCount >= DISPUTE_THRESHOLD && disputeCount > confirmCount * 2;
-
-      savePosts(
-        posts.map((p) =>
-          p.id === postId
-            ? { ...p, confirmCount, disputeCount, status: shouldHide ? "hidden" : p.status, updatedAt: now }
-            : p,
-        ),
-      );
+    // Mirrors unvote_post: a no-op, not an error, if there was never a vote
+    // to remove — matches every other "undo my own thing" method in this
+    // file (deleteChatMessage, and this one's own sibling votePost above,
+    // which is likewise never surprised by a missing row).
+    async unvotePost(postId: string): Promise<void> {
+      const posts = loadPosts();
+      const me = getMe();
+      const votes = loadVotes().filter((v) => !(v.postId === postId && v.voterId === me));
+      recountVotes(postId, votes, posts, nowSeconds());
     },
 
     async reportPost(_postId: string, _reason: ReportReason, _detail?: string): Promise<void> {
@@ -1076,6 +1103,7 @@ export function createDemoGateway(): SosoGateway {
           author: { id: post.authorId, handle: "demo", displayName: post.authorId === me ? "You" : "A neighbour" },
           media: [],
           replyCount: post.replyCount,
+          liked: hasLiked(post.id, me),
         })),
       };
     },
@@ -1156,6 +1184,10 @@ export function createDemoGateway(): SosoGateway {
     },
 
     subscribePostUpdated(): () => void {
+      return () => {};
+    },
+
+    subscribeNewPost(): () => void {
       return () => {};
     },
 

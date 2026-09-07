@@ -45,6 +45,7 @@ class FakeGateway implements SosoGateway {
     throw new Error('not used');
   }
   async votePost() {}
+  async unvotePost() {}
   async reportPost() {}
   async setFriendTier() {}
   async myZones() {
@@ -127,6 +128,9 @@ class FakeGateway implements SosoGateway {
     return () => {};
   }
   subscribePostUpdated() {
+    return () => {};
+  }
+  subscribeNewPost() {
     return () => {};
   }
   subscribeFollowsChanged() {

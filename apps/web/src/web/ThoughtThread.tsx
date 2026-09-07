@@ -46,8 +46,6 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
-  const [liked, setLiked] = useState(false);
-  const [confirmCount, setConfirmCount] = useState(post.confirmCount);
   const [voting, setVoting] = useState(false);
   const [voteError, setVoteError] = useState<string | null>(null);
 
@@ -128,22 +126,30 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
     }
   }
 
+  // `post.liked`/`post.confirmCount` come from the server (post_detail,
+  // backed by post_votes) rather than component-local state, so a like
+  // made here is what a reopened thread — or the feed card behind it, via
+  // onPostChanged below — shows on its next load, and a second tap undoes
+  // it instead of re-casting the same vote (votePost is an upsert with no
+  // "remove" of its own; unvotePost is that operation).
   async function toggleLike() {
     if (voting || post.mine) return;
     setVoting(true);
     setVoteError(null);
-    const next = !liked;
+    const next = !post.liked;
     // Genuinely optimistic, unlike PinPreview's own vote button (which
     // waits for the server before showing anything) — the plan is
     // explicit about this one specifically: "toggle immediately,
     // reconcile on response, roll back on error."
-    setLiked(next);
-    setConfirmCount((c) => c + (next ? 1 : -1));
+    onPostChanged({ ...post, liked: next, confirmCount: post.confirmCount + (next ? 1 : -1) });
     try {
-      await gateway.votePost(post.id, 1);
+      if (next) {
+        await gateway.votePost(post.id, 1);
+      } else {
+        await gateway.unvotePost(post.id);
+      }
     } catch (err) {
-      setLiked(!next);
-      setConfirmCount((c) => c - (next ? 1 : -1));
+      onPostChanged(post);
       const code = (err as { code?: string }).code;
       setVoteError(code === "soso/cannot_vote_own" ? "That's your own post." : "Couldn't send that — try again.");
     } finally {
@@ -208,14 +214,14 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
             <div className="feed-card-actions">
               <button
                 type="button"
-                className={`feed-action feed-action-like ${liked ? "active" : ""}`}
+                className={`feed-action feed-action-like ${post.liked ? "active" : ""}`}
                 disabled={voting || post.mine}
                 onClick={() => void toggleLike()}
-                aria-pressed={liked}
-                aria-label={liked ? "Undo like" : "Like"}
+                aria-pressed={post.liked}
+                aria-label={post.liked ? "Undo like" : "Like"}
               >
-                <Icon src={liked ? ICONS.heartFilled : ICONS.heart} size={22} />
-                {confirmCount > 0 && <span>{confirmCount}</span>}
+                <Icon src={post.liked ? ICONS.heartFilled : ICONS.heart} size={22} />
+                {post.confirmCount > 0 && <span>{post.confirmCount}</span>}
               </button>
               <span className="feed-action" aria-label={`${post.replyCount} replies`}>
                 <Icon src={ICONS.comment} size={22} />

@@ -178,6 +178,15 @@ export interface PostDetail extends Pin {
   author: { id: string; handle: string; displayName: string };
   media: { objectKey: string; width: number; height: number }[];
   replyCount: number;
+  /**
+   * Whether the signed-in user has already cast a "still valid"
+   * corroboration (`vote_post(id, 1)`) on this post — persisted server-side
+   * in `post_votes`, not a per-session guess. Drives the like button's
+   * filled/outline state across a refresh, and is what makes a second tap
+   * (`unvotePost`) mean "undo" instead of silently re-casting the same
+   * vote.
+   */
+  liked: boolean;
 }
 
 /** `post_detail` response: a pin plus the fields the pin deliberately omits. */
@@ -190,6 +199,7 @@ export interface WirePostDetail extends WirePin {
   author: { id: string; handle: string; name: string };
   media: { key: string; w: number; h: number }[];
   replies: number;
+  liked: boolean;
 }
 
 export function decodePostDetail(w: WirePostDetail): PostDetail {
@@ -203,6 +213,7 @@ export function decodePostDetail(w: WirePostDetail): PostDetail {
     author: { id: w.author.id, handle: w.author.handle, displayName: w.author.name },
     media: (w.media ?? []).map((m) => ({ objectKey: m.key, width: m.w, height: m.h })),
     replyCount: w.replies,
+    liked: w.liked,
   };
 }
 

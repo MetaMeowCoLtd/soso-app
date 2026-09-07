@@ -100,6 +100,15 @@ export interface SosoGateway {
    */
   votePost(postId: string, vote: 1 | -1): Promise<void>;
 
+  /**
+   * Removes the caller's own vote (either direction) from a post — a
+   * no-op, not an error, if there wasn't one. `votePost` is an upsert and
+   * has no way to express "take my vote back"; this is that operation.
+   * `PostDetail.liked` is what tells a caller whether there's a vote here
+   * to remove in the first place.
+   */
+  unvotePost(postId: string): Promise<void>;
+
   reportPost(postId: string, reason: ReportReason, detail?: string): Promise<void>;
 
   /**
@@ -266,6 +275,17 @@ export interface SosoGateway {
    * trust any other field off the realtime payload.
    */
   subscribePostUpdated(onChanged: (postId: string) => void): () => void;
+
+  /**
+   * Fires only when a brand-new post appears — an INSERT into `posts`,
+   * nothing else. This is the narrow signal the feed's "New posts" banner
+   * needs and `subscribePostsChanged` cannot give it: that one fires on
+   * every UPDATE too (a vote, a reply count bumping), which is exactly
+   * right for the map's own incremental refresh but was WRONG for a
+   * banner that is supposed to mean "something you don't have yet
+   * exists" — a like on a post already on screen was setting it off.
+   */
+  subscribeNewPost(onNew: () => void): () => void;
 
   /** Fires when any follows row involving the caller changes. */
   subscribeFollowsChanged(onChange: () => void): () => void;
