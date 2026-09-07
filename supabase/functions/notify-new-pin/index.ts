@@ -53,6 +53,11 @@
 //   2. supabase functions deploy notify-new-pin --no-verify-jwt
 //   3. Create a Database Webhook for INSERTs on public.posts which invokes
 //      this function and has "Add auth header with service key" enabled.
+//      Optional siblings, same function, same header, different table (see
+//      the README's Setup steps 4b-4d): post_votes, post_replies,
+//      dm_messages. handleDmMessage below is the one that also embeds a
+//      decryptable preview — see the README's "DM notification previews"
+//      for why that's safe under this app's end-to-end encryption.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3";
@@ -181,6 +186,44 @@ function parseReplyPayload(value: unknown): ReplyPayload | null {
   return { post_id: r.post_id, author_id: r.author_id };
 }
 
+interface DmMessagePayload {
+  message_id: string;
+  thread_id: string;
+  sender_id: string;
+  ciphertext: string;
+  iv: string;
+}
+
+/**
+ * `dm_messages` carries no plaintext, ever — see 20260907000026's own module
+ * comment. What this function embeds in the push payload below (ciphertext,
+ * iv, and the sender's PUBLIC key) is the same set of values `list_dm_messages`
+ * and `dm_public_key_of` already hand back to the recipient's own client;
+ * nothing here is new disclosure, only a copy of it routed through a push
+ * message so the recipient's service worker can decrypt a preview locally
+ * (see apps/web/public/sw.js) instead of on this server.
+ */
+function parseDmMessagePayload(value: unknown): DmMessagePayload | null {
+  if (!isRecord(value) || value.type !== "INSERT" || !isRecord(value.record)) return null;
+  const r = value.record;
+  if (
+    typeof r.id !== "string" ||
+    typeof r.thread_id !== "string" ||
+    typeof r.sender_id !== "string" ||
+    typeof r.ciphertext !== "string" ||
+    typeof r.iv !== "string"
+  ) {
+    return null;
+  }
+  return {
+    message_id: r.id,
+    thread_id: r.thread_id,
+    sender_id: r.sender_id,
+    ciphertext: r.ciphertext,
+    iv: r.iv,
+  };
+}
+
 /**
  * Shared by both handlePostVote and handlePostReply below: who actually
  * gets notified, and whether they should be at all. Looked up fresh per
@@ -305,6 +348,133 @@ async function handlePostReply(
 
   const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
   console.log("[notify-new-pin] reply notification complete", { postId: payload.post_id, ...result });
+  return new Response(JSON.stringify(result), { status: 200 });
+}
+
+/**
+ * Max bytes of the JSON string handed to web-push's own encryption layer
+ * for a DM notification. Web Push's practical ceiling on the final,
+ * service-provider-encrypted payload is roughly 4KB, the library's own
+ * encryption adds overhead on top of whatever is passed in here, and
+ * `dm_messages.ciphertext` alone is allowed up to 6000 base64 characters
+ * by that column's own check constraint (see 20260907000026). A message
+ * near that ceiling simply cannot be embedded — this always degrades to
+ * the generic body below rather than risking a push a provider silently
+ * drops, which this function would have no way to learn about.
+ */
+const DM_RICH_PAYLOAD_LIMIT = 3000;
+
+async function handleDmMessage(
+  supabase: ReturnType<typeof createClient>,
+  rawPayload: unknown,
+): Promise<Response> {
+  const payload = parseDmMessagePayload(rawPayload);
+  if (!payload) {
+    console.error("[notify-new-pin] unexpected dm_messages payload", rawPayload);
+    return new Response("Bad request", { status: 400 });
+  }
+
+  if (!VAPID_CONFIGURED) {
+    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
+  }
+
+  const { data: thread, error: threadError } = await supabase
+    .from("dm_threads")
+    .select("user_low, user_high")
+    .eq("id", payload.thread_id)
+    .maybeSingle();
+
+  if (threadError) {
+    console.error("[notify-new-pin] dm_threads lookup failed:", threadError);
+    return new Response("Internal error", { status: 500 });
+  }
+  if (!thread) {
+    return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
+  }
+
+  const recipientId = thread.user_low === payload.sender_id ? thread.user_high : thread.user_low;
+  // Cannot currently happen — send_dm never inserts a message whose sender
+  // isn't one side of its own thread — but costs one comparison and avoids
+  // ever notifying the sender about their own message if that ever changed.
+  if (recipientId === payload.sender_id) {
+    return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
+  }
+
+  // Re-checked directly against the table rather than trusted from send_dm's
+  // own moment-of-send check: a block can land in the window between the
+  // insert this webhook fired for and this function actually running, and a
+  // push notification is exactly the kind of contact a block exists to end
+  // immediately, not just new messages arriving in the thread view.
+  const { data: blockRow, error: blockError } = await supabase
+    .from("blocks")
+    .select("blocker_id")
+    .or(
+      `and(blocker_id.eq.${recipientId},blocked_id.eq.${payload.sender_id}),` +
+        `and(blocker_id.eq.${payload.sender_id},blocked_id.eq.${recipientId})`,
+    )
+    .maybeSingle();
+
+  if (blockError) {
+    console.error("[notify-new-pin] blocks lookup failed:", blockError);
+    return new Response("Internal error", { status: 500 });
+  }
+  if (blockRow) {
+    return new Response(JSON.stringify({ sent: 0, reason: "blocked" }), { status: 200 });
+  }
+
+  const [{ data: sender }, { data: senderKey }, { data: endpoints, error: endpointsError }] = await Promise.all([
+    supabase.from("profiles").select("display_name").eq("id", payload.sender_id).maybeSingle(),
+    supabase.from("user_keys").select("public_key").eq("user_id", payload.sender_id).maybeSingle(),
+    supabase.from("push_endpoints").select("endpoint, p256dh, auth").eq("user_id", recipientId),
+  ]);
+
+  if (endpointsError) {
+    console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
+    return new Response("Internal error", { status: 500 });
+  }
+
+  const senderName = sender?.display_name ?? "Someone";
+
+  // Naming the sender here, unlike the anonymous "Someone liked your post"
+  // bodies above, discloses nothing new: DMs only exist between mutual
+  // follows, and the inbox already shows this exact name the instant it
+  // loads. This is also the fallback body when the rich payload below
+  // doesn't fit or there's no key to decrypt with — real messengers under
+  // E2EE (Signal included) fall back to exactly this, not to full anonymity.
+  const genericBody = JSON.stringify({
+    title: "SoSo",
+    body: `${senderName} sent you a message`,
+    dmSenderId: payload.sender_id,
+  });
+
+  // The rich payload additionally lets the recipient's own service worker
+  // decrypt an actual preview locally (see apps/web/public/sw.js) — this
+  // function and anyone who intercepted the request still only ever see
+  // ciphertext. senderPublicKey is not secret: it's the same value
+  // `dm_public_key_of` already hands to any mutual follow.
+  const richBody = JSON.stringify({
+    title: "SoSo",
+    body: `${senderName} sent you a message`,
+    dmSenderId: payload.sender_id,
+    dm: {
+      ciphertext: payload.ciphertext,
+      iv: payload.iv,
+      threadId: payload.thread_id,
+      senderId: payload.sender_id,
+      senderName,
+      senderPublicKey: senderKey?.public_key,
+    },
+  });
+
+  const canEmbed = Boolean(senderKey?.public_key) && richBody.length <= DM_RICH_PAYLOAD_LIMIT;
+  const notificationBody = canEmbed ? richBody : genericBody;
+
+  const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
+  console.log("[notify-new-pin] dm notification complete", {
+    threadId: payload.thread_id,
+    rich: canEmbed,
+    ...result,
+  });
   return new Response(JSON.stringify(result), { status: 200 });
 }
 
@@ -448,6 +618,9 @@ Deno.serve(async (req: Request) => {
   }
   if (isRecord(rawPayload) && rawPayload.table === "post_replies") {
     return await handlePostReply(supabase, rawPayload);
+  }
+  if (isRecord(rawPayload) && rawPayload.table === "dm_messages") {
+    return await handleDmMessage(supabase, rawPayload);
   }
 
   const payload = parsePostPayload(rawPayload);

@@ -187,7 +187,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
     // Both entry points into a conversation have to do this, not just the
     // inbox: without our public key published, everything sent from here is
     // undecryptable for the person receiving it.
-    void ensurePublishedKey(gateway).catch(() => {});
+    void ensurePublishedKey(gateway, myId).catch(() => {});
     void reload();
     void gateway.markDmRead(thread.id).catch(() => {});
 

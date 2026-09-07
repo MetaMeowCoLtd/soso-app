@@ -538,6 +538,25 @@ None of the following occurs automatically from a `git push`.
     post. Skip either (or both) if that's not wanted; nothing else depends
     on them existing.
 
+4d. **Create a fourth Database Webhook, for direct messages.** Same
+    function, same secret header, and it reuses the pin-alert bell: opening
+    the DM inbox or a friend's Message button publishes a key and, as a
+    side effect of the same `subscribe_to_push`/`push_endpoints` mechanism
+    above, opts that browser into DM push once the bell is on — there is no
+    separate DM notification toggle.
+
+    - Name: `notify-dm-message`
+    - Table: `public.dm_messages`
+    - Events: **Insert** only
+    - Type: **Supabase Edge Function**
+    - Edge Function: `notify-new-pin` (the same one)
+    - HTTP header: identical to step 4, `x-push-secret` with the same value
+
+    See [DM notification previews](#dm-notification-previews) below for why
+    this one gets a message preview when the like/reply ones deliberately
+    don't, and how that's done without the server ever reading a plaintext
+    message. Also optional — skip it and DMs still work, just silently.
+
 5. **Provide the client with the public key.** This value is safe to
    expose; that is the purpose of a VAPID public key. Add it to
    `apps/web/.env.local` for local development and as a repository variable
@@ -599,7 +618,68 @@ through as a URL parameter when opening a new window, and sends a
 by itself change what it is showing. Once open, the app strips the
 parameter from the address bar immediately, so refreshing the page — or
 someone else opening a shared link — does not keep reopening the same
-post.
+post. A DM notification does the same with a `?dm=<senderId>` parameter and
+an `open-dm` `postMessage`, landing on the conversation with that sender
+(`openDm` finds-or-creates it, the same lookup People's own Message button
+uses) rather than a specific message.
+
+### DM notification previews
+
+Every other notification in this app is deliberately anonymous —
+"Someone liked your post," "New reply on your post" — because the server
+holds the plaintext and chose not to say it. A DM notification cannot use
+that excuse: [Direct messages](#direct-messages) below means the server
+*never has* the plaintext to withhold. Showing "Alex: see you at 6?" the
+way Messenger or Instagram does — the explicit ask this feature was built
+to satisfy — meant finding a way to produce that preview without the
+server ever decrypting anything, not relaxing the no-plaintext rule.
+
+**What actually happens:** `notify-new-pin`'s DM handler embeds the raw
+materials for decryption in the push payload — the message's ciphertext
+and IV (already sitting in `dm_messages`, unchanged) and the sender's
+*public* key (already handed to any mutual follow by `dm_public_key_of`).
+None of that is new disclosure; it's the same values the recipient's own
+client already fetches to render the thread on screen, just riding along
+on the push instead. The server still never calls `crypto.subtle.decrypt`
+on anything. Only `apps/web/public/sw.js`'s own `push` handler does that,
+inside the recipient's browser, using the recipient's private key — which
+still never leaves that browser's IndexedDB (see
+[Direct messages](#direct-messages) for why it lives there rather than in
+`localStorage`). That handler is a hand-copied twin of
+`packages/core/src/domain/dm-crypto.ts`'s ECDH/HKDF/AES-GCM composition,
+duplicated rather than imported only because a classic (non-module)
+service worker — required for Safari, which has never shipped module
+service workers — cannot `import` from anywhere. If that algorithm ever
+changes, both copies need to change together, or a message this device can
+read on screen would inexplicably fail to preview.
+
+**A service worker's own limitation forced one extra piece of state.**
+Deriving the per-thread key needs this device's own user id, and a service
+worker can read IndexedDB but not `localStorage`, where the Supabase
+session (and therefore the signed-in user's id) normally lives. So
+`ensurePublishedKey` — already the one function guaranteed to run on every
+path into a conversation — now also writes the current user's own id into
+the same `soso-dm` IndexedDB database the private key lives in, under a
+`my-user-id` record. Not secret; just otherwise unreachable from a push
+handler with no live app session to ask.
+
+**This degrades, it doesn't fail.** If the ciphertext won't fit in a push
+message (Web Push's practical ceiling is roughly 4KB, and `dm_messages`
+allows up to 6000 base64 characters of ciphertext), if the sender never
+published a key, or if local decryption throws for any reason at all
+(wrong device, rotated key, corrupted payload), the notification still
+shows — just as "Alex sent you a message" instead of the actual text. That
+fallback names the sender rather than staying fully anonymous, unlike the
+like/reply notifications: DMs only exist between mutual follows, and the
+name is already the first thing the inbox shows, so it discloses nothing
+a push notification is introducing for the first time.
+
+**Not verified end-to-end**, the same caveat as the rest of this feature
+(see the UNVERIFIED comment at the top of `notify-new-pin/index.ts`):
+nothing in this sandbox can trigger a real push or run a real service
+worker against a live subscription, so the crypto here is confirmed
+algorithm-for-algorithm identical to the tested, on-screen path, not
+confirmed to actually decrypt a real notification on a real device.
 
 ## Early resolution
 

@@ -37,6 +37,8 @@ const DB_NAME = "soso-dm";
 const DB_VERSION = 1;
 const STORE = "keys";
 const SELF_ID = "self";
+/** See `rememberSelfUserId` below for why this lives in the same store as the key itself. */
+const MY_USER_ID_RECORD = "my-user-id";
 
 interface StoredKeys {
   id: string;
@@ -44,6 +46,11 @@ interface StoredKeys {
   privateKey: CryptoKey;
   /** Base64 SPKI — the half that gets published to the server. */
   publicKeySpki: string;
+}
+
+interface StoredSelfUserId {
+  id: string;
+  userId: string;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -59,15 +66,19 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-function idbGet(db: IDBDatabase, id: string): Promise<StoredKeys | undefined> {
+// Generic over the record shape rather than one pair per record kind this
+// store holds (the key pair, and now the plain user-id record below) — the
+// underlying IndexedDB operation genuinely doesn't care what's in the
+// object, only that it carries the store's own keyPath.
+function idbGet<T>(db: IDBDatabase, id: string): Promise<T | undefined> {
   return new Promise((resolve, reject) => {
     const request = db.transaction(STORE, "readonly").objectStore(STORE).get(id);
-    request.onsuccess = () => resolve(request.result as StoredKeys | undefined);
+    request.onsuccess = () => resolve(request.result as T | undefined);
     request.onerror = () => reject(request.error);
   });
 }
 
-function idbPut(db: IDBDatabase, value: StoredKeys): Promise<void> {
+function idbPut<T extends { id: string }>(db: IDBDatabase, value: T): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = db.transaction(STORE, "readwrite").objectStore(STORE).put(value);
     request.onsuccess = () => resolve();
@@ -89,7 +100,7 @@ export function getSelfKeys(): Promise<StoredKeys> {
 
   selfPromise = (async () => {
     const db = await openDb();
-    const existing = await idbGet(db, SELF_ID);
+    const existing = await idbGet<StoredKeys>(db, SELF_ID);
     if (existing) return existing;
 
     const pair = await generateDmKeyPair();
@@ -103,6 +114,23 @@ export function getSelfKeys(): Promise<StoredKeys> {
   })();
 
   return selfPromise;
+}
+
+/**
+ * Remembers this account's own id in the same IndexedDB database the
+ * private key lives in. Not because the id is secret — it isn't — but
+ * because of WHERE it needs to be readable from without a live app session
+ * to ask: the service worker's own `push` handler (see sw.js), decrypting
+ * a notification's ciphertext on-device before ever showing it. Deriving
+ * that thread key needs both participants' ids to bind it to this specific
+ * pair (see `deriveThreadKey`'s own comment in packages/core), and a
+ * service worker has no signed-in session of its own — the Supabase auth
+ * session lives in `localStorage`, which a service worker cannot read at
+ * all, only IndexedDB.
+ */
+async function rememberSelfUserId(userId: string): Promise<void> {
+  const db = await openDb();
+  await idbPut<StoredSelfUserId>(db, { id: MY_USER_ID_RECORD, userId });
 }
 
 /**
@@ -131,7 +159,10 @@ export async function threadKeyFor(
 let publishing: Promise<void> | null = null;
 
 /**
- * Publishes this device's public key, once per session.
+ * Publishes this device's public key, once per session, and records
+ * `myUserId` alongside it (see `rememberSelfUserId`'s own comment on why
+ * that needs to live here too — the service worker's local-decryption path
+ * for notification previews reads it from the same place).
  *
  * Must be called on EVERY path into a conversation, not just the one that
  * happens to list them. The asymmetry is easy to miss and the failure is
@@ -146,10 +177,13 @@ let publishing: Promise<void> | null = null;
  * Cleared on failure so a later attempt retries rather than caching a
  * rejection for the rest of the session.
  */
-export function ensurePublishedKey(gateway: SosoGateway): Promise<void> {
+export function ensurePublishedKey(gateway: SosoGateway, myUserId: string): Promise<void> {
   if (!publishing) {
-    publishing = getSelfKeys()
-      .then((keys) => gateway.publishUserKey(keys.publicKeySpki))
+    publishing = Promise.all([
+      getSelfKeys().then((keys) => gateway.publishUserKey(keys.publicKeySpki)),
+      rememberSelfUserId(myUserId),
+    ])
+      .then(() => undefined)
       .catch((err) => {
         publishing = null;
         throw err;

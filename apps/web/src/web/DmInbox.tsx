@@ -85,7 +85,7 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refresh
 
     // Publish this device's public key before listing, so that by the time
     // anyone looks at their friends list this account is messageable.
-    void ensurePublishedKey(gateway)
+    void ensurePublishedKey(gateway, myId)
       .catch(() => {})
       .then(() => reload());
 

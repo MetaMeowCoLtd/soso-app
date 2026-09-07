@@ -376,11 +376,20 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
    */
   async function openDm(userId: string) {
     setDmError(null);
+    // Can genuinely be null here: this is also the landing point for a
+    // push notification's deep link (see the `?dm=` and `open-dm` handling
+    // below), which can fire before usePresence's own myProfile() fetch
+    // has resolved on a cold app start.
+    const myId = presence.me?.id;
+    if (!myId) {
+      setDmError("Still setting up your account — try again in a moment.");
+      return;
+    }
     try {
       // Publishing our own key is what makes messages sent from here
       // readable by the recipient — see ensurePublishedKey. Not fatal if it
       // fails; the conversation still opens and the next attempt retries.
-      await ensurePublishedKey(gateway).catch(() => {});
+      await ensurePublishedKey(gateway, myId).catch(() => {});
       const thread = await gateway.openDmThread(userId);
       setDmThread(thread);
     } catch (err) {
@@ -560,13 +569,25 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const postId = params.get("post");
+    // The sender's user id, not a thread id — a DM push carries whoever
+    // sent it, and `openDm` already does the exact "find or create the one
+    // thread with this person" lookup that opening a friend's row in
+    // People does, so this deep link reuses that verbatim rather than
+    // needing its own thread-by-id path.
+    const dmSenderId = params.get("dm");
     if (postId) {
       void openPostById(postId);
-      // Strip the param immediately rather than leaving it in the address
-      // bar — otherwise reloading the page (or sharing the URL) would keep
-      // reopening the same post indefinitely.
+    }
+    if (dmSenderId) {
+      void openDm(dmSenderId);
+    }
+    if (postId || dmSenderId) {
+      // Stripped immediately rather than left in the address bar —
+      // otherwise reloading the page (or sharing the URL) would keep
+      // reopening the same post or thread indefinitely.
       const url = new URL(window.location.href);
       url.searchParams.delete("post");
+      url.searchParams.delete("dm");
       window.history.replaceState({}, "", url.toString());
     }
 
@@ -575,6 +596,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     function onMessage(event: MessageEvent) {
       if (event.data?.type === "open-post" && typeof event.data.postId === "string") {
         void openPostById(event.data.postId);
+      }
+      if (event.data?.type === "open-dm" && typeof event.data.dmSenderId === "string") {
+        void openDm(event.data.dmSenderId);
       }
     }
     navigator.serviceWorker?.addEventListener("message", onMessage);
