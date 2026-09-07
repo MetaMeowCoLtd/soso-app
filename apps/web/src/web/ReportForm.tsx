@@ -11,6 +11,7 @@ import {
   type Pin,
 } from "soso-core";
 import { lookOf } from "./theme";
+import { COIN_ICON, Icon, ICONS, ImageIcon } from "./Icon";
 import { toLngLat, type Coordinates } from "./region";
 import type { PostAudience } from "soso-core";
 
@@ -174,12 +175,14 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
   return (
     <div className="quick-composer">
       <button className="composer-close" onClick={onCancel} aria-label="Close pin composer" type="button">
-        ×
+        <Icon src={ICONS.close} size={16} />
       </button>
 
       {step === "category" && (
         <>
-          <p className="composer-kicker">✦ Pin dropped</p>
+          <p className="composer-kicker">
+            <Icon src={ICONS.sparkle} size={13} /> Pin dropped
+          </p>
           <h2>What&rsquo;s here?</h2>
           <div className="category-launcher">
             {categories.map((c, i) => {
@@ -192,7 +195,9 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
                   style={{ "--pop-delay": `${i * 55}ms`, "--pin-color": look.color } as CSSProperties}
                   onClick={() => pickCategory(c)}
                 >
-                  <span className="category-launcher-icon">{look.icon}</span>
+                  <span className="category-launcher-icon">
+                    <Icon src={look.icon} size={26} />
+                  </span>
                   <span className="category-launcher-label">{c.labelEn}</span>
                 </button>
               );
@@ -211,11 +216,11 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
               setCategoryKey(null);
             }}
           >
-            ‹ change type
+            <Icon src={ICONS.chevronLeft} size={13} /> change type
           </button>
 
           <p className="composer-kicker" style={{ color: lookOf(category.key).color }}>
-            {lookOf(category.key).icon} {category.labelEn}
+            <Icon src={lookOf(category.key).icon} size={15} /> {category.labelEn}
           </p>
           <h2>Add a bit more?</h2>
           <p className="composer-hint">
@@ -303,11 +308,14 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
 
           <div className="composer-footer">
             <span>
-              📍 {location.latitude.toFixed(3)}, {location.longitude.toFixed(3)}
+              <Icon src={ICONS.place} size={13} /> {location.latitude.toFixed(3)}, {location.longitude.toFixed(3)}
               {/* Shown even when affordable — the cost should be visible
                   before someone commits to filling out the rest of the
                   form, not just when it's the reason they're blocked. */}
-              <span className="composer-cost"> · costs {POST_PIN_COST} 🪙</span>
+              <span className="composer-cost">
+                {" "}
+                · costs {POST_PIN_COST} <ImageIcon src={COIN_ICON} size={13} />
+              </span>
             </span>
             <button
               className="share-button"

@@ -2,6 +2,7 @@
 
 import { formatAgo, formatCountdown, type CategoryConfig, type Pin } from "soso-core";
 import { lookOf } from "./theme";
+import { Icon } from "./Icon";
 
 /**
  * The list.
@@ -42,7 +43,7 @@ export default function ReportList({ pins, categories, selectedId, nowSeconds, o
             type="button"
           >
             <span className="report-icon" style={{ backgroundColor: look.color }} aria-hidden="true">
-              {look.icon}
+              <Icon src={look.icon} size={17} />
             </span>
             <span className="report-main">
               <span className="report-meta">

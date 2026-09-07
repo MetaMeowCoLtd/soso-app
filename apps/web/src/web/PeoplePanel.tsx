@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatAgo } from "soso-core";
+import { Icon, ICONS } from "./Icon";
 import type { UsePresenceResult } from "./usePresence";
 
 /**
@@ -140,9 +141,7 @@ export default function PeoplePanel({ presence, demoMode, minimized, onMinimize 
         >
           {/* A minimize dash rather than a close "×" — the glyph itself
               should say "this collapses," not "this goes away." */}
-          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-            <rect x="1" y="5.25" width="10" height="1.5" rx=".75" fill="currentColor" />
-          </svg>
+          <Icon src={ICONS.minimize} size={10} />
         </button>
       </div>
 
@@ -217,7 +216,7 @@ export default function PeoplePanel({ presence, demoMode, minimized, onMinimize 
                         : "Mark as close friend"
                     }
                   >
-                    {friend.tier === "close" ? "★" : "☆"}
+                    <Icon src={friend.tier === "close" ? ICONS.starFilled : ICONS.star} size={15} />
                   </button>
                   <span className="friend-menu">
                     <button
@@ -230,7 +229,7 @@ export default function PeoplePanel({ presence, demoMode, minimized, onMinimize 
                       aria-expanded={openMenu === friend.id}
                       aria-label={`More options for ${friend.displayName}`}
                     >
-                      ⋯
+                      <Icon src={ICONS.more} size={15} />
                     </button>
                     {openMenu === friend.id &&
                       menuPos &&

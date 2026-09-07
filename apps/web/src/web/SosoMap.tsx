@@ -6,6 +6,7 @@ import { setWorkerUrl, type Map as MaplibreMap } from "maplibre-gl";
 import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
 import { Circle, MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import { cellCentre, pinOpacity, pinSaturation, viewMode, type CellCount, type FeedView, type Pin } from "soso-core";
+import { ICONS, iconStyleAttr } from "./Icon";
 import { lookOf } from "./theme";
 import { loadCuteMapStyle } from "./mapStyle";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, leafletBoundsToBounds, type Coordinates } from "./region";
@@ -634,7 +635,7 @@ function FlyToSignal({ signal }: { signal: { at: Coordinates; id: number } | nul
 
 const draftIcon = L.divIcon({
   className: "soso-pin-shell",
-  html: '<span class="draft-pin"><span>+</span></span>',
+  html: `<span class="draft-pin"><span class="soso-pin-glyph icon" style="${iconStyleAttr(ICONS.plus, 17)}"></span></span>`,
   iconSize: [42, 42],
   iconAnchor: [21, 36],
 });
@@ -736,12 +737,20 @@ function pinIcon(pin: Pin, celebrate: boolean, opacity: number, saturation: numb
     `--pin-saturate:${saturation.toFixed(2)}`,
   ].join(";");
 
+  // A private pin gets a small lock marker. Without it, a friends-only post
+  // is visually identical to a public one, and the author has no way to
+  // confirm at a glance that what they shared narrowly stayed narrow. It is
+  // an element rather than the CSS `content:"\1F512"` it used to be, for the
+  // same reason the category glyph beside it is no longer an emoji (see
+  // Icon.tsx) — and because a relative icon path has to come from markup,
+  // not from a stylesheet that lives at a different depth.
+  const lock = pin.audience
+    ? `<span class="soso-pin-lock icon" style="${iconStyleAttr(ICONS.lock, 10)}"></span>`
+    : "";
+
   return L.divIcon({
     className: "soso-pin-shell",
-    // A private pin gets a small lock marker. Without it, a friends-only post
-    // is visually identical to a public one, and the author has no way to
-    // confirm at a glance that what they shared narrowly stayed narrow.
-    html: `<span class="soso-pin${celebrate ? " soso-pin-pop" : ""}${pin.audience ? " soso-pin-private" : ""}" style="${style}"><span>${look.icon}</span></span>`,
+    html: `<span class="soso-pin${celebrate ? " soso-pin-pop" : ""}${pin.audience ? " soso-pin-private" : ""}" style="${style}"><span class="soso-pin-glyph icon" style="${iconStyleAttr(look.icon, 21)}"></span>${lock}</span>`,
     iconSize: [48, 48],
     iconAnchor: [24, 42],
   });

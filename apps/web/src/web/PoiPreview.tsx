@@ -1,6 +1,7 @@
 "use client";
 
 import type { Coordinates } from "./region";
+import { Icon, ICONS } from "./Icon";
 
 export interface SelectedPoi {
   name: string;
@@ -29,11 +30,13 @@ export default function PoiPreview({ poi, onClose, onAddPin }: PoiPreviewProps) 
     <div className="poi-preview">
       <div className="pin-preview-head">
         <div>
-          <p className="composer-kicker pin-preview-kicker">📍 Place</p>
+          <p className="composer-kicker pin-preview-kicker">
+            <Icon src={ICONS.place} size={13} /> Place
+          </p>
           <p className="poi-preview-name">{poi.name}</p>
         </div>
         <button className="pin-preview-close" onClick={onClose} aria-label="Close" type="button">
-          ×
+          <Icon src={ICONS.close} size={15} />
         </button>
       </div>
 

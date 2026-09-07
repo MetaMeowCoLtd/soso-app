@@ -10,6 +10,7 @@ import {
   type PostDetail,
   type SosoGateway,
 } from "soso-core";
+import { COIN_ICON, ImageIcon } from "./Icon";
 
 interface ThoughtComposerProps {
   gateway: SosoGateway;
@@ -141,7 +142,10 @@ export default function ThoughtComposer({ gateway, coinBalance, onCancel, onPost
         </div>
 
         <p className="composer-meta">
-          Costs <strong>{POST_PIN_COST} 🪙</strong>
+          Costs{" "}
+          <strong>
+            {POST_PIN_COST} <ImageIcon src={COIN_ICON} size={13} />
+          </strong>
         </p>
 
         {(error || !canAfford) && (

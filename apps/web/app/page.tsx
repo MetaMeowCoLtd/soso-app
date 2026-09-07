@@ -13,10 +13,10 @@ import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeoplePanel from "@/src/web/PeoplePanel";
 import ChatPanel from "@/src/web/ChatPanel";
-import { PeopleIcon, BellIcon, ChatIcon, MapIcon, FeedIcon } from "@/src/web/icons";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { usePresence } from "@/src/web/usePresence";
 import { lookOf } from "@/src/web/theme";
+import { COIN_ICON, Icon, ICONS, ImageIcon } from "@/src/web/Icon";
 import { useCategories, useFeed, useNowSeconds } from "@/src/web/hooks";
 import { DEFAULT_CENTER, distanceMetres, leafletBoundsToBounds, nearbyCells, type Coordinates } from "@/src/web/region";
 import {
@@ -644,7 +644,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             <span>So</span>So
           </a>
           <div className="coin-badge" title="Coins — spent posting, earned by walking">
-            <span className="coin-badge-amount">🪙 {coinBalance ?? "…"}</span>
+            <span className="coin-badge-amount">
+              <ImageIcon src={COIN_ICON} size={15} /> {coinBalance ?? "…"}
+            </span>
             {/* DEV TOOL, not a real feature — see the migration and gateway
                 comments on debug_grant_coins for why this needs to be
                 removed or locked down before this app has real users. */}
@@ -668,7 +670,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           aria-pressed={showPeople}
           title="Friends"
         >
-          <PeopleIcon />
+          <Icon src={ICONS.people} size={20} />
           {presence.areaCount !== null && presence.areaCount > 0 && (
             <span className="people-count">{presence.areaCount}</span>
           )}
@@ -683,7 +685,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             aria-label={pushSubscribed ? "Turn off notifications" : "Get notified about pins near here"}
             title={pushSubscribed ? "Notifications on" : "Get notified about pins near here"}
           >
-            <BellIcon muted={!pushSubscribed} />
+            <Icon src={pushSubscribed ? ICONS.bell : ICONS.bellMuted} size={20} />
           </button>
         )}
       </header>
@@ -716,9 +718,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             aria-label="Jump to current location"
             aria-pressed={isAtMyLocation}
           >
-            <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true">
-              <path d="M12 2.5 3.5 20.5l8.5-4 8.5 4z" fill="currentColor" />
-            </svg>
+            <Icon src={ICONS.locate} size={21} />
           </button>
 
           <button
@@ -727,9 +727,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             type="button"
             aria-label="Drop a pin here"
           >
-            <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
+            <Icon src={ICONS.plus} size={26} />
           </button>
         </div>
       )}
@@ -927,7 +925,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             className={`tab-bar-button${activeTab === "map" ? " active" : ""}`}
             onClick={() => setActiveTab("map")}
           >
-            <MapIcon />
+            <Icon src={ICONS.map} size={21} />
             <span>Map</span>
           </button>
           <button
@@ -937,7 +935,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             className={`tab-bar-button${activeTab === "feed" ? " active" : ""}`}
             onClick={() => setActiveTab("feed")}
           >
-            <FeedIcon />
+            <Icon src={ICONS.feed} size={21} />
             <span>Feed</span>
           </button>
           <button
@@ -947,7 +945,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
             className={`tab-bar-button${activeTab === "chat" ? " active" : ""}`}
             onClick={() => setActiveTab("chat")}
           >
-            <ChatIcon />
+            <Icon src={ICONS.chat} size={21} />
             <span>Chat</span>
           </button>
         </nav>

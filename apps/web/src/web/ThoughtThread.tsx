@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ERROR_MESSAGES_EN, formatAgoShort, type PostDetail, type PostReply, type ReportReason, type SosoGateway } from "soso-core";
-import { CommentIcon, HeartIcon } from "./icons";
+import { Icon, ICONS } from "./Icon";
 
 interface ThoughtThreadProps {
   post: PostDetail;
@@ -182,7 +182,7 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
     <div className="thought-thread" role="dialog" aria-modal="true" aria-label="Post">
       <header className="thought-thread-head">
         <button type="button" className="thought-thread-close" onClick={onClose} aria-label="Close">
-          ✕
+          <Icon src={ICONS.close} size={15} />
         </button>
         <strong>Post</strong>
         <span />
@@ -214,11 +214,11 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
                 aria-pressed={liked}
                 aria-label={liked ? "Undo like" : "Like"}
               >
-                <HeartIcon filled={liked} />
+                <Icon src={liked ? ICONS.heartFilled : ICONS.heart} size={22} />
                 {confirmCount > 0 && <span>{confirmCount}</span>}
               </button>
               <span className="feed-action" aria-label={`${post.replyCount} replies`}>
-                <CommentIcon />
+                <Icon src={ICONS.comment} size={22} />
                 {post.replyCount > 0 && <span>{post.replyCount}</span>}
               </span>
             </div>
@@ -317,7 +317,7 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
                         onClick={() => void removeReply(r.id)}
                         aria-label="Delete reply"
                       >
-                        ✕
+                        <Icon src={ICONS.close} size={10} />
                       </button>
                     )}
                   </div>
@@ -347,9 +347,7 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
           aria-label="Reply"
         />
         <button className="chat-send" type="submit" disabled={sending || input.trim().length === 0} aria-label="Send">
-          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 10h13M10 3l7 7-7 7" />
-          </svg>
+          <Icon src={ICONS.send} size={16} />
         </button>
       </form>
     </div>

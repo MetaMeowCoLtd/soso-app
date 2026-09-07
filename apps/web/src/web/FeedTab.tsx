@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { formatAgoShort, type Pin, type PostDetail, type SosoGateway } from "soso-core";
 import { useFeedPosts } from "./hooks";
-import { CommentIcon, HeartIcon } from "./icons";
+import { Icon, ICONS } from "./Icon";
 import ThoughtComposer from "./ThoughtComposer";
 
 interface FeedTabProps {
@@ -99,9 +99,7 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, on
           auto-insert is to leave the reading position alone. */}
       {hasNewPosts && (
         <button type="button" className="feed-tab-new-banner" onClick={refresh}>
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
-          </svg>
+          <Icon src={ICONS.arrowUp} size={13} />
           New posts
         </button>
       )}
@@ -146,7 +144,7 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, on
       )}
 
       <button type="button" className="feed-tab-fab" onClick={() => setComposing(true)} aria-label="New post">
-        +
+        <Icon src={ICONS.plus} size={24} />
       </button>
 
       {composing && (
@@ -283,11 +281,11 @@ function FeedCard({
             aria-pressed={liked}
             aria-label={liked ? "Undo like" : "Like"}
           >
-            <HeartIcon filled={liked} />
+            <Icon src={liked ? ICONS.heartFilled : ICONS.heart} size={22} />
             {post.confirmCount > 0 && <span>{post.confirmCount}</span>}
           </button>
           <button type="button" className="feed-action" onClick={onOpen} aria-label="Replies">
-            <CommentIcon />
+            <Icon src={ICONS.comment} size={22} />
             {post.replyCount > 0 && <span>{post.replyCount}</span>}
           </button>
         </div>

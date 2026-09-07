@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Pin, SosoGateway } from "soso-core";
-import { EraserIcon, RedoIcon, UndoIcon } from "./icons";
+import { Icon, ICONS } from "./Icon";
 import {
   BOARD_BRUSH_SIZE_MAX,
   BOARD_BRUSH_SIZE_MIN,
@@ -219,7 +219,7 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
             aria-label="Undo"
             title="Undo"
           >
-            <UndoIcon />
+            <Icon src={ICONS.undo} size={20} />
           </button>
           <button
             type="button"
@@ -229,7 +229,7 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
             aria-label="Redo"
             title="Redo"
           >
-            <RedoIcon />
+            <Icon src={ICONS.redo} size={20} />
           </button>
         </div>
         {/*
@@ -327,7 +327,7 @@ export default function BoardCanvas({ pin, title, gateway, onClose }: BoardCanva
               session.setTool((tool) => ({ ...tool, mode: "erase", size: Math.max(tool.size, DEFAULT_ERASER_SIZE) }))
             }
           >
-            <EraserIcon />
+            <Icon src={ICONS.eraser} size={20} />
           </button>
         </div>
       </footer>

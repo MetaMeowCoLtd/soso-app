@@ -10,6 +10,7 @@ import {
   type PostDetail,
   type ReportReason,
 } from "soso-core";
+import { Icon, ICONS } from "./Icon";
 import { lookOf } from "./theme";
 
 /**
@@ -128,12 +129,12 @@ export default function PinPreview({
       <div className="pin-preview-head">
         <div>
           <p className="composer-kicker pin-preview-kicker" style={{ color: look.color }}>
-            {look.icon} {subtype?.labelEn ?? category?.labelEn ?? pin.category}
+            <Icon src={look.icon} size={15} /> {subtype?.labelEn ?? category?.labelEn ?? pin.category}
           </p>
           <p className="detail-age pin-preview-age">{formatAgo(pin.createdAt, nowSeconds)}</p>
         </div>
         <button className="pin-preview-close" onClick={onClose} aria-label="Close preview" type="button">
-          ×
+          <Icon src={ICONS.close} size={15} />
         </button>
       </div>
 
@@ -142,7 +143,9 @@ export default function PinPreview({
             yet or fails outright — an address is a nice-to-have added
             asynchronously after the pin is posted, not something this view
             waits on. */}
-        {detail?.address && <p className="detail-address pin-preview-address">📍 {detail.address}</p>}
+        {detail?.address && <p className="detail-address pin-preview-address">
+            <Icon src={ICONS.place} size={13} /> {detail.address}
+          </p>}
 
         {detail?.body && <p className="pin-preview-snippet">{detail.body}</p>}
 
@@ -168,7 +171,7 @@ export default function PinPreview({
               aria-label="Still valid"
               title="Still valid"
             >
-              👍 {detail?.confirmCount ?? 0}
+              <Icon src={ICONS.thumbUp} size={15} /> {detail?.confirmCount ?? 0}
             </button>
             <button
               type="button"
@@ -178,7 +181,7 @@ export default function PinPreview({
               aria-label="No longer valid"
               title="No longer valid — enough of these will remove the pin"
             >
-              👎 {detail?.disputeCount ?? 0}
+              <Icon src={ICONS.thumbDown} size={15} /> {detail?.disputeCount ?? 0}
             </button>
           </span>
         </div>

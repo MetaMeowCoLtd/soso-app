@@ -9,6 +9,7 @@ import {
   type SosoGateway,
 } from "soso-core";
 import { useLongPress } from "./useLongPress";
+import { Icon, ICONS } from "./Icon";
 
 /**
  * The shared chat panel — its own full-screen tab, not a floating panel
@@ -283,7 +284,7 @@ export default function ChatPanel({ gateway, demoMode }: ChatPanelProps) {
             onClick={() => setReplyingTo(null)}
             aria-label="Cancel reply"
           >
-            ✕
+            <Icon src={ICONS.close} size={11} />
           </button>
         </div>
       )}
@@ -306,9 +307,7 @@ export default function ChatPanel({ gateway, demoMode }: ChatPanelProps) {
           aria-label="Message"
         />
         <button className="chat-send" type="submit" disabled={sending || input.trim().length === 0} aria-label="Send">
-          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 10h13M10 3l7 7-7 7" />
-          </svg>
+          <Icon src={ICONS.send} size={16} />
         </button>
       </form>
 
@@ -399,7 +398,7 @@ function ChatMessageRow({
               aria-hidden would be wrong (it is a real control), so it is
               hidden by CSS on touch instead. */}
           <button type="button" className="chat-row-more" onClick={openMenu} aria-label="Message actions">
-            ⋯
+            <Icon src={ICONS.more} size={14} />
           </button>
         </div>
 
@@ -526,26 +525,16 @@ function MessageActionSheet({
         <div className="chat-sheet-menu">
           <button type="button" className="chat-sheet-row" onClick={onReply}>
             Reply
-            <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M8.5 5 3.5 9.5l5 4.5" />
-              <path d="M3.5 9.5h7.2c3.2 0 5.8 1.9 5.8 5.2" />
-            </svg>
+            <Icon src={ICONS.reply} size={17} />
           </button>
           <button type="button" className="chat-sheet-row" onClick={onCopy}>
             Copy
-            <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="7" y="7" width="9.5" height="9.5" rx="2.2" />
-              <path d="M13 4.5H5.8c-.99 0-1.8.8-1.8 1.8V13" />
-            </svg>
+            <Icon src={ICONS.copy} size={17} />
           </button>
           {message.mine && (
             <button type="button" className="chat-sheet-row destructive" onClick={onDelete}>
               Delete
-              <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4.5 6h11" />
-                <path d="M8 6V4.6c0-.6.5-1.1 1.1-1.1h1.8c.6 0 1.1.5 1.1 1.1V6" />
-                <path d="M6 6l.7 9.2c.05.7.63 1.3 1.35 1.3h3.9c.72 0 1.3-.6 1.35-1.3L14 6" />
-              </svg>
+              <Icon src={ICONS.trash} size={17} />
             </button>
           )}
         </div>
