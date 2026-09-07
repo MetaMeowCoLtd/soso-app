@@ -1110,6 +1110,10 @@ export function createDemoGateway(): SosoGateway {
       return () => {};
     },
 
+    subscribePostUpdated(): () => void {
+      return () => {};
+    },
+
     subscribeFollowsChanged(): () => void {
       return () => {};
     },

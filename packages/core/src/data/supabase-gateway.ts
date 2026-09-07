@@ -436,6 +436,39 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       };
     },
 
+    subscribePostUpdated(onChanged: (postId: string) => void): () => void {
+      // `new` is what we want for an update/insert; a delete only carries
+      // `old` (and REPLICA IDENTITY FULL, set in migration 0012, is what
+      // guarantees `old` is fully populated rather than just the primary
+      // key). Either way this only ever hands the caller an id, never the
+      // row itself — see this method's own doc comment on `SosoGateway`.
+      const emitPostId = (payload: { new?: { id?: string }; old?: { id?: string } }) => {
+        const id = payload.new?.id ?? payload.old?.id;
+        if (id) onChanged(id);
+      };
+      const emitMediaPostId = (payload: {
+        new?: { post_id?: string };
+        old?: { post_id?: string };
+      }) => {
+        const id = payload.new?.post_id ?? payload.old?.post_id;
+        if (id) onChanged(id);
+      };
+
+      const channel = client
+        .channel(`post-updated-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, emitPostId)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'post_media' },
+          emitMediaPostId,
+        )
+        .subscribe();
+
+      return () => {
+        void client.removeChannel(channel);
+      };
+    },
+
     subscribeFollowsChanged(onChange: () => void): () => void {
       const channel = client
         .channel(`follows-changed-${Math.random().toString(36).slice(2)}`)

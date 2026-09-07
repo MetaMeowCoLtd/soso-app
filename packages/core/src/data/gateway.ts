@@ -252,6 +252,19 @@ export interface SosoGateway {
   /** Fires when any post or post_media row the caller can see changes. */
   subscribePostsChanged(onChange: () => void): () => void;
 
+  /**
+   * Fires with a post's id whenever that post (or its post_media) changes —
+   * the id-scoped sibling of `subscribePostsChanged` above, for a caller
+   * that already has specific posts on screen (e.g. the feed) and wants to
+   * refresh just the affected card's like/reply counts instead of treating
+   * every edit anywhere as a "go reload the whole list" event. Still only a
+   * "this one changed" signal, same as `subscribePostsChanged`: the id
+   * itself carries nothing sensitive, but the caller must still refetch
+   * through `postDetail` (SECURITY DEFINER, audience-checked) rather than
+   * trust any other field off the realtime payload.
+   */
+  subscribePostUpdated(onChanged: (postId: string) => void): () => void;
+
   /** Fires when any follows row involving the caller changes. */
   subscribeFollowsChanged(onChange: () => void): () => void;
 

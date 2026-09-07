@@ -103,6 +103,9 @@ class FakeGateway implements SosoGateway {
   subscribePostsChanged() {
     return () => {};
   }
+  subscribePostUpdated() {
+    return () => {};
+  }
   subscribeFollowsChanged() {
     return () => {};
   }

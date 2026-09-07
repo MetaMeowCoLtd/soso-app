@@ -212,6 +212,12 @@ export function useFeedPosts(gateway: SosoGateway): UseFeedPostsResult {
   // Guards against two overlapping loadMore() calls (e.g. a fast double-fire
   // of the intersection observer) both appending the same page twice.
   const inFlight = useRef(false);
+  // Read inside the subscribePostUpdated effect below, which must not
+  // resubscribe every time `posts` changes (that would tear down and
+  // recreate the realtime channel on every like) but still needs to know,
+  // at event time, whether the changed post is one it's currently holding.
+  const postsRef = useRef(posts);
+  postsRef.current = posts;
 
   const refresh = useCallback(() => {
     cursor.current = null;
@@ -276,9 +282,33 @@ export function useFeedPosts(gateway: SosoGateway): UseFeedPostsResult {
     };
     const unsubscribe = gateway.subscribePostsChanged(onPostsChanged);
 
+    // Separate from the banner above: this is for a post already on
+    // screen whose like/reply count changed elsewhere (someone else voted
+    // or replied), not for a post the caller doesn't have yet. Re-fetches
+    // just that one post through `postDetail` — the same audience-checked
+    // path the initial page load used — and splices it in in place, so
+    // scroll position and every other rendered card are undisturbed.
+    // Ignored entirely if the id isn't currently in view; the "N new
+    // posts" banner above is what surfaces posts this hook doesn't have.
+    const onPostUpdated = (postId: string) => {
+      if (!postsRef.current.some((p) => p.id === postId)) return;
+      void gateway.postDetail(postId).then((fresh) => {
+        // Null means gone (deleted, or no longer visible to us) — drop it
+        // rather than leave a stale card with a like button nobody can
+        // act on any more.
+        setPosts((current) =>
+          fresh
+            ? current.map((p) => (p.id === postId ? fresh : p))
+            : current.filter((p) => p.id !== postId),
+        );
+      });
+    };
+    const unsubscribeUpdated = gateway.subscribePostUpdated(onPostUpdated);
+
     return () => {
       if (debounce) clearTimeout(debounce);
       unsubscribe();
+      unsubscribeUpdated();
     };
     // Runs once: gateway is resolved once for the whole session and never
     // changes (see resolveGateway in page.tsx) — matches the same

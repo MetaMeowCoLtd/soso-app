@@ -31,16 +31,17 @@ interface FeedTabProps {
  * that's what distinguishes this category from every pin category the map
  * already shows.
  *
- * Realtime here is scoped to new posts only, matching subscribePostsChanged
- * itself — a "N new posts" banner rather than auto-inserting new items and
- * disrupting scroll position (the Twitter/Threads convention the plan
- * itself names). Live-updating likes/replies on a post already on screen
- * is not built here: the plan lists it as part of the same realtime step,
- * but it is a materially different mechanism (a per-post subscription, or
- * a broader one keyed off post ids currently rendered) than "know the list
- * itself is stale," and folding it in here would be a second feature
- * wearing the first one's name. Called out as deferred, not silently
- * skipped.
+ * Realtime here is two separate mechanisms, deliberately not one:
+ *   - New posts (subscribePostsChanged, in useFeedPosts) surface as a
+ *     "N new posts" banner rather than auto-inserting items and disrupting
+ *     scroll position — the Twitter/Threads convention.
+ *   - Likes/replies on a post already on screen (subscribePostUpdated,
+ *     also in useFeedPosts) splice a fresh `postDetail` into that one card
+ *     in place, with no banner and no scroll disruption, since nothing
+ *     about the list itself changed.
+ * "Know the list is stale" and "a card I'm already looking at changed" are
+ * different signals with different UI treatments, which is why they're two
+ * gateway subscriptions instead of one broader one.
  */
 export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, onOpenPost }: FeedTabProps) {
   const { posts, loading, loadingMore, atEnd, error, loadMore, refresh, hasNewPosts } = useFeedPosts(gateway);
