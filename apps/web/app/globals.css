@@ -29,7 +29,7 @@
  *
  * `--app-top` / `--app-left` come from visualViewport.offset* in layout.tsx
  * so a stuck visual-viewport offset (uncorrectable once zoom is locked) still
- * keeps the shell aligned. `.sheet-body`, `.people-frame` and `.filter-row`
+ * keeps the shell aligned. `.sheet-body`, `.people-tab-scroll` and `.filter-row`
  * keep their own overflow — this only locks the OUTER page.
  */
 html {
@@ -244,7 +244,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    this rule used to carry as CSS `content`. */
 .soso-pin-lock { position:absolute; top:-5px; right:-5px; box-sizing:content-box; padding:3px; border-radius:50%; background:#fff; color:#41564f; box-shadow:var(--e1); transform:rotate(45deg); z-index:2; }
 
-@media (max-width:600px) { .brand { height:34px; padding:0 11px; font-size:1rem; }.notify-button, .people-button { width:34px; height:34px; }.notify-button svg, .people-button svg { width:18px; height:18px; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; }.people-frame { top:calc(max(14px, env(safe-area-inset-top)) + 34px + 14px + 8px); left:10px; width:min(210px, calc(100% - 20px)); max-height:min(55vh, 340px); padding:9px 10px; }.coin-badge { padding:5px 5px 5px 9px; }.coin-badge-amount { font-size:.72rem; }.coin-debug-button { width:18px; height:18px; font-size:.72rem; } }
+@media (max-width:600px) { .brand { height:34px; padding:0 11px; font-size:1rem; }.notify-button, .people-button { width:34px; height:34px; }.notify-button svg, .people-button svg { width:18px; height:18px; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; }.coin-badge { padding:5px 5px 5px 9px; }.coin-badge-amount { font-size:.72rem; }.coin-debug-button { width:18px; height:18px; font-size:.72rem; } }
 
 /* --- Added for the Supabase-backed rewrite: subtype chips reuse .vibe-picker/
    .vibe-option above as-is. Everything below is new: the detail panel (tap a
@@ -299,7 +299,6 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .people-button.active { box-shadow:0 0 0 2px var(--teal); }
 .people-count { position:absolute; top:-3px; right:-3px; min-width:17px; height:17px; padding:0 4px; border-radius:999px; background:var(--hot); color:#fff; font-size:.62rem; font-weight:750; display:grid; place-items:center; border:1.5px solid #fff; }
 
-.people-frame { position:absolute; z-index:9; top:calc(max(14px, env(safe-area-inset-top)) + 38px + 14px + 10px); left:16px; width:min(220px, calc(100% - 32px)); max-height:min(60vh, 380px); overflow-y:auto; padding:10px 12px; border-radius:16px; background:rgba(255,255,255,.6); border:1px solid rgba(255,255,255,.6); box-shadow:var(--e2); backdrop-filter:blur(24px) saturate(180%); transform-origin:top left; transition:transform .22s cubic-bezier(.32,.72,0,1), opacity .18s, visibility 0s linear 0s; }
 
 /* ------------------------------------------------------------- icons --- */
 /* Drawn SVG files under public/icons, masked so they take their colour from
@@ -446,70 +445,121 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .chat-send:active:not(:disabled) { transform:scale(.92); }
 .chat-send:disabled { opacity:.4; }
 .chat-error { margin:0; padding:6px 12px; color:#b5442d; font-size:.72rem; }
-.people-frame.minimized { transform:scale(.15) translate(-38%,-38%); opacity:0; pointer-events:none; visibility:hidden; transition:transform .18s cubic-bezier(.4,0,1,1), opacity .16s, visibility 0s linear .18s; }
-.people-frame-head { display:flex; align-items:baseline; gap:6px; margin-bottom:6px; }
-.people-frame-title { color:var(--muted); font-size:.66rem; font-weight:750; text-transform:uppercase; letter-spacing:.07em; }
-.people-frame-close { flex-shrink:0; margin-left:auto; display:grid; place-items:center; width:20px; height:20px; border:0; border-radius:50%; background:rgba(241,244,242,.7); color:#5b706a; font-size:1rem; line-height:1; transition:background .16s; }
-.people-frame-close:hover { background:#e4e9e6; }
-.people-note { margin:0 0 8px; color:var(--muted); font-size:.72rem; line-height:1.45; }
-.people-note strong { color:var(--deep); font-weight:700; }
-.people-hint { margin:0 0 8px; padding:7px 9px; border-radius:10px; background:rgba(238,247,244,.7); color:#2c5d52; font-size:.7rem; line-height:1.4; }
-.people-empty { margin:6px 0 0; padding:12px 10px; border-radius:10px; background:rgba(245,248,247,.6); color:var(--muted); font-size:.72rem; line-height:1.4; text-align:center; }
 
-/* Grouped at the bottom, below the friend list: your own handle sits right
-   above the control that consumes someone else's handle, since the two are
-   the same action from opposite directions (give yours out / take theirs
-   in) — the same pairing Discord's "Add Friend" screen uses. A hairline
-   separates it from the list above so it reads as its own block, not one
-   more friend row. */
-.add-friend-block { margin-top:8px; padding-top:9px; border-top:1px solid rgba(20,50,43,.08); }
-.people-own-handle { margin:0 0 7px; color:var(--muted); font-size:.68rem; line-height:1.4; }
-.people-own-handle strong { color:var(--deep); font-weight:700; }
+/* ------------------------------------------------------------ people --- */
+/* Its own tab now, not the ~220px frame that used to float over the map —
+   see PeopleTab.tsx for why the width is what made the difference. Same
+   full-screen shell as .feed-tab/.chat-tab (fixed, bottom padding to clear
+   the floating tab bar), with the scrolling confined to one region so the
+   header stays put. */
+.people-tab { position:fixed; z-index:1; inset:0; display:flex; flex-direction:column; background:#fff; padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
+.people-tab-header { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); background:rgba(255,255,255,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.people-tab-header h1 { margin:0; font-size:1.1rem; font-weight:900; color:var(--deep); }
+.people-add-toggle { flex-shrink:0; margin-left:auto; display:grid; place-items:center; width:36px; height:36px; border:0; border-radius:50%; background:#f0f2f5; color:var(--deep); transition:background .16s, color .16s, transform .16s; }
+.people-add-toggle:hover { background:#e6eae8; }
+.people-add-toggle:active { transform:scale(.94); }
+.people-add-toggle.active { background:var(--deep); color:#fff; }
+.people-tab-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-bottom:18px; }
 
-.area-activity { display:flex; align-items:baseline; gap:6px; margin:2px 0 4px; }
-.area-activity-number { font-size:1.3rem; font-weight:800; color:var(--deep); letter-spacing:-.03em; }
-.area-activity-label { color:var(--muted); font-size:.7rem; font-weight:550; }
+/* Identity and the privacy switch, as one card at the top — the order is
+   the deliberate departure from the apps this otherwise resembles; see
+   PeopleTab.tsx. */
+.people-you { margin:12px clamp(12px,3vw,20px) 0; padding:14px; border-radius:20px; background:#f7f9f8; border:1px solid var(--hairline); }
+.people-you-head { display:flex; align-items:center; gap:11px; }
+.people-you-id { min-width:0; flex:1; display:flex; flex-direction:column; }
+.people-you-id strong { color:var(--deep); font-size:.94rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.people-you-id span { color:var(--muted); font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.people-copy { flex-shrink:0; display:inline-flex; align-items:center; gap:5px; padding:7px 12px; border:1px solid var(--hairline); border-radius:999px; background:#fff; color:var(--deep); font-size:.75rem; font-weight:700; transition:background .16s, transform .16s; }
+.people-copy:hover:not(:disabled) { background:#eef1f0; }
+.people-copy:active:not(:disabled) { transform:scale(.95); }
+.people-copy:disabled { opacity:.5; }
 
-/* Same pill-toggle language as .chip/.audience-option elsewhere in the app —
-   an inline dot carries the on/off state so the label can stay a single
-   short word instead of a full sentence borrowed from the tooltip. */
-.presence-toggle { display:inline-flex; align-items:center; gap:6px; align-self:flex-start; margin:6px 0; padding:7px 12px; border:1px solid var(--hairline); border-radius:999px; background:#fff; cursor:pointer; transition:background .16s, border-color .16s, color .16s; font-size:.72rem; font-weight:650; color:#41564f; }
-.presence-toggle:hover { border-color:#c2d2cc; background:#f7faf9; }
-.presence-toggle-dot { width:7px; height:7px; border-radius:50%; background:#c8d3ce; flex-shrink:0; transition:background .16s, box-shadow .16s; }
-.presence-toggle.active { background:var(--deep); border-color:var(--deep); color:#fff; }
-.presence-toggle.active .presence-toggle-dot { background:#34d399; box-shadow:0 0 0 2px rgba(52,211,153,.3); }
+.people-share { display:flex; align-items:center; gap:14px; margin-top:14px; padding-top:13px; border-top:1px solid var(--hairline); }
+.people-share-text { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
+.people-share-text strong { color:var(--deep); font-size:.85rem; font-weight:750; }
+.people-share-text span { color:var(--muted); font-size:.74rem; line-height:1.4; }
+/* A real switch, not the old pill button: an opt-in that discloses your
+   presence should look like a setting with an on/off state, not like an
+   action you might have already triggered by accident. */
+.people-switch { flex-shrink:0; position:relative; width:48px; height:29px; border:0; border-radius:999px; background:#d3dbd8; transition:background .2s; }
+.people-switch:disabled { opacity:.45; }
+.people-switch-knob { position:absolute; top:3px; left:3px; width:23px; height:23px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(16,44,37,.28); transition:transform .2s cubic-bezier(.32,.72,0,1); }
+.people-switch.on { background:var(--teal); }
+.people-switch.on .people-switch-knob { transform:translateX(19px); }
 
-.follow-row { display:flex; gap:5px; margin-bottom:6px; }
-.follow-row input { flex:1; min-width:0; padding:7px 9px; border:1px solid rgba(216,226,222,.8); border-radius:12px; background:rgba(250,252,251,.7); font-size:.72rem; color:var(--ink); transition:border-color .16s, background .16s; }
-.follow-row input::placeholder { font-size:.72rem; color:var(--muted); }
-.follow-row input:focus { outline:none; border-color:var(--teal); background:#fff; }
-.follow-row button { padding:7px 11px; border:0; border-radius:12px; background:var(--deep); color:#fff; font-size:.72rem; font-weight:700; transition:background .16s; }.follow-row button:hover:not(:disabled) { background:#0a1d1a; }
-.follow-row button:disabled { opacity:.5; }
+.people-nearby { display:flex; align-items:center; gap:7px; margin-top:12px; padding-top:11px; border-top:1px solid var(--hairline); color:var(--muted); font-size:.74rem; line-height:1.35; }
+.people-nearby strong { color:var(--deep); font-size:.95rem; font-weight:800; }
+.people-nearby-dot { flex-shrink:0; width:7px; height:7px; border-radius:50%; background:#34d399; box-shadow:0 0 0 3px rgba(52,211,153,.2); }
 
-.friend-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
-.friend-row { display:flex; align-items:center; gap:7px; padding:7px 2px; border:0; border-bottom:1px solid rgba(20,50,43,.08); background:transparent; }.friend-row:last-child { border-bottom:0; }
-.friend-dot { width:7px; height:7px; border-radius:50%; background:#c8d3ce; flex-shrink:0; }
-.friend-dot.online { background:#34d399; box-shadow:0 0 0 2px rgba(52,211,153,.22); }
-.friend-main { display:grid; gap:0; min-width:0; flex:1; }
-.friend-name { font-size:.76rem; font-weight:650; color:var(--deep); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.friend-meta { font-size:.64rem; color:var(--muted); }
+.people-add { margin:12px clamp(12px,3vw,20px) 0; padding:13px 14px; border-radius:18px; background:rgba(0,167,143,.07); border:1px solid rgba(0,167,143,.22); }
+.people-add-row { display:flex; gap:7px; }
+.people-add-row input { flex:1; min-width:0; padding:10px 13px; border:1px solid var(--hairline); border-radius:999px; background:#fff; color:var(--ink); font-size:.84rem; font-family:inherit; }
+.people-add-row input:focus { outline:none; border-color:var(--teal); }
+.people-add-row button { flex-shrink:0; padding:10px 18px; border:0; border-radius:999px; background:var(--deep); color:#fff; font-size:.8rem; font-weight:750; }
+.people-add-row button:disabled { opacity:.5; }
+.people-add-hint { margin:9px 2px 0; color:#3f6b62; font-size:.73rem; line-height:1.45; }
+.people-error { margin:8px 2px 0; color:#b5442d; font-size:.75rem; }
 
-.tier-star { flex-shrink:0; width:22px; height:22px; border:0; border-radius:50%; background:transparent; color:#c8d3ce; font-size:.95rem; line-height:1; display:grid; place-items:center; transition:transform .15s, color .15s; }
-.tier-star:hover { transform:scale(1.15); color:#e0b64a; }
-.tier-star.active { color:#f5b731; }
+/* Counts that are also the filters — a number tells you whether tapping is
+   worth anything before you tap, which a bare word does not. */
+.people-filters { display:flex; gap:8px; margin:16px clamp(12px,3vw,20px) 0; }
+.people-filter { flex:1; display:flex; flex-direction:column; align-items:center; gap:1px; padding:10px 4px; border:1px solid var(--hairline); border-radius:16px; background:#fff; transition:background .16s, border-color .16s, transform .14s; }
+.people-filter strong { color:var(--deep); font-size:1.05rem; font-weight:850; letter-spacing:-.02em; }
+.people-filter span { color:var(--muted); font-size:.72rem; font-weight:650; }
+.people-filter:active { transform:scale(.97); }
+.people-filter.active { background:var(--deep); border-color:var(--deep); }
+.people-filter.active strong, .people-filter.active span { color:#fff; }
 
-.friend-menu { position:relative; flex-shrink:0; }
-.friend-menu-trigger { width:22px; height:22px; border:0; border-radius:50%; background:transparent; color:#8a9a94; font-size:.9rem; line-height:1; display:grid; place-items:center; transition:background .15s, color .15s; }
-.friend-menu-trigger:hover, .friend-menu-trigger[aria-expanded="true"] { background:rgba(20,50,43,.08); color:#3d534c; }
-/* Rendered through a portal into document.body (see PeoplePanel.tsx) so it
-   escapes .people-frame's overflow clipping and always layers on top of the
-   frame rather than being cut off/scrolled inside it. top/left are set
-   inline per-instance from the trigger's bounding rect. */
-.friend-popover { position:fixed; z-index:1000; display:flex; flex-direction:column; gap:2px; min-width:104px; padding:4px; border-radius:12px; background:#fff; border:1px solid rgba(20,50,43,.1); box-shadow:var(--e3); }
-.friend-popover button { padding:6px 9px; border:0; border-radius:8px; background:transparent; color:#3d534c; font-size:.72rem; font-weight:600; text-align:left; transition:background .12s; }
-.friend-popover button:hover { background:rgba(20,50,43,.06); }
-.friend-popover.friend-confirm button:first-child { color:#b91c1c; }
-.friend-popover.friend-confirm button:first-child:hover { background:rgba(220,38,38,.08); }
+.people-search { display:flex; align-items:center; gap:8px; margin:12px clamp(12px,3vw,20px) 0; padding:0 14px; border-radius:999px; background:#f0f2f5; color:var(--muted); }
+.people-search input { flex:1; min-width:0; padding:10px 0; border:0; background:transparent; color:var(--ink); font-size:.86rem; font-family:inherit; }
+.people-search input:focus { outline:none; }
+.people-search input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; }
+
+.people-list { list-style:none; margin:14px 0 0; padding:0; }
+.people-row { display:flex; align-items:center; gap:12px; padding:9px clamp(12px,3vw,20px); }
+.people-row:hover { background:rgba(20,50,43,.02); }
+.people-row-main { min-width:0; flex:1; display:grid; }
+.people-row-name { color:var(--deep); font-size:.89rem; font-weight:750; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.people-row-handle { color:var(--muted); font-size:.76rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.people-row-status { margin-top:1px; color:var(--muted); font-size:.71rem; font-weight:600; }
+.people-row-status.online { color:#12876f; }
+.people-star { flex-shrink:0; display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:50%; background:transparent; color:#c3ccc8; transition:color .16s, background .16s, transform .16s; }
+.people-star:hover { background:#f2f5f3; color:#e0b64a; }
+.people-star:active { transform:scale(1.14); }
+.people-star.active { color:#f5b731; }
+.people-row-more { flex-shrink:0; display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:50%; background:transparent; color:var(--muted); transition:background .16s; }
+.people-row-more:hover { background:#f2f5f3; }
+
+.people-empty { margin:22px clamp(12px,3vw,20px); padding:18px 14px; border-radius:16px; background:#f7f9f8; color:var(--muted); font-size:.8rem; line-height:1.5; text-align:center; }
+.people-blank { display:flex; flex-direction:column; align-items:center; gap:8px; margin:26px clamp(12px,3vw,20px); padding:30px 22px; border-radius:20px; background:#f7f9f8; color:var(--muted); text-align:center; }
+.people-blank .icon { color:#c3ccc8; }
+.people-blank strong { color:var(--deep); font-size:.95rem; font-weight:800; }
+.people-blank p { margin:0; font-size:.79rem; line-height:1.5; max-width:270px; }
+.people-blank-action { margin-top:6px; padding:10px 20px; border:0; border-radius:999px; background:var(--deep); color:#fff; font-size:.8rem; font-weight:750; }
+
+/* Bottom sheet for a row's destructive actions. Portalled to <body>: this
+   tab is a fixed, z-indexed stacking context, so a child could never rise
+   above the floating .tab-bar — the same trap ChatPanel's sheet hit. */
+.people-sheet { position:fixed; z-index:30; inset:0; display:flex; align-items:flex-end; }
+.people-sheet-scrim { position:absolute; inset:0; background:rgba(10,26,22,.42); backdrop-filter:blur(2px); animation:sheet-fade .16s ease-out; }
+.people-sheet-panel { position:relative; width:100%; max-width:520px; margin:0 auto; padding:16px 14px calc(16px + env(safe-area-inset-bottom)); border-radius:24px 24px 0 0; background:#fff; box-shadow:var(--e3); animation:sheet-rise .22s cubic-bezier(.32,.72,0,1); }
+@keyframes sheet-rise { from { transform:translateY(100%); } to { transform:translateY(0); } }
+.people-sheet-head { display:flex; align-items:center; gap:11px; padding:2px 4px 14px; border-bottom:1px solid var(--hairline); }
+.people-sheet-head strong { display:block; color:var(--deep); font-size:.9rem; font-weight:800; }
+.people-sheet-head span { color:var(--muted); font-size:.77rem; }
+.people-sheet-warning { margin:14px 4px 4px; color:var(--muted); font-size:.78rem; line-height:1.5; }
+.people-sheet-row { display:flex; align-items:center; gap:11px; width:100%; margin-top:6px; padding:14px; border:0; border-radius:14px; background:#f5f7f6; color:var(--deep); font-size:.87rem; font-weight:700; text-align:left; transition:background .14s; }
+.people-sheet-row:hover { background:#eceff0; }
+.people-sheet-row.destructive { color:#d1394b; }
+.people-sheet-row.cancel { justify-content:center; color:var(--muted); background:transparent; }
+
+/* The initials disc used wherever a person appears (people list, sheet) —
+   colour derived from the handle so a face-less list is still scannable;
+   see Avatar.tsx. */
+.avatar { position:relative; flex-shrink:0; display:grid; place-items:center; border-radius:50%; color:#fff; font-weight:800; letter-spacing:-.01em; }
+.avatar-dot { position:absolute; right:0; bottom:0; width:12px; height:12px; border-radius:50%; border:2.5px solid #fff; background:#c3ccc8; }
+.avatar-dot.online { background:#34d399; }
+
 
 /* Drawing board — full-screen, sits above map chrome. Pan/zoom is local to
    this surface (see BoardCanvas.tsx); the map underneath is not involved. */
@@ -576,7 +626,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 /* Floating "glass" pill rather than the old edge-to-edge bar, matching the
    translucent, rounded bottom-nav material iOS 18+ uses system-wide (Safari's
    own tab bar, Maps, Messages) — `--e3` is the same elevation token the rest
-   of this file already uses for floating surfaces (`.people-frame`, `.sheet`).
+   of this file already uses for floating surfaces (`.sheet`, `.chat-sheet`).
    The background is its own value rather than reusing `--glass`, though: this
    bar sits directly over map tiles or photo-heavy feed content far more of
    the time than any other glass surface in the app, so it's tuned lighter/
@@ -598,7 +648,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    in its own soft pill when active, not just a differently-colored line of
    text. Tinted with the app's own teal rather than the reference screenshot's
    blue, matching this app's own accent everywhere else active state is shown
-   (`.tier-star.active`, `.audience-option.selected`), not the source photo's
+   (`.people-star.active`, `.audience-option.selected`), not the source photo's
    palette. Stadium-shaped for the same reason `.tab-bar` itself is, and
    because a button-shaped rounded-rect highlight sitting inside a pill-shaped
    bar was the one detail that broke the illusion the most in the first pass. */

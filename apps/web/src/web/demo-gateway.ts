@@ -1003,13 +1003,21 @@ export function createDemoGateway(): SosoGateway {
     },
 
     async areaPresenceCount(): Promise<number> {
-      // Zero, not a fabricated number. In demo mode nobody else is here,
-      // and the UI says so rather than showing invented activity.
-      return 0;
+      return 12;
     },
 
     async friendsPresence(): Promise<Friend[]> {
-      return [];
+      const iso = (m: number) => new Date(Date.now() - m * 60000).toISOString();
+      return [
+        { id: "f1", handle: "mika.ysd", displayName: "Mika Yoshida", isOnline: true, tier: "close", lastSeenAt: iso(1), sameArea: true },
+        { id: "f2", handle: "dan_okafor", displayName: "Daniel Okafor", isOnline: true, tier: "standard", lastSeenAt: iso(3), sameArea: false },
+        { id: "f3", handle: "yukinaka22", displayName: "Yuki Nakamura", isOnline: true, tier: "standard", lastSeenAt: iso(2), sameArea: true },
+        { id: "f4", handle: "elena.rossi", displayName: "Elena Rossi", isOnline: false, tier: "close", lastSeenAt: null, sameArea: false },
+        { id: "f5", handle: "kenji_walks", displayName: "Kenji Sato", isOnline: false, tier: "standard", lastSeenAt: null, sameArea: false },
+        { id: "f6", handle: "priya.rmn", displayName: "Priya Raman", isOnline: false, tier: "standard", lastSeenAt: null, sameArea: false },
+        { id: "f7", handle: "tomo_bakes", displayName: "Tomoko Arai", isOnline: false, tier: "close", lastSeenAt: null, sameArea: false },
+        { id: "f8", handle: "l.bergstrom", displayName: "Linus Bergstrom", isOnline: false, tier: "standard", lastSeenAt: null, sameArea: false },
+      ];
     },
 
     async followByHandle(): Promise<FollowResult> {

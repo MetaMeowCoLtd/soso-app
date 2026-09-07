@@ -11,7 +11,7 @@ import FeedTab from "@/src/web/FeedTab";
 import ThoughtThread from "@/src/web/ThoughtThread";
 import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
-import PeoplePanel from "@/src/web/PeoplePanel";
+import PeopleTab from "@/src/web/PeopleTab";
 import ChatPanel from "@/src/web/ChatPanel";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import { usePresence } from "@/src/web/usePresence";
@@ -77,7 +77,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // requests) that a tab switch must not tear down. The feed tab has no
   // equivalent persistent state of its own, so it mounts and unmounts
   // freely with the tab itself.
-  const [activeTab, setActiveTab] = useState<"map" | "feed" | "chat">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "feed" | "chat" | "people">("map");
 
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [locating, setLocating] = useState(false);
@@ -205,13 +205,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
-  const [showPeople, setShowPeople] = useState(false);
-  // Starts minimized — presence could reasonably serve the map's own "is
-  // this area alive" purpose by defaulting open, but that's been changed on
-  // request so it doesn't claim screen space before someone's actually
-  // asked to see it. Chat used to have the identical comment here; now that
-  // it's its own tab rather than a floating panel, it has no minimize state
-  // left to default.
   // null while loading, distinct from 0 — ReportForm treats null as "don't
   // block on this yet" rather than falsely showing "you can't afford this"
   // before the real balance has even loaded.
@@ -253,7 +246,7 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
   // count answers "is where I'm looking busy", and tying it to the viewport
   // means it works without a second location permission prompt.
   const [presenceCentre, setPresenceCentre] = useState<{ lng: number; lat: number } | null>(null);
-  const presence = usePresence(gateway, mode === "supabase", presenceCentre);
+  const presence = usePresence(gateway, true, presenceCentre);
 
   useEffect(() => {
     if (mode !== "supabase" || pushAvailability !== "available") return;
@@ -365,7 +358,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
    */
   function handlePoiClick(poi: SelectedPoi) {
     deselectPin();
-    setShowPeople(false);
     setSelectedPoi(poi);
   }
 
@@ -420,7 +412,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
     // is never in question at all for an explicit button press.
     deselectPin();
     setSelectedPoi(null);
-    setShowPeople(false);
 
     if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
     // The draft marker appears — and the map stops accepting further clicks
@@ -446,10 +437,9 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
    * "make this go away."
    */
   function handleMapTap(at: Coordinates) {
-    if (selectedPin || selectedPoi || showPeople) {
+    if (selectedPin || selectedPoi) {
       deselectPin();
       setSelectedPoi(null);
-      setShowPeople(false);
       return;
     }
     beginPin(at);
@@ -663,12 +653,11 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           </div>
         </div>
         <button
-          className={`people-button ${presence.sharing ? "sharing" : ""} ${showPeople ? "active" : ""}`}
-          onClick={() => setShowPeople((v) => !v)}
+          className={`people-button ${presence.sharing ? "sharing" : ""}`}
+          onClick={() => setActiveTab("people")}
           type="button"
-          aria-label="Friends"
-          aria-pressed={showPeople}
-          title="Friends"
+          aria-label="People"
+          title="People"
         >
           <Icon src={ICONS.people} size={20} />
           {presence.areaCount !== null && presence.areaCount > 0 && (
@@ -847,19 +836,6 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
         </div>
       )}
 
-      {/* Always mounted, never conditionally rendered — see the comment on
-          PeoplePanel's `minimized` prop for why: a CSS-driven minimize
-          animation needs the component to still exist while it plays. Chat
-          used to work the same way; now that it's its own tab (rendered
-          below, conditionally, alongside Feed) rather than a floating
-          panel, it has no minimize state left to animate and mounts/
-          unmounts with the tab like Feed already does. */}
-      <PeoplePanel
-        presence={presence}
-        demoMode={mode !== "supabase"}
-        minimized={!showPeople}
-        onMinimize={() => setShowPeople(false)}
-      />
       </main>
 
       {/*
@@ -911,6 +887,8 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
 
       {activeTab === "chat" && <ChatPanel gateway={gateway} demoMode={mode !== "supabase"} />}
 
+      {activeTab === "people" && <PeopleTab presence={presence} demoMode={false} />}
+
       {/* Hidden entirely, not merely covered, whenever a pin is open (any
           category — a plain preview, a board, or an "update" thread) —
           tab navigation and "something about a specific pin is open" are
@@ -947,6 +925,16 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
           >
             <Icon src={ICONS.chat} size={21} />
             <span>Chat</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "people"}
+            className={`tab-bar-button${activeTab === "people" ? " active" : ""}`}
+            onClick={() => setActiveTab("people")}
+          >
+            <Icon src={ICONS.people} size={21} />
+            <span>People</span>
           </button>
         </nav>
       )}

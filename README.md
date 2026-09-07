@@ -49,7 +49,7 @@ Supabase.
 | Polls | Modeled, disabled. Requires separate options/votes tables. |
 | Local news and official notices | Modeled, disabled |
 | Topic groups | Not implemented |
-| Presence and mutual-follow contacts | Implemented. Opt-in, off by default; see [Presence and people](#presence-and-people). |
+| Presence and mutual-follow contacts | Implemented. Its own People tab; opt-in, off by default; see [Presence and people](#presence-and-people). |
 | Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
 | Photo uploads | Not implemented. The `post_media` table exists; nothing writes to it. |
 | Push notifications | Implemented, not verified end-to-end. See [Push notifications](#push-notifications). |
@@ -771,6 +771,23 @@ changes what the feature discloses:
 - **`follow_by_handle` returns the same error for "no such user" and "you are
   blocked",** since distinguishing them tells a blocked party something they
   can act on.
+
+### Where it lives
+
+Its own **People** tab, alongside Map, Feed and Chat. It used to be a ~220px
+frame docked over the map, which forced everything in it to be miniature — and
+this is the screen where you decide who can see you, which is not a decision
+that belongs in a widget. The tab leads with identity and the sharing switch
+(with the scope of what sharing discloses written next to it, not hidden in a
+tooltip), then the friend counts — which double as the list's filters — then
+the list itself. Removing and blocking live in a bottom sheet behind each row's
+"⋯", with blocking requiring a second, explicit confirmation that names the
+person and says what it does in both directions.
+
+That ordering is deliberate and is where this departs from the social apps it
+otherwise resembles: those lead with the list because the list is the product.
+Here, "is anyone able to see me right now" matters more than any single row and
+should not be something you scroll to find.
 
 ### Grid collision hazard
 
