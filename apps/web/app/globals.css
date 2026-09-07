@@ -365,6 +365,17 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    bubble down to wrap long text, the same job `.chat-bubble` itself used
    to do before this wrapper existed). */
 .chat-bubble-drag-zone { position:relative; min-width:0; }
+/* The bubble and its reaction pills, grouped so useSwipeToReply's transform
+   (applied to this node, not `.chat-bubble` itself — see ChatMessageRow's
+   own comment) moves both together instead of leaving reactions behind.
+   Nesting them here — inside the positioned drag-zone above, rather than
+   as a later sibling of it — is also what keeps them painting in the same
+   subtree as their own bubble: a `position:relative` element's whole
+   subtree paints as one unit, after any plain unpositioned box elsewhere
+   on the page, so a reaction pill left as a plain sibling could end up
+   behind a neighboring message's bubble with no relation to which one
+   was actually on top of the other. */
+.chat-bubble-swipe-track { min-width:0; }
 /* Positioned off the drag zone's own (untransformed) box, not the bubble's
    moving one — see the hook's own comment on why that means this needs no
    JS-driven horizontal movement of its own, only opacity/scale. */

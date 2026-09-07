@@ -416,6 +416,14 @@ function ChatMessageRow({
   onSwipeReply: () => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
+  // What actually moves during a drag — see the JSX below for why this is
+  // a level below `bubbleRef` rather than the same node: it wraps the
+  // bubble AND its reaction pills, so a reaction rides along with the text
+  // it's attached to instead of being left behind mid-swipe. `bubbleRef`
+  // stays scoped to the bubble alone because openMenu's rect is meant to
+  // frame exactly the bubble the action sheet is about to clone, not the
+  // reactions sitting below it.
+  const swipeTrackRef = useRef<HTMLDivElement>(null);
 
   function openMenu() {
     const rect = bubbleRef.current?.getBoundingClientRect();
@@ -430,8 +438,10 @@ function ChatMessageRow({
   const longPress = useLongPress(openMenu);
   // Same element, two independent gestures — see useSwipeToReply's own doc
   // comment on why a long press and a reply-swipe never actually race each
-  // other despite sharing the bubble.
-  const swipe = useSwipeToReply(bubbleRef, onSwipeReply);
+  // other despite sharing the bubble. The hook's touch/mouse handlers below
+  // still go on the bubble itself (bubbleHandlers); only the node it moves
+  // (swipeTrackRef) differs from the node it reads gestures from.
+  const swipe = useSwipeToReply(swipeTrackRef, onSwipeReply);
   const author = message.authorName || message.authorHandle;
 
   // Merges both hooks' handlers onto the one element they share. Each event
@@ -484,19 +494,59 @@ function ChatMessageRow({
               indicator (`right: 100%`, see globals.css) — it, not the row,
               because the row's own layout differs between "mine" (row-
               reverse) and "theirs", while the indicator's job is always
-              simply "just left of this bubble's own box", regardless. */}
+              simply "just left of this bubble's own box", regardless.
+              It also never moves itself — see useSwipeToReply's own doc
+              comment on why the indicator is positioned off this
+              untransformed box rather than the swipe track's moving one. */}
           <div className="chat-bubble-drag-zone">
             <span ref={swipe.indicatorRef} className="chat-swipe-indicator" aria-hidden="true">
               <Icon src={ICONS.reply} size={16} />
             </span>
-            <div ref={bubbleRef} className="chat-bubble" {...bubbleHandlers}>
-              {message.replyTo && (
-                <div className="chat-bubble-quote">
-                  <span className="chat-quote-author">{message.replyTo.authorName}</span>
-                  <span className="chat-quote-body">{message.replyTo.body}</span>
+            {/* Everything that should slide together during a drag —
+                the bubble AND its reactions — lives inside this one node,
+                since useSwipeToReply sets `transform` on whatever ref it's
+                given: nesting the reactions here rather than leaving them
+                as a sibling of chat-row-bubble-line is what makes them
+                move with the text instead of being left stranded mid-swipe.
+                It also fixes a stacking bug that has nothing to do with
+                motion: `.chat-bubble-drag-zone` is `position:relative` for
+                the indicator above, which makes ITS whole subtree paint
+                after any plain, non-positioned box elsewhere in the list —
+                including, previously, another message's reaction pills.
+                Reactions living outside any drag-zone were exactly that
+                kind of plain box, so a neighboring bubble could paint over
+                them regardless of which message came first on screen.
+                Nested inside this drag-zone now, they paint as part of the
+                same positioned subtree as their own bubble, in the same
+                correct top-to-bottom order as everything else. */}
+            <div ref={swipeTrackRef} className="chat-bubble-swipe-track">
+              <div ref={bubbleRef} className="chat-bubble" {...bubbleHandlers}>
+                {message.replyTo && (
+                  <div className="chat-bubble-quote">
+                    <span className="chat-quote-author">{message.replyTo.authorName}</span>
+                    <span className="chat-quote-body">{message.replyTo.body}</span>
+                  </div>
+                )}
+                <span className="chat-bubble-text">{message.body}</span>
+              </div>
+
+              {message.reactions.length > 0 && (
+                <div className="chat-reactions">
+                  {message.reactions.map((reaction) => (
+                    <button
+                      key={reaction.emoji}
+                      type="button"
+                      className={`chat-reaction${reaction.mine ? " mine" : ""}`}
+                      onClick={() => onToggleReaction(reaction.emoji)}
+                      aria-pressed={reaction.mine}
+                      aria-label={`${reaction.emoji} ${reaction.count}`}
+                    >
+                      <span aria-hidden="true">{reaction.emoji}</span>
+                      {reaction.count > 1 && <span className="chat-reaction-count">{reaction.count}</span>}
+                    </button>
+                  ))}
                 </div>
               )}
-              <span className="chat-bubble-text">{message.body}</span>
             </div>
           </div>
 
@@ -508,24 +558,6 @@ function ChatMessageRow({
             <Icon src={ICONS.more} size={14} />
           </button>
         </div>
-
-        {message.reactions.length > 0 && (
-          <div className="chat-reactions">
-            {message.reactions.map((reaction) => (
-              <button
-                key={reaction.emoji}
-                type="button"
-                className={`chat-reaction${reaction.mine ? " mine" : ""}`}
-                onClick={() => onToggleReaction(reaction.emoji)}
-                aria-pressed={reaction.mine}
-                aria-label={`${reaction.emoji} ${reaction.count}`}
-              >
-                <span aria-hidden="true">{reaction.emoji}</span>
-                {reaction.count > 1 && <span className="chat-reaction-count">{reaction.count}</span>}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

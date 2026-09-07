@@ -521,6 +521,13 @@ function DmBubble({
   onToggleReaction: (emoji: string) => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
+  // The node useSwipeToReply actually moves — see ChatPanel's own
+  // ChatMessageRow (the room's twin of this component) for why this is
+  // one level below bubbleRef rather than the same node: it wraps the
+  // bubble AND its reaction pills so a reaction rides along with the text
+  // during a drag, while bubbleRef stays scoped to just the bubble for
+  // openMenu's rect.
+  const swipeTrackRef = useRef<HTMLDivElement>(null);
 
   function openMenu() {
     const rect = bubbleRef.current?.getBoundingClientRect();
@@ -530,7 +537,7 @@ function DmBubble({
   }
 
   const longPress = useLongPress(openMenu);
-  const swipe = useSwipeToReply(bubbleRef, onSwipeReply);
+  const swipe = useSwipeToReply(swipeTrackRef, onSwipeReply);
 
   // Merges both hooks' handlers onto the one element they share — see
   // useSwipeToReply's own doc comment on why a long press and a reply-swipe
@@ -577,53 +584,62 @@ function DmBubble({
             <span ref={swipe.indicatorRef} className="chat-swipe-indicator" aria-hidden="true">
               <Icon src={ICONS.reply} size={16} />
             </span>
-            <div
-              ref={bubbleRef}
-              className={`chat-bubble${message.text === null ? " unreadable" : ""}`}
-              {...bubbleHandlers}
-            >
-              {message.replyTo && (
-                <div className="chat-bubble-quote">
-                  <span className="chat-quote-author">{message.replyTo.mine ? "You" : otherName}</span>
-                  <span className="chat-quote-body">
-                    {message.replyTo.text ?? "Can't be read on this device"}
-                  </span>
+            {/* Bubble + reactions share this one moving node — see
+                ChatMessageRow's own comment on why (both the "reactions
+                should slide with the text" fix and the "reactions were
+                painting behind another bubble" stacking fix come from the
+                same change: nesting them inside this positioned drag-zone
+                rather than leaving them a plain sibling of it). */}
+            <div ref={swipeTrackRef} className="chat-bubble-swipe-track">
+              <div
+                ref={bubbleRef}
+                className={`chat-bubble${message.text === null ? " unreadable" : ""}`}
+                {...bubbleHandlers}
+              >
+                {message.replyTo && (
+                  <div className="chat-bubble-quote">
+                    <span className="chat-quote-author">{message.replyTo.mine ? "You" : otherName}</span>
+                    <span className="chat-quote-body">
+                      {message.replyTo.text ?? "Can't be read on this device"}
+                    </span>
+                  </div>
+                )}
+                <span className="chat-bubble-text">
+                  {message.text === null ? "Can't be read on this device" : message.text}
+                </span>
+              </div>
+
+              {message.reactions.length > 0 && (
+                <div className="chat-reactions">
+                  {message.reactions.map((reaction) => (
+                    <button
+                      key={reaction.userId}
+                      type="button"
+                      className={`chat-reaction${reaction.mine ? " mine" : ""}`}
+                      // Only your own reaction is yours to tap away — the
+                      // other side's is theirs to change, the same
+                      // asymmetry the room enforces server-side
+                      // (toggle_chat_reaction only ever touches the
+                      // caller's own row) but which here is worth
+                      // enforcing in the UI too: there is no server call
+                      // this button could make on someone else's reaction
+                      // that would mean anything.
+                      disabled={!reaction.mine}
+                      onClick={() => reaction.emoji && onToggleReaction(reaction.emoji)}
+                      aria-pressed={reaction.mine}
+                      aria-label={reaction.emoji ?? "Reaction unavailable on this device"}
+                    >
+                      {reaction.emoji ?? "•"}
+                    </button>
+                  ))}
                 </div>
               )}
-              <span className="chat-bubble-text">
-                {message.text === null ? "Can't be read on this device" : message.text}
-              </span>
             </div>
           </div>
           <button type="button" className="chat-row-more" onClick={openMenu} aria-label="Message options">
             <Icon src={ICONS.more} size={14} />
           </button>
         </div>
-
-        {message.reactions.length > 0 && (
-          <div className="chat-reactions">
-            {message.reactions.map((reaction) => (
-              <button
-                key={reaction.userId}
-                type="button"
-                className={`chat-reaction${reaction.mine ? " mine" : ""}`}
-                // Only your own reaction is yours to tap away — the other
-                // side's is theirs to change, the same asymmetry the room
-                // enforces server-side (toggle_chat_reaction only ever
-                // touches the caller's own row) but which here is worth
-                // enforcing in the UI too: there is no server call this
-                // button could make on someone else's reaction that would
-                // mean anything.
-                disabled={!reaction.mine}
-                onClick={() => reaction.emoji && onToggleReaction(reaction.emoji)}
-                aria-pressed={reaction.mine}
-                aria-label={reaction.emoji ?? "Reaction unavailable on this device"}
-              >
-                {reaction.emoji ?? "•"}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
