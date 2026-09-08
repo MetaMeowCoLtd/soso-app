@@ -97,12 +97,12 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, on
   }
 
   return (
-    <div className="feed-tab" role="tabpanel" aria-label="Feed">
+    <div className="feed-tab" role="tabpanel" aria-label="Posts">
       <header className="feed-tab-header">
         <a className="brand" href="#top" aria-label="SoSo home">
           <span>So</span>So
         </a>
-        <h1>Feed</h1>
+        <h1>Posts</h1>
       </header>
 
       {/* A floating pill over the list rather than a block pushing it down,

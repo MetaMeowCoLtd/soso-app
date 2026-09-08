@@ -37,13 +37,27 @@ interface ProfileViewProps {
   gateway: SosoGateway;
   /** The handle from the byline that was tapped. */
   handle: string;
-  onClose: () => void;
+  /** Closes the overlay. Omitted in tab mode, which has no back button. */
+  onClose?: () => void;
   /** Open one of their posts full-screen — reuses page.tsx's own post opener. */
   onOpenPost: (postId: string) => void;
   /** Open another profile — the shared FeedCard byline needs it; here it's the same person. */
   onOpenProfile: (handle: string) => void;
   /** Start a DM. Offered only when the two of you follow each other. */
   onMessage: (userId: string) => void;
+  /**
+   * "overlay" (default): a full-screen surface above everything, with a back
+   * button, opened from a byline. "tab": sits in the tab stack as your own
+   * Profile tab — no back button, below the tab bar, and its scroll clears
+   * the floating nav.
+   */
+  variant?: "overlay" | "tab";
+  /**
+   * Opens profile settings. Shown as an "Edit profile" button in place of
+   * Follow when the profile is your own — which is the only case that
+   * passes this (the Profile tab).
+   */
+  onEditProfile?: () => void;
 }
 
 const TIER_MEDAL: Record<string, string> = { bronze: "🥉", silver: "🥈", gold: "🥇" };
@@ -77,7 +91,10 @@ export default function ProfileView({
   onOpenPost,
   onOpenProfile,
   onMessage,
+  variant = "overlay",
+  onEditProfile,
 }: ProfileViewProps) {
+  const isTab = variant === "tab";
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<PostDetail[]>([]);
@@ -150,14 +167,21 @@ export default function ProfileView({
   }
 
   return (
-    <div className="profile-view" role="dialog" aria-modal="true" aria-label="Profile">
-      {/* Floating over the cover rather than in a solid bar — the immersive
-          cover-photo treatment social apps use, not a chrome strip. Its own
-          translucent disc keeps it legible over both the gradient and the
-          white loading state. */}
-      <button type="button" className="profile-view-back" onClick={onClose} aria-label="Back">
-        <Icon src={ICONS.chevronLeft} size={22} />
-      </button>
+    <div
+      className={`profile-view${isTab ? " profile-view-tab" : ""}`}
+      // As a tab it's a region of the page, not a modal dialog over it.
+      role={isTab ? "tabpanel" : "dialog"}
+      aria-modal={isTab ? undefined : true}
+      aria-label="Profile"
+    >
+      {/* Overlay only: floats over the cover, the immersive cover-photo
+          treatment social apps use. The tab has no back button — you leave
+          it by tapping another tab. */}
+      {!isTab && onClose && (
+        <button type="button" className="profile-view-back" onClick={onClose} aria-label="Back">
+          <Icon src={ICONS.chevronLeft} size={22} />
+        </button>
+      )}
 
       {loading ? (
         <p className="profile-view-status">Loading…</p>
@@ -196,7 +220,15 @@ export default function ProfileView({
               </div>
             </div>
 
-            {!profile.isSelf && (
+            {profile.isSelf ? (
+              onEditProfile && (
+                <div className="profile-view-actions">
+                  <button type="button" className="profile-view-follow following" onClick={onEditProfile}>
+                    Edit profile
+                  </button>
+                </div>
+              )
+            ) : (
               <div className="profile-view-actions">
                 <button
                   type="button"

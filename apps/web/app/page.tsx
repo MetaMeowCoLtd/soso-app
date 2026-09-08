@@ -17,6 +17,7 @@ import { ensurePublishedKey } from "@/src/web/dmCrypto";
 import ChatPanel from "@/src/web/ChatPanel";
 import ProfileSettings from "@/src/web/ProfileSettings";
 import ProfileView from "@/src/web/ProfileView";
+import { Avatar } from "@/src/web/Avatar";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import AuthScreens from "@/src/web/AuthScreens";
 import { isGuest, loadAccount, onAuthChange, setGuest, type Account } from "@/src/web/auth";
@@ -165,8 +166,28 @@ function Map({
   // requests) that a tab switch must not tear down. The feed tab has no
   // equivalent persistent state of its own, so it mounts and unmounts
   // freely with the tab itself.
-  const [activeTab, setActiveTab] = useState<"map" | "feed" | "chat" | "people">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "feed" | "chat" | "people" | "profile">("map");
   const [editingProfile, setEditingProfile] = useState(false);
+  // This account's own handle, for the Profile tab (which renders ProfileView
+  // for yourself) and its tab-bar avatar. Fetched via myProfile so it works
+  // in demo mode too, where presence — and therefore presence.me — is off.
+  const [myHandle, setMyHandle] = useState<string | null>(null);
+  const [myName, setMyName] = useState<string>("You");
+
+  const refreshMyIdentity = useCallback(() => {
+    void gateway
+      .myProfile()
+      .then((p) => {
+        if (!p) return;
+        setMyHandle(p.handle);
+        setMyName(p.displayName);
+      })
+      .catch(() => {});
+  }, [gateway]);
+
+  useEffect(() => {
+    refreshMyIdentity();
+  }, [refreshMyIdentity]);
   // The handle whose profile is open, or null. A handle (not an id) because
   // that's what a byline carries and what user_profile looks up.
   const [profileHandle, setProfileHandle] = useState<string | null>(null);
@@ -1065,6 +1086,28 @@ function Map({
         />
       )}
 
+      {/* Your own profile as the last tab — the same ProfileView others see,
+          in tab mode (no back button, sits below the nav) with Edit profile
+          in place of Follow. myHandle is loaded from myProfile; until it
+          resolves the tab shows a brief loading state rather than nothing. */}
+      {activeTab === "profile" &&
+        (myHandle ? (
+          <ProfileView
+            key={`self-${myHandle}`}
+            gateway={gateway}
+            handle={myHandle}
+            variant="tab"
+            onEditProfile={() => setEditingProfile(true)}
+            onOpenProfile={(handle) => setProfileHandle(handle)}
+            onOpenPost={(postId) => void openPostById(postId)}
+            onMessage={(userId) => void openDm(userId)}
+          />
+        ) : (
+          <div className="profile-view profile-view-tab">
+            <p className="profile-view-status">Loading…</p>
+          </div>
+        ))}
+
       {/* A full-screen surface above the tabs, like the DM thread — editing
           your identity is a task you enter and leave. The notification
           toggle here shares page.tsx's single push subscription (state and
@@ -1104,9 +1147,11 @@ function Map({
           }}
           onClose={() => setEditingProfile(false)}
           onSaved={() => {
-            // The People card reads the display name from presence; re-fetch
-            // so the new name shows the moment you're back.
+            // The People card reads the name from presence; the Profile tab
+            // and its tab-bar avatar read it from myProfile. Refresh both so
+            // the new name shows everywhere the moment you're back.
             presence.refreshMe();
+            refreshMyIdentity();
           }}
         />
       )}
@@ -1153,7 +1198,7 @@ function Map({
             onClick={() => setActiveTab("feed")}
           >
             <Icon src={ICONS.feed} size={21} />
-            <span>Feed</span>
+            <span>Posts</span>
           </button>
           <button
             type="button"
@@ -1173,7 +1218,23 @@ function Map({
             onClick={() => setActiveTab("people")}
           >
             <Icon src={ICONS.people} size={21} />
-            <span>People</span>
+            <span>Friends</span>
+          </button>
+          {/* Your own profile, last — the Instagram/Threads convention. The
+              tab icon is your own avatar (initials for now) rather than a
+              generic person glyph, so it reads as "you" and never collides
+              with the Friends icon. A teal ring marks it when active. */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "profile"}
+            className={`tab-bar-button${activeTab === "profile" ? " active" : ""}`}
+            onClick={() => setActiveTab("profile")}
+          >
+            <span className={`tab-bar-avatar${activeTab === "profile" ? " active" : ""}`}>
+              <Avatar name={myName} seed={myHandle ?? "you"} size={22} />
+            </span>
+            <span>Profile</span>
           </button>
         </nav>
       )}

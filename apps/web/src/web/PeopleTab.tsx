@@ -141,12 +141,12 @@ export default function PeopleTab({ presence, demoMode, onMessage, onEditProfile
   }
 
   return (
-    <div className="people-tab" role="tabpanel" aria-label="People">
+    <div className="people-tab" role="tabpanel" aria-label="Friends">
       <header className="people-tab-header">
         <a className="brand" href="#top" aria-label="SoSo home">
           <span>So</span>So
         </a>
-        <h1>People</h1>
+        <h1>Friends</h1>
         <button
           type="button"
           className={`people-add-toggle${adding ? " active" : ""}`}

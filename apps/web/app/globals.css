@@ -747,8 +747,17 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    than a fixed radius, so it stays a true pill regardless of the bar's actual
    height instead of needing hand-tuning if padding/icon size ever changes. */
 .tab-bar { position:fixed; z-index:6; left:50%; transform:translateX(-50%); bottom:calc(14px + env(safe-area-inset-bottom)); display:flex; gap:2px; padding:6px; border-radius:999px; background:rgba(255,255,255,.55); backdrop-filter:blur(30px) saturate(200%); -webkit-backdrop-filter:blur(30px) saturate(200%); border:1px solid rgba(255,255,255,.55); box-shadow:var(--e3), inset 0 1px 0 rgba(255,255,255,.8), inset 0 0 0 1px rgba(255,255,255,.2); }
-.tab-bar-button { display:flex; flex-direction:column; align-items:center; gap:2px; min-width:68px; padding:8px 16px 7px; border:0; border-radius:999px; background:transparent; color:var(--muted); font-size:.66rem; font-weight:750; transition:background .18s, color .16s; }
+/* min-width/padding tightened from the four-tab era so five tabs (Map,
+   Posts, Chat, Friends, Profile) fit the pill on a 375px phone without the
+   bar overflowing its centered position. */
+.tab-bar-button { display:flex; flex-direction:column; align-items:center; gap:2px; min-width:56px; padding:8px 10px 7px; border:0; border-radius:999px; background:transparent; color:var(--muted); font-size:.66rem; font-weight:750; transition:background .18s, color .16s; }
 .tab-bar-button svg { width:21px; height:21px; }
+/* The Profile tab's icon is the user's own avatar. A 22px disc that gets a
+   teal ring when the tab is active, so "you" is marked the same way the
+   other icons' active pill marks them. */
+.tab-bar-avatar { display:grid; place-items:center; width:23px; height:23px; border-radius:50%; }
+.tab-bar-avatar .avatar { width:22px !important; height:22px !important; }
+.tab-bar-avatar.active { box-shadow:0 0 0 2px var(--teal); }
 /* The selected tab's own rounded highlight, not just a color change on the
    label — this is the specific detail that makes the reference bar read as
    "glass with icons" rather than "text bar with icons added": each icon sits
@@ -980,6 +989,14 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    (teal / mint / hot pink) the way the map pins already do, so a profile
    feels like social media, not a dashboard. */
 .profile-view { position:fixed; z-index:20; inset:0; display:flex; flex-direction:column; background:#f6f8f7; }
+/* As the Profile TAB it sits in the tab stack (z-index:1, below the floating
+   tab bar at z-index:6) rather than as an overlay above everything, and its
+   scroll clears the nav so the last post isn't hidden behind it. */
+.profile-view-tab { z-index:1; }
+.profile-view-tab .profile-view-scroll { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
+/* No back button in the tab, so the cover must clear the status bar itself
+   rather than relying on the floating button's own safe-area inset. */
+.profile-view-tab .profile-view-cover { margin-top:env(safe-area-inset-top); }
 /* Floats over the cover; its translucent disc keeps it readable on both the
    gradient and the plain white loading state. */
 .profile-view-back { position:absolute; z-index:2; top:max(12px, env(safe-area-inset-top)); left:12px; display:grid; place-items:center; width:38px; height:38px; border:0; border-radius:50%; background:rgba(255,255,255,.82); color:var(--deep); box-shadow:var(--e1); backdrop-filter:blur(8px); transition:background .16s, transform .16s; }
@@ -997,8 +1014,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 /* The avatar sits in a white ring that straddles the cover edge — the
    overlapping-avatar move every social profile uses, which is also what
    ties the colourful banner to the white card below it. */
-.profile-view-avatar-ring { margin-top:-52px; padding:5px; border-radius:50%; background:#fff; box-shadow:var(--e2); }
-.profile-view-avatar-ring .avatar { display:block; }
+.profile-view-avatar-ring { margin-top:-52px; padding:5px; border-radius:50%; background:#fff; box-shadow:var(--e2); line-height:0; }
 .profile-view-name { margin:12px 0 0; font-size:1.5rem; font-weight:900; letter-spacing:-.035em; color:var(--deep); text-align:center; }
 .profile-view-handle { color:var(--muted); font-size:.85rem; font-weight:650; }
 .profile-view-bio { margin:10px 0 0; max-width:420px; color:var(--ink); font-size:.9rem; line-height:1.5; text-align:center; white-space:pre-wrap; }

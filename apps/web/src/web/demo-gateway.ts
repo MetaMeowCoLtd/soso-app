@@ -1171,6 +1171,26 @@ export function createDemoGateway(): SosoGateway {
     // post list — not to model a real social graph demo mode doesn't have.
     async userProfile(handle: string) {
       const posts = loadPosts().filter((p) => p.status === "live" && p.expiresAt > nowSeconds());
+      // The demo "self" handle is what myProfile returns; the Profile tab
+      // passes it, and it must come back isSelf:true (Edit profile, no
+      // Follow). Any other handle is the one seed "neighbour".
+      if (handle === "demo_user") {
+        const me = getMe();
+        const edits = loadProfileEdits();
+        return {
+          id: me,
+          handle,
+          displayName: edits.displayName ?? "You (demo)",
+          bio: edits.bio ?? "",
+          pins: posts.filter((p) => p.authorId === me).length,
+          followers: 0,
+          following: 0,
+          isSelf: true,
+          isFollowing: false,
+          isMutual: false,
+          badges: [],
+        };
+      }
       return {
         id: "seed",
         handle,
