@@ -26,7 +26,15 @@ self.addEventListener("push", (event) => {
 });
 
 async function handlePush(event) {
-  let payload = { title: "SoSo", body: "Something new nearby.", postId: null, dmSenderId: null };
+  let payload = {
+    title: "SoSo",
+    body: "Something new nearby.",
+    postId: null,
+    dmSenderId: null,
+    // A new-follower push carries the follower's handle; tapping it opens
+    // their profile so you can follow back.
+    profileHandle: null,
+  };
   try {
     if (event.data) payload = { ...payload, ...event.data.json() };
   } catch {
@@ -49,7 +57,11 @@ async function handlePush(event) {
     body,
     icon: "icons/icon-192.png",
     badge: "icons/icon-192.png",
-    data: { postId: payload.postId, dmSenderId: payload.dmSenderId },
+    data: {
+      postId: payload.postId,
+      dmSenderId: payload.dmSenderId,
+      profileHandle: payload.profileHandle,
+    },
   });
 }
 
@@ -171,10 +183,11 @@ async function decryptDmPreview(dm) {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   // Present on every notification this app sends — the new-post case, the
-  // vote/reply case, and the DM case all include one of these in their
-  // payload's `data` field (never both).
+  // vote/reply case, the DM case, and the new-follower case each include one
+  // of these in their payload's `data` field (never more than one).
   const postId = event.notification.data?.postId ?? null;
   const dmSenderId = event.notification.data?.dmSenderId ?? null;
+  const profileHandle = event.notification.data?.profileHandle ?? null;
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
@@ -186,6 +199,7 @@ self.addEventListener("notificationclick", (event) => {
           // this; see page.tsx's serviceWorker message handler.
           if (postId) client.postMessage({ type: "open-post", postId });
           if (dmSenderId) client.postMessage({ type: "open-dm", dmSenderId });
+          if (profileHandle) client.postMessage({ type: "open-profile", handle: profileHandle });
           return client.focus();
         }
       }
@@ -197,7 +211,9 @@ self.addEventListener("notificationclick", (event) => {
           ? `./?post=${encodeURIComponent(postId)}`
           : dmSenderId
             ? `./?dm=${encodeURIComponent(dmSenderId)}`
-            : "./";
+            : profileHandle
+              ? `./?profile=${encodeURIComponent(profileHandle)}`
+              : "./";
         return self.clients.openWindow(url);
       }
     }),

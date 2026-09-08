@@ -534,6 +534,24 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .people-switch.on .people-switch-knob { transform:translateX(19px); }
 
 .people-nearby { display:flex; align-items:center; gap:7px; margin-top:12px; padding-top:11px; border-top:1px solid var(--hairline); color:var(--muted); font-size:.74rem; line-height:1.35; }
+
+/* Follow requests — people who followed you, shown above the friends list so
+   a new follower is the first thing you see, with follow-back one tap away. */
+.people-requests { margin:14px 0 4px; }
+.people-requests-title { display:flex; align-items:center; gap:8px; margin:0 0 10px; color:var(--deep); font-size:.95rem; font-weight:900; letter-spacing:-.02em; }
+.people-requests-count { display:grid; place-items:center; min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:var(--hot); color:#fff; font-size:.7rem; font-weight:800; }
+.people-requests-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.people-request { display:flex; align-items:center; gap:10px; padding:10px 11px; border-radius:16px; background:#fff; box-shadow:var(--e1); }
+.people-request-who { flex:1; min-width:0; display:flex; align-items:center; gap:11px; border:0; background:transparent; padding:0; text-align:left; cursor:pointer; }
+.people-request-id { min-width:0; display:flex; flex-direction:column; }
+.people-request-id strong { color:var(--deep); font-size:.9rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.people-request-id span { color:var(--muted); font-size:.73rem; }
+.people-request-actions { flex-shrink:0; display:flex; align-items:center; gap:6px; }
+.people-request-follow { border:0; border-radius:999px; padding:9px 15px; background:linear-gradient(120deg, var(--teal), var(--deep)); color:#fff; font-size:.8rem; font-weight:800; box-shadow:0 4px 11px color-mix(in srgb, var(--teal), transparent 68%); transition:transform .16s, opacity .16s; }
+.people-request-follow:active:not(:disabled) { transform:scale(.97); }
+.people-request-follow:disabled { opacity:.55; }
+.people-request-dismiss { display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:50%; background:#f1f4f2; color:var(--muted); transition:background .16s; }
+.people-request-dismiss:hover { background:#e5eae7; color:var(--deep); }
 .people-nearby strong { color:var(--deep); font-size:.95rem; font-weight:800; }
 .people-nearby-dot { flex-shrink:0; width:7px; height:7px; border-radius:50%; background:#34d399; box-shadow:0 0 0 3px rgba(52,211,153,.2); }
 

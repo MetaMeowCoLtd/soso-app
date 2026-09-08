@@ -1095,8 +1095,30 @@ export function createDemoGateway(): SosoGateway {
       return [];
     },
 
-    async followByHandle(): Promise<FollowResult> {
-      throw new Error('Following people needs the real backend, not available in demo mode.');
+    async followByHandle(handle: string): Promise<FollowResult> {
+      // Resolves rather than throwing: the app now surfaces Follow in several
+      // places (profile Follow button, follow-back on a request), and a demo
+      // that errored on every one of them would look broken. Demo has no real
+      // social graph, so this doesn't add anyone to the friends list — it just
+      // lets the Follow affordances complete and settle the way they would
+      // against a backend.
+      const clean = handle.trim().replace(/^@/, "");
+      return { id: `demo-${clean}`, handle: clean, displayName: clean, mutual: false };
+    },
+
+    // A single sample so the Friends tab's "Follow requests" section has
+    // something to render in demo — real accounts get their actual incoming
+    // follows from list_incoming_follows (migration 0035).
+    async listIncomingFollows() {
+      return [
+        {
+          id: "seed",
+          handle: "kenji_naka",
+          displayName: "Kenji Nakamura",
+          bio: "New around Nakano — say hi 👋",
+          followedAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
+        },
+      ];
     },
 
     async unfollowUser(): Promise<void> {},

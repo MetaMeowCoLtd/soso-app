@@ -347,6 +347,38 @@ export function decodeFriend(w: WireFriend): Friend {
   };
 }
 
+/**
+ * Someone who follows you but whom you don't follow back yet — the Friends
+ * tab's "Follow requests" section (`list_incoming_follows`, migration 0035).
+ * Following is open here, so this is a follow-back prompt, not an approve/deny.
+ */
+export interface IncomingFollow {
+  id: string;
+  handle: string;
+  displayName: string;
+  bio: string;
+  /** ISO timestamp of when they followed you — newest first in the list. */
+  followedAt: string;
+}
+
+export interface WireIncomingFollow {
+  id: string;
+  handle: string;
+  name: string;
+  bio: string;
+  followed_at: string;
+}
+
+export function decodeIncomingFollow(w: WireIncomingFollow): IncomingFollow {
+  return {
+    id: w.id,
+    handle: w.handle,
+    displayName: w.name,
+    bio: w.bio ?? "",
+    followedAt: w.followed_at,
+  };
+}
+
 /** Result of following someone by handle. */
 export interface FollowResult {
   id: string;

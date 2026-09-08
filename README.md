@@ -561,6 +561,26 @@ None of the following occurs automatically from a `git push`.
     don't, and how that's done without the server ever reading a plaintext
     message. Also optional — skip it and DMs still work, just silently.
 
+4e. **Create a fifth Database Webhook, for new followers.** Same function,
+    same secret header, different table — one deployed function still routes
+    them all by table name.
+
+    - Name: `notify-new-follow`
+    - Table: `public.follows`
+    - Events: **Insert** only
+    - Type: **Supabase Edge Function**
+    - Edge Function: `notify-new-pin` (the same one)
+    - HTTP header: identical to step 4, `x-push-secret` with the same value
+
+    Sends "X started following you" to the person being followed, deep-linked
+    to X's profile so they can follow back in a tap. Names the follower
+    (unlike the anonymous like/reply bodies) because a follow is a deliberate,
+    public act — nothing is disclosed that the linked profile doesn't already
+    show. Blocks are re-checked at send time. Optional like the rest; without
+    it, follows still appear in the recipient's **Follow requests** section in
+    the Friends tab (that part needs no push and no webhook — it reads
+    `list_incoming_follows`, migration 0035).
+
 5. **Provide the client with the public key.** This value is safe to
    expose; that is the purpose of a VAPID public key. Add it to
    `apps/web/.env.local` for local development and as a repository variable

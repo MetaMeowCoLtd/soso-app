@@ -35,6 +35,7 @@ import type {
   FeedDelta,
   FollowResult,
   Friend,
+  IncomingFollow,
   MyProfile,
   NewPost,
   Pin,
@@ -205,6 +206,13 @@ export interface SosoGateway {
 
   followByHandle(handle: string): Promise<FollowResult>;
   unfollowUser(userId: string): Promise<void>;
+
+  /**
+   * People who follow you but whom you don't follow back yet — the Friends
+   * tab's "Follow requests" section. Following is open, so these are
+   * follow-back prompts, not pending approvals.
+   */
+  listIncomingFollows(): Promise<IncomingFollow[]>;
 
   /**
    * Another person's profile by handle, for the profile-view screen — name,

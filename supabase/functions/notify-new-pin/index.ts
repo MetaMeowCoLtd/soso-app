@@ -478,6 +478,91 @@ async function handleDmMessage(
   return new Response(JSON.stringify(result), { status: 200 });
 }
 
+interface FollowPayload {
+  follower_id: string;
+  followee_id: string;
+}
+
+function parseFollowPayload(value: unknown): FollowPayload | null {
+  if (!isRecord(value) || value.type !== "INSERT" || !isRecord(value.record)) return null;
+  const r = value.record;
+  if (typeof r.follower_id !== "string" || typeof r.followee_id !== "string") return null;
+  return { follower_id: r.follower_id, followee_id: r.followee_id };
+}
+
+/**
+ * "X started following you", deep-linked to X's profile so the recipient can
+ * follow back in a tap.
+ *
+ * Names the follower, unlike the anonymous vote/reply bodies: a follow is a
+ * deliberate, public act by a named account (their handle is on the profile
+ * this leads to), so there is nothing withheld by naming them — the same
+ * reasoning the DM notification uses for showing the sender's name.
+ */
+async function handleNewFollow(
+  supabase: ReturnType<typeof createClient>,
+  rawPayload: unknown,
+): Promise<Response> {
+  const payload = parseFollowPayload(rawPayload);
+  if (!payload) {
+    console.error("[notify-new-pin] unexpected follows payload", rawPayload);
+    return new Response("Bad request", { status: 400 });
+  }
+
+  if (!VAPID_CONFIGURED) {
+    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
+  }
+
+  // Re-checked here, not trusted from the moment of the follow: a block can
+  // land between the insert this fired for and this function running, and a
+  // "started following you" nudge is exactly the contact a block should stop.
+  const { data: blockRow, error: blockError } = await supabase
+    .from("blocks")
+    .select("blocker_id")
+    .or(
+      `and(blocker_id.eq.${payload.followee_id},blocked_id.eq.${payload.follower_id}),` +
+        `and(blocker_id.eq.${payload.follower_id},blocked_id.eq.${payload.followee_id})`,
+    )
+    .maybeSingle();
+  if (blockError) {
+    console.error("[notify-new-pin] blocks lookup failed:", blockError);
+    return new Response("Internal error", { status: 500 });
+  }
+  if (blockRow) {
+    return new Response(JSON.stringify({ sent: 0, reason: "blocked" }), { status: 200 });
+  }
+
+  const [{ data: follower }, { data: endpoints, error: endpointsError }] = await Promise.all([
+    supabase.from("profiles").select("handle, display_name").eq("id", payload.follower_id).maybeSingle(),
+    supabase.from("push_endpoints").select("endpoint, p256dh, auth").eq("user_id", payload.followee_id),
+  ]);
+
+  if (endpointsError) {
+    console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
+    return new Response("Internal error", { status: 500 });
+  }
+  if (!follower?.handle) {
+    // No handle means no profile to deep-link to; nothing useful to send.
+    return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
+  }
+
+  const name = follower.display_name || `@${follower.handle}`;
+  const notificationBody = JSON.stringify({
+    title: "SoSo",
+    body: `${name} started following you`,
+    // The client opens ProfileView by handle from this (see sw.js /
+    // page.tsx's `?profile=` and open-profile handling).
+    profileHandle: follower.handle,
+  });
+
+  const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
+  console.log("[notify-new-pin] follow notification complete", {
+    followee: payload.followee_id,
+    ...result,
+  });
+  return new Response(JSON.stringify(result), { status: 200 });
+}
+
 /**
  * Reverse-geocodes a post's stored (already precision-fuzzed, for categories
  * that fuzz) location into a human-readable address, and writes it to
@@ -621,6 +706,9 @@ Deno.serve(async (req: Request) => {
   }
   if (isRecord(rawPayload) && rawPayload.table === "dm_messages") {
     return await handleDmMessage(supabase, rawPayload);
+  }
+  if (isRecord(rawPayload) && rawPayload.table === "follows") {
+    return await handleNewFollow(supabase, rawPayload);
   }
 
   const payload = parsePostPayload(rawPayload);

@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { formatAgo, type Friend } from "soso-core";
+import { formatAgo, type Friend, type IncomingFollow, type SosoGateway } from "soso-core";
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
 import type { UsePresenceResult } from "./usePresence";
@@ -42,6 +42,10 @@ import type { UsePresenceResult } from "./usePresence";
 interface PeopleTabProps {
   presence: UsePresenceResult;
   demoMode: boolean;
+  /** For loading incoming follows directly (works in demo too, where presence is off). */
+  gateway: SosoGateway;
+  /** Opens a person's profile — from a follow request row. */
+  onOpenProfile: (handle: string) => void;
   /**
    * Opens a direct-message thread with a friend. Handled by page.tsx rather
    * than here because the thread view is a full-screen surface that must
@@ -70,7 +74,60 @@ function statusOf(friend: Friend, nowSeconds: number): string | null {
     : null;
 }
 
-export default function PeopleTab({ presence, demoMode, onMessage, onEditProfile }: PeopleTabProps) {
+export default function PeopleTab({
+  presence,
+  demoMode,
+  gateway,
+  onMessage,
+  onEditProfile,
+  onOpenProfile,
+}: PeopleTabProps) {
+  // People who follow you but you don't follow back yet. Loaded here (not via
+  // presence) so it works in demo mode too, where presence is disabled.
+  const [incoming, setIncoming] = useState<IncomingFollow[]>([]);
+  // Handles currently being followed back, to disable their button mid-request.
+  const [followingBack, setFollowingBack] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let alive = true;
+    gateway
+      .listIncomingFollows()
+      .then((list) => {
+        if (alive) setIncoming(list);
+      })
+      .catch(() => {
+        // A failed load just leaves the section empty rather than erroring —
+        // it's a secondary surface, not the point of the tab.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [gateway]);
+
+  async function followBack(item: IncomingFollow) {
+    setFollowingBack((s) => new Set(s).add(item.handle));
+    try {
+      await presence.follow(item.handle);
+      // Now mutual — it leaves the requests list and shows up as a friend.
+      setIncoming((list) => list.filter((i) => i.id !== item.id));
+      presence.refreshFriends();
+    } catch {
+      // Left in place so it can be retried; presence surfaces its own error.
+    } finally {
+      setFollowingBack((s) => {
+        const next = new Set(s);
+        next.delete(item.handle);
+        return next;
+      });
+    }
+  }
+
+  function dismissRequest(item: IncomingFollow) {
+    // Local-only: they still follow you (an open follow can't be refused),
+    // this just clears it from your view.
+    setIncoming((list) => list.filter((i) => i.id !== item.id));
+  }
+
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
@@ -227,6 +284,55 @@ export default function PeopleTab({ presence, demoMode, onMessage, onEditProfile
             </span>
           </div>
         </section>
+
+        {/* Follow requests: people who followed you and aren't yet mutual.
+            "Requests" in the sense people expect, though an open follow can't
+            be denied — the real actions are follow back (→ mutual, unlocks
+            messaging) or dismiss (clears it from view). Tapping a row opens
+            their profile, the same place the follow notification leads. */}
+        {incoming.length > 0 && (
+          <section className="people-requests" aria-label="Follow requests">
+            <h2 className="people-requests-title">
+              Follow requests <span className="people-requests-count">{incoming.length}</span>
+            </h2>
+            <ul className="people-requests-list">
+              {incoming.map((item) => (
+                <li key={item.id} className="people-request">
+                  <button
+                    type="button"
+                    className="people-request-who"
+                    onClick={() => onOpenProfile(item.handle)}
+                    aria-label={`View ${item.displayName}'s profile`}
+                  >
+                    <Avatar name={item.displayName} seed={item.handle} size={44} />
+                    <span className="people-request-id">
+                      <strong>{item.displayName}</strong>
+                      <span>followed you {formatAgo(Math.floor(new Date(item.followedAt).getTime() / 1000), nowSeconds)}</span>
+                    </span>
+                  </button>
+                  <div className="people-request-actions">
+                    <button
+                      type="button"
+                      className="people-request-follow"
+                      onClick={() => void followBack(item)}
+                      disabled={followingBack.has(item.handle)}
+                    >
+                      Follow back
+                    </button>
+                    <button
+                      type="button"
+                      className="people-request-dismiss"
+                      onClick={() => dismissRequest(item)}
+                      aria-label={`Dismiss ${item.displayName}`}
+                    >
+                      <Icon src={ICONS.close} size={15} />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {adding && (
           <section className="people-add" aria-label="Add someone">

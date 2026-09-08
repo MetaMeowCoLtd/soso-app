@@ -153,6 +153,9 @@ class FakeGateway implements SosoGateway {
   async listUserPosts() {
     return { cursor: null, posts: [] };
   }
+  async listIncomingFollows() {
+    return [];
+  }
   async presenceHeartbeat() {}
   async stopSharingPresence() {}
   async areaPresenceCount() {

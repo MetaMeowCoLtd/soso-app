@@ -686,19 +686,26 @@ function Map({
     // People does, so this deep link reuses that verbatim rather than
     // needing its own thread-by-id path.
     const dmSenderId = params.get("dm");
+    // A new-follower notification deep-links here: the follower's handle, so
+    // the recipient lands on their profile and can follow back in one tap.
+    const profileParam = params.get("profile");
     if (postId) {
       void openPostById(postId);
     }
     if (dmSenderId) {
       void openDm(dmSenderId);
     }
-    if (postId || dmSenderId) {
+    if (profileParam) {
+      setProfileHandle(profileParam);
+    }
+    if (postId || dmSenderId || profileParam) {
       // Stripped immediately rather than left in the address bar —
       // otherwise reloading the page (or sharing the URL) would keep
-      // reopening the same post or thread indefinitely.
+      // reopening the same post, thread, or profile indefinitely.
       const url = new URL(window.location.href);
       url.searchParams.delete("post");
       url.searchParams.delete("dm");
+      url.searchParams.delete("profile");
       window.history.replaceState({}, "", url.toString());
     }
 
@@ -710,6 +717,9 @@ function Map({
       }
       if (event.data?.type === "open-dm" && typeof event.data.dmSenderId === "string") {
         void openDm(event.data.dmSenderId);
+      }
+      if (event.data?.type === "open-profile" && typeof event.data.handle === "string") {
+        setProfileHandle(event.data.handle);
       }
     }
     navigator.serviceWorker?.addEventListener("message", onMessage);
@@ -1081,8 +1091,10 @@ function Map({
         <PeopleTab
           presence={presence}
           demoMode={mode !== "supabase"}
+          gateway={gateway}
           onMessage={(userId) => void openDm(userId)}
           onEditProfile={() => setEditingProfile(true)}
+          onOpenProfile={(handle) => setProfileHandle(handle)}
         />
       )}
 

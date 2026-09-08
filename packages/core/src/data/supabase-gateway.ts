@@ -53,6 +53,7 @@ import {
   parseBoardStrokeBatch,
   decodeFeedPostsPage,
   decodeUserProfile,
+  decodeIncomingFollow,
   decodePostReply,
   type Board,
   type BoardStrokeBatch,
@@ -67,6 +68,8 @@ import {
   type FeedPostsPage,
   type WireFeedPostsPage,
   type UserProfile,
+  type IncomingFollow,
+  type WireIncomingFollow,
   type WireUserProfile,
   type PostReply,
   type WirePostReply,
@@ -364,6 +367,12 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
     async unfollowUser(userId: string): Promise<void> {
       const { error } = await client.rpc('unfollow_user', { p_user_id: userId });
       if (error) throw toSosoError(error);
+    },
+
+    async listIncomingFollows(): Promise<IncomingFollow[]> {
+      const { data, error } = await client.rpc('list_incoming_follows');
+      if (error) throw toSosoError(error);
+      return (data as WireIncomingFollow[] | null ?? []).map(decodeIncomingFollow);
     },
 
     async userProfile(handle: string): Promise<UserProfile | null> {
