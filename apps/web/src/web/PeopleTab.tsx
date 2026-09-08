@@ -49,6 +49,8 @@ interface PeopleTabProps {
    * ThoughtThread lives up there instead of inside FeedTab.
    */
   onMessage: (userId: string) => void;
+  /** Opens the profile settings surface. Owned by page.tsx, like the DM thread. */
+  onEditProfile: () => void;
 }
 
 type Filter = "all" | "online" | "close";
@@ -68,7 +70,7 @@ function statusOf(friend: Friend, nowSeconds: number): string | null {
     : null;
 }
 
-export default function PeopleTab({ presence, demoMode, onMessage }: PeopleTabProps) {
+export default function PeopleTab({ presence, demoMode, onMessage, onEditProfile }: PeopleTabProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
@@ -183,6 +185,15 @@ export default function PeopleTab({ presence, demoMode, onMessage }: PeopleTabPr
               </button>
             )}
           </div>
+
+          {/* Edit profile lives on the "You" card, the same place Instagram
+              and Threads put it — right where your own identity is shown.
+              Offered even in demo mode, since the settings screen loads and
+              saves through the demo gateway too. */}
+          <button type="button" className="people-edit-profile" onClick={onEditProfile}>
+            <Icon src={ICONS.sparkle} size={15} />
+            Edit profile
+          </button>
 
           <div className="people-share">
             <div className="people-share-text">

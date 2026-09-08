@@ -287,6 +287,7 @@ interface DemoVote {
 const POSTS_KEY = "soso-demo:posts:v1";
 const VOTES_KEY = "soso-demo:votes:v1";
 const ME_KEY = "soso-demo:me:v1";
+const PROFILE_KEY = "soso-demo:profile:v1";
 const CHAT_KEY = "soso-demo:chat:v1";
 const CHAT_REACTIONS_KEY = "soso-demo:chat-reactions:v1";
 const COINS_KEY = "soso-demo:coins:v1";
@@ -334,6 +335,19 @@ function getMe(): string {
     window.localStorage.setItem(ME_KEY, id);
   }
   return id;
+}
+
+interface DemoProfileEdits {
+  displayName?: string;
+  bio?: string;
+}
+
+function loadProfileEdits(): DemoProfileEdits {
+  return readJSON<DemoProfileEdits>(PROFILE_KEY, {});
+}
+
+function saveProfileEdits(edits: DemoProfileEdits): void {
+  writeJSON(PROFILE_KEY, edits);
 }
 
 /** Metres between two points. Good enough for a client-side proximity gate. */
@@ -980,7 +994,33 @@ export function createDemoGateway(): SosoGateway {
 
     async myProfile() {
       const me = getMe();
-      return { id: me, handle: 'demo_user', displayName: 'You (demo)', coinBalance: getCoinBalance(me) };
+      const edits = loadProfileEdits();
+      return {
+        id: me,
+        handle: "demo_user",
+        displayName: edits.displayName ?? "You (demo)",
+        bio: edits.bio ?? "",
+        coinBalance: getCoinBalance(me),
+      };
+    },
+
+    // Persists to localStorage so the settings page is genuinely exercisable
+    // in demo mode — edits survive a reload the same way a real backend's
+    // would, rather than resetting and making the screen look broken. Mirrors
+    // update_profile's validation (migration 0033) so demo and real reject
+    // the same inputs; the trimming here is what the server would store.
+    async updateProfile(input: { displayName: string; bio: string }) {
+      const displayName = input.displayName.trim();
+      const bio = input.bio.trim();
+      if (displayName.length < 1 || displayName.length > 40) {
+        throw new SosoError("soso/invalid_display_name");
+      }
+      if (bio.length > 160) {
+        throw new SosoError("soso/bio_too_long");
+      }
+      saveProfileEdits({ displayName, bio });
+      const me = getMe();
+      return { id: me, handle: "demo_user", displayName, bio, coinBalance: getCoinBalance(me) };
     },
 
     // --- Coins -------------------------------------------------------------

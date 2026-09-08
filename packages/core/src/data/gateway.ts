@@ -142,6 +142,16 @@ export interface SosoGateway {
   /** Your own handle, for sharing with someone who wants to add you. */
   myProfile(): Promise<MyProfile | null>;
 
+  /**
+   * Updates your own display name and bio. Handle is deliberately not
+   * editable here — it is claimed once at signup (see `complete_signup`),
+   * and a rename that frees the old handle is an impersonation vector that
+   * needs a reservation period this app has no reason to build yet. Returns
+   * the profile as saved, so the caller renders the server's own trimmed
+   * copy rather than the raw input.
+   */
+  updateProfile(input: { displayName: string; bio: string }): Promise<MyProfile>;
+
   // --- Coins ---------------------------------------------------------------
   //
   // Earned by walking (`recordWalk`), spent posting a pin (10 coins, charged

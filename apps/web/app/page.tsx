@@ -15,6 +15,7 @@ import PeopleTab from "@/src/web/PeopleTab";
 import DmThreadView from "@/src/web/DmThreadView";
 import { ensurePublishedKey } from "@/src/web/dmCrypto";
 import ChatPanel from "@/src/web/ChatPanel";
+import ProfileSettings from "@/src/web/ProfileSettings";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import AuthScreens from "@/src/web/AuthScreens";
 import { isGuest, loadAccount, onAuthChange, setGuest, type Account } from "@/src/web/auth";
@@ -164,6 +165,7 @@ function Map({
   // equivalent persistent state of its own, so it mounts and unmounts
   // freely with the tab itself.
   const [activeTab, setActiveTab] = useState<"map" | "feed" | "chat" | "people">("map");
+  const [editingProfile, setEditingProfile] = useState(false);
 
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [locating, setLocating] = useState(false);
@@ -1054,6 +1056,31 @@ function Map({
           presence={presence}
           demoMode={mode !== "supabase"}
           onMessage={(userId) => void openDm(userId)}
+          onEditProfile={() => setEditingProfile(true)}
+        />
+      )}
+
+      {/* A full-screen surface above the tabs, like the DM thread — editing
+          your identity is a task you enter and leave. The notification
+          toggle here shares page.tsx's single push subscription (state and
+          handler) with the map's bell, so the two can never disagree about
+          whether this browser is subscribed. */}
+      {editingProfile && (
+        <ProfileSettings
+          gateway={gateway}
+          demoMode={mode !== "supabase"}
+          push={{
+            available: mode === "supabase" && pushAvailability === "available",
+            subscribed: pushSubscribed,
+            busy: pushBusy,
+            onToggle: () => void toggleNotifications(),
+          }}
+          onClose={() => setEditingProfile(false)}
+          onSaved={() => {
+            // The People card reads the display name from presence; re-fetch
+            // so the new name shows the moment you're back.
+            presence.refreshMe();
+          }}
         />
       )}
 

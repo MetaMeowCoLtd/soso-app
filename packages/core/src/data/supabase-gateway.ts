@@ -291,6 +291,15 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return decodeMyProfile(data as WireMyProfile);
     },
 
+    async updateProfile(input: { displayName: string; bio: string }): Promise<MyProfile> {
+      const { data, error } = await client.rpc('update_profile', {
+        p_display_name: input.displayName,
+        p_bio: input.bio,
+      });
+      if (error) throw toSosoError(error);
+      return decodeMyProfile(data as WireMyProfile);
+    },
+
     // --- Coins -----------------------------------------------------------
 
     async myCoinBalance(): Promise<number> {

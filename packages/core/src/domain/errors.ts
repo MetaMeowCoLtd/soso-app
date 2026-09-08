@@ -66,6 +66,7 @@ export const SOSO_ERROR_CODES = [
   'soso/handle_reserved',
   'soso/handle_already_set',
   'soso/invalid_display_name',
+  'soso/bio_too_long',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -162,5 +163,6 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/handle_reserved': 'That username is not available.',
   'soso/handle_already_set': 'Your username has already been set.',
   'soso/invalid_display_name': 'Enter a name between 1 and 40 characters.',
+  'soso/bio_too_long': 'That bio is too long (160 characters max).',
   'soso/unknown': 'Something went wrong. Try again.',
 };

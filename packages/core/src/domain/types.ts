@@ -255,6 +255,8 @@ export interface MyProfile {
   id: string;
   handle: string;
   displayName: string;
+  /** Free text the owner wrote about themselves. Empty string, never null, when unset. */
+  bio: string;
   /** Spendable balance. Earned by walking, spent posting a pin. */
   coinBalance: number;
 }
@@ -264,6 +266,7 @@ export interface WireMyProfile {
   id: string;
   handle: string;
   name: string;
+  bio: string;
   coins: number;
 }
 
@@ -272,6 +275,10 @@ export function decodeMyProfile(w: WireMyProfile): MyProfile {
     id: w.id,
     handle: w.handle,
     displayName: w.name,
+    // Coalesced because a profile row written before migration 0033 added
+    // the column has no bio at all; "" is the same "no bio" the empty-string
+    // default produces, so both paths render identically.
+    bio: w.bio ?? '',
     coinBalance: Number(w.coins) || 0,
   };
 }

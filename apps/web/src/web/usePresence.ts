@@ -53,6 +53,8 @@ export interface UsePresenceResult {
   busy: boolean;
   error: string | null;
   refreshFriends: () => void;
+  /** Re-fetch your own profile — after editing your name or bio, so `me` isn't stale. */
+  refreshMe: () => void;
   follow: (handle: string) => Promise<void>;
   unfollow: (userId: string) => Promise<void>;
   block: (userId: string) => Promise<void>;
@@ -77,10 +79,20 @@ export function usePresence(
   // server and a mismatch here would be a hydration error.
   useEffect(() => setSharingState(readStoredSharing()), []);
 
-  useEffect(() => {
+  const refreshMe = useCallback(() => {
     if (!enabled) return;
-    void gateway.myProfile().then(setMe).catch(() => setMe(null));
+    // Only overwrites on success — a failed refetch after a profile edit
+    // should leave the known name in place, not blank it.
+    void gateway.myProfile().then(setMe).catch(() => {});
   }, [gateway, enabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      setMe(null);
+      return;
+    }
+    refreshMe();
+  }, [enabled, refreshMe]);
 
   // Keep the latest centre in a ref so the heartbeat interval does not need to
   // be torn down and recreated every time the map moves.
@@ -261,6 +273,7 @@ export function usePresence(
     busy,
     error,
     refreshFriends,
+    refreshMe,
     follow,
     unfollow,
     block,

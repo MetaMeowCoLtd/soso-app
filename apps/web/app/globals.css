@@ -515,6 +515,9 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .people-copy { flex-shrink:0; display:inline-flex; align-items:center; gap:5px; padding:7px 12px; border:1px solid var(--hairline); border-radius:999px; background:#fff; color:var(--deep); font-size:.75rem; font-weight:700; transition:background .16s, transform .16s; }
 .people-copy:hover:not(:disabled) { background:#eef1f0; }
 .people-copy:active:not(:disabled) { transform:scale(.95); }
+.people-edit-profile { display:inline-flex; align-items:center; justify-content:center; gap:6px; width:100%; margin-top:12px; padding:11px 14px; border:0; border-radius:12px; background:#eef2f0; color:var(--deep); font-size:.84rem; font-weight:800; transition:background .16s, transform .16s; }
+.people-edit-profile:hover { background:#e4eae7; }
+.people-edit-profile:active { transform:scale(.98); }
 .people-copy:disabled { opacity:.5; }
 
 .people-share { display:flex; align-items:center; gap:14px; margin-top:14px; padding-top:13px; border-top:1px solid var(--hairline); }
@@ -913,3 +916,52 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .guest-pill span { color:var(--deep); text-decoration:underline; text-underline-offset:2px; }
 .guest-pill:hover { background:#fff; }
 .guest-pill:active { transform:scale(.97); }
+
+/* ── Profile settings (ProfileSettings.tsx) ─────────────────────────────
+   Full-screen, same stacking as the DM/thought surfaces it sits beside.
+   Restraint is the design intent (see the component comment): a small set
+   of grouped cards on the app's off-white ground, not a long scroll of
+   rows. */
+.settings-screen { position:fixed; z-index:20; inset:0; display:flex; flex-direction:column; background:#f6f8f7; }
+.settings-header { flex-shrink:0; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:8px; padding:14px 16px; padding-top:max(14px, env(safe-area-inset-top)); background:rgba(255,255,255,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.settings-header h1 { margin:0; font-size:1rem; font-weight:900; color:var(--deep); text-align:center; white-space:nowrap; }
+.settings-cancel { justify-self:start; border:0; background:transparent; color:var(--muted); font-size:.9rem; font-weight:650; padding:4px 2px; }
+.settings-cancel:hover { color:var(--deep); }
+.settings-save { justify-self:end; border:0; border-radius:999px; padding:8px 16px; background:var(--deep); color:#fff; font-size:.84rem; font-weight:800; transition:opacity .16s, transform .16s; }
+.settings-save:active:not(:disabled) { transform:scale(.97); }
+.settings-save:disabled { opacity:.34; }
+.settings-loading { margin:auto; color:var(--muted); font-size:.85rem; }
+.settings-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:20px 16px calc(28px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:16px; }
+
+.settings-avatar-block { display:flex; flex-direction:column; align-items:center; gap:10px; padding:8px 0 4px; }
+.settings-avatar-wrap { position:relative; }
+.settings-avatar-badge { position:absolute; right:-2px; bottom:-2px; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; background:var(--deep); color:#fff; border:3px solid #f6f8f7; }
+.settings-avatar-cta { border:0; border-radius:999px; padding:7px 14px; background:#eef2f0; color:var(--muted); font-size:.76rem; font-weight:750; }
+.settings-avatar-cta:disabled { opacity:.7; }
+
+.settings-group { display:flex; flex-direction:column; gap:2px; padding:6px; border-radius:18px; background:#fff; box-shadow:var(--e1); }
+.settings-field { display:flex; flex-direction:column; gap:6px; padding:12px 12px 13px; }
+.settings-field + .settings-field { border-top:1px solid var(--hairline); }
+.settings-label { color:var(--deep); font-size:.74rem; font-weight:800; letter-spacing:.01em; }
+.settings-field input, .settings-field textarea { width:100%; border:1px solid #dce5e1; border-radius:12px; padding:11px 12px; background:#fafcfb; color:var(--ink); font-size:.92rem; line-height:1.4; transition:border-color .16s, background .16s; }
+.settings-field input:focus, .settings-field textarea:focus { outline:none; border-color:var(--teal); background:#fff; }
+.settings-field input[aria-invalid="true"], .settings-field textarea[aria-invalid="true"] { border-color:#e3b8c1; }
+.settings-field textarea { resize:vertical; min-height:74px; font-family:inherit; }
+.settings-sub { color:var(--muted); font-size:.72rem; line-height:1.4; }
+.settings-sub.bad { color:#b52445; font-weight:650; }
+.settings-counter { align-self:flex-end; font-variant-numeric:tabular-nums; }
+.settings-readonly-value { color:var(--ink); font-size:.92rem; font-weight:700; }
+.settings-readonly { opacity:.9; }
+
+.settings-toggle-row { display:flex; align-items:center; gap:14px; padding:14px 12px; }
+.settings-toggle-text { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.settings-toggle-text strong { color:var(--deep); font-size:.9rem; font-weight:800; }
+.settings-toggle-text span { color:var(--muted); font-size:.75rem; line-height:1.45; }
+/* The switch matches the presence switch in People, so one "on" affordance
+   reads the same everywhere in the app. */
+.settings-switch { flex-shrink:0; position:relative; width:50px; height:30px; border:0; border-radius:999px; background:#d3ddd8; transition:background .18s; }
+.settings-switch.on { background:var(--teal); }
+.settings-switch:disabled { opacity:.45; }
+.settings-switch-knob { position:absolute; top:3px; left:3px; width:24px; height:24px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(16,44,37,.3); transition:transform .18s cubic-bezier(.32,.72,0,1); }
+.settings-switch.on .settings-switch-knob { transform:translateX(20px); }
+.settings-error { margin:0; padding:11px 13px; border-radius:12px; background:#fef2f4; color:#b52445; font-size:.79rem; line-height:1.45; }
