@@ -1080,6 +1080,7 @@ function Map({
           gateway={gateway}
           handle={profileHandle}
           onClose={() => setProfileHandle(null)}
+          onOpenProfile={(handle) => setProfileHandle(handle)}
           onOpenPost={(postId) => {
             setProfileHandle(null);
             void openPostById(postId);

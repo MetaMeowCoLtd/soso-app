@@ -974,55 +974,82 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .settings-error { margin:0; padding:11px 13px; border-radius:12px; background:#fef2f4; color:#b52445; font-size:.79rem; line-height:1.45; }
 
 /* ── Profile view (ProfileView.tsx) ─────────────────────────────────────
-   Full-screen, same stacking as the DM/settings surfaces. Identity-led, not
-   grid-led (see the component comment) — the person and their contribution
-   come first, posts read as full cards below. */
+   Identity-led and COLOUR-led: a per-person gradient cover, a ringed
+   avatar overlapping it, and brand-coloured stat tiles. The restraint of
+   the first pass read as a finance app; this leans into SoSo's own palette
+   (teal / mint / hot pink) the way the map pins already do, so a profile
+   feels like social media, not a dashboard. */
 .profile-view { position:fixed; z-index:20; inset:0; display:flex; flex-direction:column; background:#f6f8f7; }
-.profile-view-bar { flex-shrink:0; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; padding:10px 12px; padding-top:max(10px, env(safe-area-inset-top)); background:rgba(255,255,255,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
-.profile-view-back { display:grid; place-items:center; width:36px; height:36px; border:0; border-radius:50%; background:transparent; color:var(--deep); }
-.profile-view-back:hover { background:#eef1f0; }
-.profile-view-bar-handle { text-align:center; font-size:.9rem; font-weight:800; color:var(--deep); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.profile-view-bar-spacer { width:36px; }
+/* Floats over the cover; its translucent disc keeps it readable on both the
+   gradient and the plain white loading state. */
+.profile-view-back { position:absolute; z-index:2; top:max(12px, env(safe-area-inset-top)); left:12px; display:grid; place-items:center; width:38px; height:38px; border:0; border-radius:50%; background:rgba(255,255,255,.82); color:var(--deep); box-shadow:var(--e1); backdrop-filter:blur(8px); transition:background .16s, transform .16s; }
+.profile-view-back:hover { background:#fff; }
+.profile-view-back:active { transform:scale(.94); }
 .profile-view-status { margin:auto; color:var(--muted); font-size:.85rem; padding:40px 20px; text-align:center; }
 .profile-view-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:0 0 calc(28px + env(safe-area-inset-bottom)); }
 
-.profile-view-head { display:flex; flex-direction:column; align-items:center; gap:6px; padding:22px 20px 20px; background:#fff; border-bottom:1px solid var(--hairline); }
-.profile-view-name { margin:8px 0 0; font-size:1.4rem; font-weight:900; letter-spacing:-.03em; color:var(--deep); text-align:center; }
-.profile-view-handle { color:var(--muted); font-size:.85rem; font-weight:600; }
-.profile-view-bio { margin:8px 0 0; max-width:420px; color:var(--ink); font-size:.9rem; line-height:1.5; text-align:center; white-space:pre-wrap; }
+/* The per-person gradient banner (inline background from coverGradient). A
+   soft sheen on top gives it depth rather than a flat block of colour. */
+.profile-view-cover { height:150px; position:relative; }
+.profile-view-cover::after { content:""; position:absolute; inset:0; background:radial-gradient(120% 90% at 25% 0%, rgba(255,255,255,.34), transparent 55%); }
 
-.profile-view-stats { display:flex; align-items:stretch; gap:8px; margin-top:16px; width:100%; max-width:360px; }
-.profile-view-stat { flex:1; display:flex; flex-direction:column; align-items:center; gap:1px; padding:10px 6px; border-radius:14px; background:#f4f7f5; }
-.profile-view-stat strong { font-size:1.15rem; font-weight:900; color:var(--deep); font-variant-numeric:tabular-nums; }
-.profile-view-stat span { color:var(--muted); font-size:.72rem; font-weight:650; }
-/* Pins is the app's real stat, so it's the one that carries colour. */
-.profile-view-stat.primary { background:var(--mint); }
-.profile-view-stat.primary strong { color:#0a6b58; }
+.profile-view-head { display:flex; flex-direction:column; align-items:center; gap:6px; padding:0 20px 22px; background:#fff; border-bottom:1px solid var(--hairline); border-radius:26px 26px 0 0; margin-top:-24px; position:relative; }
+/* The avatar sits in a white ring that straddles the cover edge — the
+   overlapping-avatar move every social profile uses, which is also what
+   ties the colourful banner to the white card below it. */
+.profile-view-avatar-ring { margin-top:-52px; padding:5px; border-radius:50%; background:#fff; box-shadow:var(--e2); }
+.profile-view-avatar-ring .avatar { display:block; }
+.profile-view-name { margin:12px 0 0; font-size:1.5rem; font-weight:900; letter-spacing:-.035em; color:var(--deep); text-align:center; }
+.profile-view-handle { color:var(--muted); font-size:.85rem; font-weight:650; }
+.profile-view-bio { margin:10px 0 0; max-width:420px; color:var(--ink); font-size:.9rem; line-height:1.5; text-align:center; white-space:pre-wrap; }
 
-.profile-view-actions { display:flex; gap:9px; margin-top:16px; width:100%; max-width:360px; }
-.profile-view-follow { flex:1; border:0; border-radius:999px; padding:12px 18px; background:var(--deep); color:#fff; font-size:.88rem; font-weight:800; transition:background .16s, transform .16s; }
+.profile-view-stats { display:flex; align-items:stretch; gap:8px; margin-top:18px; width:100%; max-width:380px; }
+.profile-view-stat { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:12px 6px; border-radius:16px; }
+.profile-view-stat strong { font-size:1.3rem; font-weight:900; color:var(--deep); font-variant-numeric:tabular-nums; }
+.profile-view-stat span { color:var(--muted); font-size:.72rem; font-weight:750; }
+/* Each tile a different brand tint so the row reads as lively, not as a
+   grey ledger — and pins, the stat this app is about, gets the boldest one:
+   the teal→mint gradient the map's own confirmed pins use. */
+.profile-view-stat:not(.primary):nth-of-type(2) { background:#fff0f4; }
+.profile-view-stat:not(.primary):nth-of-type(3) { background:#eef4ff; }
+.profile-view-stat.primary { background:linear-gradient(135deg, var(--teal), #37c9a9); box-shadow:0 6px 16px color-mix(in srgb, var(--teal), transparent 66%); }
+.profile-view-stat.primary strong { color:#fff; }
+.profile-view-stat.primary span { color:rgba(255,255,255,.92); }
+
+.profile-view-actions { display:flex; gap:9px; margin-top:16px; width:100%; max-width:380px; }
+/* A gradient follow button rather than flat ink — the one primary action,
+   given the app's hero colours. */
+.profile-view-follow { flex:2; border:0; border-radius:999px; padding:13px 18px; background:linear-gradient(120deg, var(--teal), var(--deep)); color:#fff; font-size:.9rem; font-weight:850; box-shadow:0 6px 16px color-mix(in srgb, var(--teal), transparent 62%); transition:transform .16s, box-shadow .16s, background .16s; }
 .profile-view-follow:active:not(:disabled) { transform:scale(.98); }
-.profile-view-follow:disabled { opacity:.55; }
-.profile-view-follow.following { background:#eef2f0; color:var(--deep); box-shadow:inset 0 0 0 1.4px var(--hairline); }
-.profile-view-message { flex:1; border:0; border-radius:999px; padding:12px 18px; background:#eef2f0; color:var(--deep); font-size:.88rem; font-weight:800; transition:background .16s, transform .16s; }
+.profile-view-follow:disabled { opacity:.6; }
+.profile-view-follow.following { background:#fff; color:var(--deep); box-shadow:inset 0 0 0 1.6px var(--teal); }
+.profile-view-message { flex:1; border:0; border-radius:999px; padding:13px 18px; background:var(--mint); color:#0a6b58; font-size:.9rem; font-weight:850; transition:transform .16s, background .16s; }
+.profile-view-message:hover { background:#c9f7ec; }
 .profile-view-message:active { transform:scale(.98); }
 
-.profile-view-badges, .profile-view-posts { padding:18px 16px 4px; }
-.profile-view-section-title { display:flex; align-items:center; gap:6px; margin:0 0 12px; color:var(--deep); font-size:.82rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; }
-.profile-view-badge-list { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:9px; }
-.profile-view-badge { display:flex; align-items:center; gap:9px; padding:9px 13px 9px 10px; border-radius:14px; background:#fff; box-shadow:var(--e1); }
-.profile-view-badge-medal { font-size:1.5rem; line-height:1; }
+.profile-view-badges { padding:20px 16px 4px; }
+/* Posts are a full-bleed white feed surface, edge-to-edge with divider-only
+   cards, exactly like the Feed tab — so the shared .feed-card reads as one
+   continuous stream here too, not as inset strips floating on grey. */
+.profile-view-posts { margin-top:16px; padding:0; background:#fff; border-top:1px solid var(--hairline); }
+.profile-view-posts .profile-view-section-title { padding:18px 16px 4px; }
+/* Sentence-case with an accent, not an all-caps ledger label. */
+.profile-view-section-title { display:flex; align-items:center; gap:7px; margin:0 0 13px; color:var(--deep); font-size:1rem; font-weight:900; letter-spacing:-.02em; }
+.profile-view-section-title .icon { color:var(--hot); }
+.profile-view-badge-list { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:10px; }
+/* Badges as bright tinted chips keyed to their tier, not white cards with a
+   hairline — a medal should look earned. */
+.profile-view-badge { display:flex; align-items:center; gap:10px; padding:10px 15px 10px 11px; border-radius:16px; box-shadow:var(--e1); }
+.profile-view-badge-medal { font-size:1.7rem; line-height:1; filter:drop-shadow(0 2px 3px rgba(16,44,37,.18)); }
 .profile-view-badge-text { display:flex; flex-direction:column; }
-.profile-view-badge-text strong { font-size:.85rem; font-weight:800; color:var(--deep); }
-.profile-view-badge-text span { font-size:.72rem; color:var(--muted); }
-.profile-view-badge.tier-gold { box-shadow:var(--e1), inset 0 0 0 1.4px #e8c069; }
-.profile-view-badge.tier-silver { box-shadow:var(--e1), inset 0 0 0 1.4px #cbd3d0; }
-.profile-view-badge.tier-bronze { box-shadow:var(--e1), inset 0 0 0 1.4px #d9b08c; }
-.profile-view-badge-empty { margin:0; padding:14px; border-radius:14px; background:#fff; box-shadow:var(--e1); color:var(--muted); font-size:.8rem; line-height:1.5; }
+.profile-view-badge-text strong { font-size:.9rem; font-weight:850; color:var(--deep); }
+.profile-view-badge-text span { font-size:.73rem; color:var(--muted); font-weight:600; }
+.profile-view-badge.tier-gold { background:linear-gradient(135deg, #fff5db, #ffe7a6); box-shadow:0 4px 12px rgba(210,160,40,.28); }
+.profile-view-badge.tier-silver { background:linear-gradient(135deg, #f6f9fb, #e2e9ee); box-shadow:0 4px 12px rgba(120,140,150,.24); }
+.profile-view-badge.tier-bronze { background:linear-gradient(135deg, #fbeee2, #f0d3b6); box-shadow:0 4px 12px rgba(180,120,70,.24); }
+.profile-view-badge-empty { margin:0; padding:16px; border-radius:16px; background:linear-gradient(135deg, var(--mint), #eafaf6); color:#356; font-size:.82rem; line-height:1.5; font-weight:600; }
 
-.profile-view-post-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px; }
-.profile-view-post { display:flex; flex-direction:column; gap:8px; width:100%; text-align:left; padding:14px; border:0; border-radius:16px; background:#fff; box-shadow:var(--e1); transition:transform .12s; }
-.profile-view-post:active { transform:scale(.99); }
-.profile-view-post-body { margin:0; color:var(--ink); font-size:.9rem; line-height:1.5; overflow:hidden; display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; }
-.profile-view-post-meta { display:flex; align-items:center; gap:12px; color:var(--muted); font-size:.74rem; font-weight:600; }
-.profile-view-post-metric { display:inline-flex; align-items:center; gap:4px; }
+/* Posts on a profile use the shared .feed-card (see FeedCard in FeedTab),
+   not a bespoke list — so there is no .profile-view-post* styling here on
+   purpose. The .feed-tab-list wrapper gives them the same spacing as the
+   feed. */

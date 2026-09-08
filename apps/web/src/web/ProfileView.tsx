@@ -1,14 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  ERROR_MESSAGES_EN,
-  formatAgoShort,
-  type PostDetail,
-  type SosoGateway,
-  type UserProfile,
-} from "soso-core";
+import { type PostDetail, type SosoGateway, type UserProfile } from "soso-core";
 import { Avatar } from "./Avatar";
+import { FeedCard } from "./FeedTab";
 import { Icon, ICONS } from "./Icon";
 
 /**
@@ -45,19 +40,51 @@ interface ProfileViewProps {
   onClose: () => void;
   /** Open one of their posts full-screen — reuses page.tsx's own post opener. */
   onOpenPost: (postId: string) => void;
+  /** Open another profile — the shared FeedCard byline needs it; here it's the same person. */
+  onOpenProfile: (handle: string) => void;
   /** Start a DM. Offered only when the two of you follow each other. */
   onMessage: (userId: string) => void;
 }
 
 const TIER_MEDAL: Record<string, string> = { bronze: "🥉", silver: "🥈", gold: "🥇" };
 
-export default function ProfileView({ gateway, handle, onClose, onOpenPost, onMessage }: ProfileViewProps) {
+/**
+ * A cover gradient derived from the handle, so each person's banner is
+ * reliably their own — the same hash-to-hue trick Avatar.tsx uses, widened
+ * into a two-tone diagonal. The second hue is offset ~50° so the gradient
+ * always has real movement rather than two near-identical shades, and both
+ * stops are kept vivid (high saturation, mid-high lightness) so the banner
+ * reads as lively, not muted. Pure function of the handle — stable across
+ * every visit.
+ */
+function coverGradient(seed: string): { background: string } {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  const h1 = Math.abs(hash) % 360;
+  const h2 = (h1 + 48) % 360;
+  return {
+    background: `linear-gradient(135deg, hsl(${h1} 85% 62%), hsl(${h2} 88% 54%))`,
+  };
+}
+
+export default function ProfileView({
+  gateway,
+  handle,
+  onClose,
+  onOpenPost,
+  onOpenProfile,
+  onMessage,
+}: ProfileViewProps) {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<PostDetail[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const nowSeconds = Math.floor(Date.now() / 1000);
+  const coverStyle = profile ? coverGradient(profile.handle) : undefined;
 
   useEffect(() => {
     let alive = true;
@@ -124,13 +151,13 @@ export default function ProfileView({ gateway, handle, onClose, onOpenPost, onMe
 
   return (
     <div className="profile-view" role="dialog" aria-modal="true" aria-label="Profile">
-      <header className="profile-view-bar">
-        <button type="button" className="profile-view-back" onClick={onClose} aria-label="Back">
-          <Icon src={ICONS.chevronLeft} size={22} />
-        </button>
-        <span className="profile-view-bar-handle">{profile ? `@${profile.handle}` : ""}</span>
-        <span className="profile-view-bar-spacer" aria-hidden="true" />
-      </header>
+      {/* Floating over the cover rather than in a solid bar — the immersive
+          cover-photo treatment social apps use, not a chrome strip. Its own
+          translucent disc keeps it legible over both the gradient and the
+          white loading state. */}
+      <button type="button" className="profile-view-back" onClick={onClose} aria-label="Back">
+        <Icon src={ICONS.chevronLeft} size={22} />
+      </button>
 
       {loading ? (
         <p className="profile-view-status">Loading…</p>
@@ -138,8 +165,16 @@ export default function ProfileView({ gateway, handle, onClose, onOpenPost, onMe
         <p className="profile-view-status">This profile isn&rsquo;t available.</p>
       ) : (
         <div className="profile-view-scroll">
+          {/* A gradient cover keyed off the handle, so a given person's
+              banner is their own colour every time — the same "colour does
+              the identifying work" idea the Avatar uses, scaled up to a
+              banner. Purely decorative; hidden from AT. */}
+          <div className="profile-view-cover" style={coverStyle} aria-hidden="true" />
+
           <section className="profile-view-head">
-            <Avatar name={profile.displayName} seed={profile.handle} size={84} />
+            <div className="profile-view-avatar-ring">
+              <Avatar name={profile.displayName} seed={profile.handle} size={96} />
+            </div>
             <h1 className="profile-view-name">{profile.displayName}</h1>
             <span className="profile-view-handle">@{profile.handle}</span>
             {profile.bio && <p className="profile-view-bio">{profile.bio}</p>}
@@ -149,7 +184,7 @@ export default function ProfileView({ gateway, handle, onClose, onOpenPost, onMe
             <div className="profile-view-stats">
               <div className="profile-view-stat primary">
                 <strong>{profile.pins}</strong>
-                <span>pins</span>
+                <span>📍 pins</span>
               </div>
               <div className="profile-view-stat">
                 <strong>{profile.followers}</strong>
@@ -169,7 +204,7 @@ export default function ProfileView({ gateway, handle, onClose, onOpenPost, onMe
                   onClick={() => void toggleFollow()}
                   disabled={followBusy}
                 >
-                  {profile.isFollowing ? "Following" : "Follow"}
+                  {profile.isFollowing ? "Following" : "＋ Follow"}
                 </button>
                 {profile.isMutual && (
                   <button
@@ -215,30 +250,23 @@ export default function ProfileView({ gateway, handle, onClose, onOpenPost, onMe
             {posts.length === 0 ? (
               <p className="profile-view-badge-empty">No posts you can see yet.</p>
             ) : (
-              <ul className="profile-view-post-list">
+              // The same FeedCard the feed uses, so a post looks and behaves
+              // identically wherever it appears — no second design to keep in
+              // sync. Liking updates the local copy through onChanged, exactly
+              // as the feed does its own optimistic updates.
+              <ul className="feed-tab-list">
                 {posts.map((post) => (
-                  <li key={post.id}>
-                    <button
-                      type="button"
-                      className="profile-view-post"
-                      onClick={() => onOpenPost(post.id)}
-                    >
-                      {post.body && <p className="profile-view-post-body">{post.body}</p>}
-                      <span className="profile-view-post-meta">
-                        <span>{formatAgoShort(post.createdAt, nowSeconds)}</span>
-                        {post.replyCount > 0 && (
-                          <span className="profile-view-post-metric">
-                            <Icon src={ICONS.comment} size={13} /> {post.replyCount}
-                          </span>
-                        )}
-                        {post.confirmCount > 0 && (
-                          <span className="profile-view-post-metric">
-                            <Icon src={ICONS.heart} size={13} /> {post.confirmCount}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  </li>
+                  <FeedCard
+                    key={post.id}
+                    post={post}
+                    nowSeconds={nowSeconds}
+                    gateway={gateway}
+                    onOpen={() => onOpenPost(post.id)}
+                    onOpenProfile={onOpenProfile}
+                    onChanged={(updated) =>
+                      setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+                    }
+                  />
                 ))}
               </ul>
             )}

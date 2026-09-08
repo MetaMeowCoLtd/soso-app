@@ -210,7 +210,13 @@ function FeedCardSkeleton() {
   );
 }
 
-function FeedCard({
+/**
+ * One post as it appears in the feed. Exported so the profile view lists
+ * posts with the exact same card — same byline, like button, reply count
+ * and tap-to-open — rather than a second, divergent design. Anything that
+ * changes about how a post looks changes here, in one place.
+ */
+export function FeedCard({
   post,
   nowSeconds,
   gateway,
