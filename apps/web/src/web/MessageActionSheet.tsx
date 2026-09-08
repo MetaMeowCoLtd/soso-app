@@ -37,6 +37,60 @@ import { QUICK_REACTIONS } from "./quickReactions";
  * list does not reflow.
  */
 
+/**
+ * The pressed bubble's LAYOUT box, with any momentary transform undone.
+ *
+ * Callers must measure with this rather than `getBoundingClientRect()`
+ * directly, because of a collision between two rules that are individually
+ * fine. `.chat-bubble:active` scales the bubble to .98 (a press affordance,
+ * over a .12s transition), and a long press only opens this sheet after
+ * 420ms — so by the time a caller measures, the bubble has been sitting at
+ * 98% of its real width for about 300ms, and `getBoundingClientRect()`
+ * reports that shrunken VISUAL box, not the layout one.
+ *
+ * Handing that 2%-narrow width to the clone below is what made a message
+ * that fit on one line re-wrap to two the moment you pressed it: the clone
+ * has no `:active` scale of its own, so it lays its text out for real in a
+ * box sized for a scaled-down one. It only bit messages whose text ended
+ * within a few pixels of the bubble's width — hence "sometimes" — and it
+ * un-wrapped on release, because nothing was ever wrong with the original.
+ *
+ * The scale is divided back out of the measured box rather than read from
+ * `offsetWidth`, because `offsetWidth` is rounded to a whole pixel and the
+ * widths here are fractional: a bubble measuring 132.453px rounds down to
+ * 132, and losing that .453 was on its own enough to wrap a message whose
+ * text needed 106.4 of the 106.453px inside it. So the visual box is
+ * divided by the scale actually in effect, which recovers the fractional
+ * layout width exactly, and the result is then rounded UP — the clone
+ * having a fraction of a pixel MORE than the original is invisible, while
+ * a fraction less is the entire bug. With no transform applied the scale
+ * is 1 and this is just the rect, unchanged.
+ *
+ * `transform-origin` defaults to the centre, so the visual and layout
+ * boxes share a centre point and the position reconstructs from it.
+ */
+export function pressedBubbleRect(el: HTMLElement): DOMRect {
+  const visual = el.getBoundingClientRect();
+
+  // DOMMatrix parses the computed `matrix(...)`; `a` and `d` are the x and
+  // y scale factors. "none" parses to the identity, so the no-transform
+  // case needs no special-casing. Guarded against a degenerate 0 scale
+  // (a mid-animation scale(0) elsewhere would otherwise divide by zero).
+  const matrix = new DOMMatrix(getComputedStyle(el).transform);
+  const scaleX = matrix.a || 1;
+  const scaleY = matrix.d || 1;
+
+  const width = Math.ceil(visual.width / scaleX);
+  const height = Math.ceil(visual.height / scaleY);
+
+  return new DOMRect(
+    visual.left + (visual.width - width) / 2,
+    visual.top + (visual.height - height) / 2,
+    width,
+    height,
+  );
+}
+
 export interface MessageActionSheetPrimaryAction {
   label: string;
   icon: string;

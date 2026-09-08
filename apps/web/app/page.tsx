@@ -16,6 +16,8 @@ import DmThreadView from "@/src/web/DmThreadView";
 import { ensurePublishedKey } from "@/src/web/dmCrypto";
 import ChatPanel from "@/src/web/ChatPanel";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
+import AuthScreens from "@/src/web/AuthScreens";
+import { isGuest, loadAccount, onAuthChange, setGuest, type Account } from "@/src/web/auth";
 import { usePresence } from "@/src/web/usePresence";
 import { lookOf } from "@/src/web/theme";
 import { COIN_ICON, Icon, ICONS, ImageIcon } from "@/src/web/Icon";
@@ -56,19 +58,101 @@ const CELEBRATE_DURATION_MS = 1600;
 
 export default function Home() {
   const [resolved, setResolved] = useState<{ gateway: SosoGateway; mode: GatewayMode } | null>(null);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [accountChecked, setAccountChecked] = useState(false);
+  // "Continue as guest" — an explicit choice to use the app on an
+  // anonymous session. Read back from storage on mount so choosing it once
+  // doesn't mean facing a phone-number wall on every reload.
+  //
+  // Lazy initialiser rather than an effect: reading it after the first
+  // render would flash the sign-in screen at someone who already declined
+  // it. `isGuest` touches localStorage, so it must not run during the
+  // server render pass — hence the typeof check.
+  const [browsing, setBrowsing] = useState(
+    () => typeof window !== "undefined" && isGuest(),
+  );
 
   useEffect(() => {
     void resolveGateway().then(setResolved);
   }, []);
 
-  if (!resolved) {
+  const refreshAccount = useCallback(async (mode: GatewayMode) => {
+    // Demo mode has no backend and therefore no account to verify against;
+    // gating it would lock the offline fallback behind an SMS it can't send.
+    if (mode === "demo") {
+      setAccount(null);
+      setAccountChecked(true);
+      return;
+    }
+    setAccount(await loadAccount());
+    setAccountChecked(true);
+  }, []);
+
+  useEffect(() => {
+    if (!resolved) return;
+    void refreshAccount(resolved.mode);
+    if (resolved.mode === "demo") return;
+    // Covers the sessions this tab did not start: a refresh token expiring,
+    // a sign-out in another tab, or a session restored on load.
+    return onAuthChange(() => void refreshAccount(resolved.mode));
+  }, [resolved, refreshAccount]);
+
+  if (!resolved || !accountChecked) {
     return <div className="map-loading">Connecting…</div>;
   }
 
-  return <Map gateway={resolved.gateway} mode={resolved.mode} />;
+  const needsAuth =
+    resolved.mode === "supabase" && (!account?.verified || !account.handleSet) && !browsing;
+
+  if (needsAuth) {
+    return (
+      <AuthScreens
+        account={account}
+        onAuthenticated={() => void refreshAccount(resolved.mode)}
+        // Offered only before verifying. Someone who has verified but not
+        // yet picked a name is mid-signup, and dropping them into the app
+        // there would leave an account with a generated handle it never
+        // agreed to.
+        onSkip={
+          account?.verified
+            ? null
+            : () => {
+                setGuest(true);
+                setBrowsing(true);
+              }
+        }
+      />
+    );
+  }
+
+  return (
+    <Map
+      gateway={resolved.gateway}
+      mode={resolved.mode}
+      // Only true while actually using the app without an account — a
+      // verified session never shows the guest affordance, so it removes
+      // itself the moment signing in succeeds.
+      guest={browsing && resolved.mode === "supabase" && !account?.verified}
+      onExitGuest={() => {
+        setGuest(false);
+        setBrowsing(false);
+      }}
+    />
+  );
 }
 
-function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
+function Map({
+  gateway,
+  mode,
+  guest = false,
+  onExitGuest,
+}: {
+  gateway: SosoGateway;
+  mode: GatewayMode;
+  /** Using the app on an anonymous session, having declined to sign in. */
+  guest?: boolean;
+  onExitGuest?: () => void;
+}) {
   const { categories } = useCategories(gateway);
   const nowSeconds = useNowSeconds();
 
@@ -710,6 +794,17 @@ function Map({ gateway, mode }: { gateway: SosoGateway; mode: GatewayMode }) {
               +
             </button>
           </div>
+          {/* The only way back to the sign-in screen once guest mode is
+              remembered across reloads. Without it, choosing "Continue as
+              guest" once would be a one-way door with no visible exit —
+              which is how a temporary convenience turns into a trap. Shown
+              only while actually a guest, so it removes itself on sign-in
+              rather than becoming permanent chrome. */}
+          {guest && onExitGuest && (
+            <button type="button" className="guest-pill" onClick={onExitGuest}>
+              Guest · <span>Sign in</span>
+            </button>
+          )}
         </div>
         <button
           className={`people-button ${presence.sharing ? "sharing" : ""}`}

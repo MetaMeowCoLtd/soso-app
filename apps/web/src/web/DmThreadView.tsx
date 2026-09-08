@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { ERROR_MESSAGES_EN, type DmThread, type SosoGateway } from "soso-core";
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
-import { MessageActionSheet } from "./MessageActionSheet";
+import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
 import { ensurePublishedKey, openMessage, sealMessage, threadKeyFor } from "./dmCrypto";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
@@ -530,10 +530,13 @@ function DmBubble({
   const swipeTrackRef = useRef<HTMLDivElement>(null);
 
   function openMenu() {
-    const rect = bubbleRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    // pressedBubbleRect, not getBoundingClientRect — see its own comment:
+    // the bubble is mid-`:active` scale at this point, and measuring that
+    // shrunken box re-wrapped the clone's text.
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
     navigator.vibrate?.(8);
-    onOpenMenu(rect);
+    onOpenMenu(pressedBubbleRect(bubble));
   }
 
   const longPress = useLongPress(openMenu);

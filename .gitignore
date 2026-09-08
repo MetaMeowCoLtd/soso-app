@@ -5,3 +5,10 @@ dist-test/
 .env
 .env.local
 .expo/
+
+# Supabase CLI scratch state (version check cache, linked-project ref).
+# Machine-local and sometimes identifies a specific project — not shared.
+supabase/.temp/
+
+# Screenshots captured for review; regenerated on demand, not source.
+.shots/

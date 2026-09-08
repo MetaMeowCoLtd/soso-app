@@ -328,7 +328,18 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    space between two people's runs is larger (see .run-end), which is what
    makes a conversation read as turns rather than as an evenly-spaced list
    of records. A single flex gap cannot express both. */
-.chat-thread { flex:1; min-height:120px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:8px 10px 14px; display:flex; flex-direction:column; }
+/* `overflow-x:clip` is load-bearing, not tidying. Setting ONLY overflow-y
+   here computes the other axis to `auto` (the spec turns a `visible` paired
+   with a non-`visible` into `auto`), which made this list horizontally
+   scrollable the moment a reply-swipe dragged a bubble past its right edge
+   — measured at 449px of scroll width against a 375px viewport mid-drag.
+   Since useSwipeToReply deliberately doesn't preventDefault (see its own
+   doc comment on why), that left the same horizontal finger movement free
+   to scroll the whole list sideways while it was also dragging the bubble.
+   `clip` rather than `hidden`: `hidden` is itself a scroll container (just
+   one with no visible scrollbar), so it would still let that sideways
+   scroll happen programmatically; `clip` refuses the scroll outright. */
+.chat-thread { flex:1; min-height:120px; overflow-y:auto; overflow-x:clip; -webkit-overflow-scrolling:touch; padding:8px 10px 14px; display:flex; flex-direction:column; }
 .chat-empty { margin:auto; padding:16px 8px; color:var(--muted); font-size:.78rem; text-align:center; line-height:1.5; }
 
 .chat-divider { align-self:center; margin:16px 0 10px; color:var(--muted); font-size:.66rem; font-weight:750; letter-spacing:.02em; }
@@ -857,3 +868,48 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .feed-card-skeleton .skeleton-line-byline { width:45%; margin-top:2px; }
 .feed-card-skeleton .skeleton-line-text { width:92%; }
 .feed-card-skeleton .skeleton-line-text-short { width:60%; }
+
+/* --- Authentication screens (AuthScreens.tsx) ---------------------------
+   A full-screen surface rather than a modal over the map: this is the
+   first thing a new person sees, and layering it over content they cannot
+   reach yet would suggest the map behind it is dismissable when it isn't.
+   z-index sits above every tab surface (.dm-thread and .thought-thread are
+   20, .board-canvas-root 40) because nothing should ever draw over the
+   sign-in step. */
+.auth-screen { position:fixed; z-index:50; inset:0; display:grid; place-items:center; padding:24px; background:#fff; overflow-y:auto; }
+.auth-card { width:min(420px, 100%); padding:8px 4px 24px; }
+.auth-kicker { margin:0 0 2px; color:var(--muted); font-size:.8rem; font-weight:650; }
+.auth-title { margin:0 0 14px; font-size:clamp(2.1rem,8vw,2.8rem); font-weight:900; letter-spacing:-.07em; color:var(--deep); }
+.auth-title span { color:var(--hot); }
+.auth-heading { margin:0 0 8px; font-size:clamp(1.5rem,5vw,1.85rem); font-weight:900; letter-spacing:-.05em; color:var(--deep); }
+.auth-lede { margin:0 0 20px; color:var(--muted); font-size:.88rem; line-height:1.5; }
+.auth-lede strong { color:var(--ink); font-weight:700; }
+.auth-field { display:grid; gap:6px; margin-bottom:12px; color:var(--deep); font-size:.78rem; font-weight:700; }
+.auth-field input { width:100%; border:1px solid #d8e2de; border-radius:13px; padding:14px 14px; background:#fafcfb; color:var(--ink); font-size:1rem; transition:border-color .16s, background .16s; }
+.auth-field input:focus { outline:none; border-color:var(--teal); background:#fff; }
+.auth-field input[aria-invalid="true"] { border-color:#e3b8c1; }
+/* Wide tracking and a tabular figure: a six-digit code is read back digit
+   by digit against an SMS, not read as a word. */
+.auth-code-input { font-variant-numeric:tabular-nums; letter-spacing:.42em; font-size:1.3rem!important; font-weight:700; text-align:center; }
+.auth-hint { margin:0 0 16px; color:var(--muted); font-size:.75rem; line-height:1.45; }
+.auth-hint-ok { color:#0f8a6d; font-weight:650; }
+.auth-hint-bad { color:#b52445; font-weight:650; }
+.auth-error { margin:0 0 14px; padding:11px 13px; border-radius:12px; background:#fef2f4; color:#b52445; font-size:.79rem; line-height:1.45; }
+.auth-primary { width:100%; margin-top:4px; border:0; border-radius:999px; padding:15px 20px; background:var(--deep); color:#fff; font-size:.92rem; font-weight:750; box-shadow:var(--e1); transition:background .16s, transform .16s, opacity .16s; }
+.auth-primary:hover:not(:disabled) { background:#0a1d1a; }
+.auth-primary:active:not(:disabled) { transform:scale(.98); }
+.auth-primary:disabled { opacity:.38; box-shadow:none; }
+.auth-secondary { width:100%; margin-top:9px; border:0; border-radius:999px; padding:13px 20px; background:transparent; color:var(--deep); font-size:.85rem; font-weight:700; transition:background .16s, opacity .16s; }
+.auth-secondary:hover:not(:disabled) { background:#f1f5f3; }
+.auth-secondary:disabled { opacity:.4; }
+.auth-back { margin:0 0 14px; padding:0; border:0; background:transparent; color:var(--muted); font-size:.8rem; font-weight:650; }
+.auth-back:hover { color:var(--deep); }
+.auth-fineprint { margin:18px 0 0; color:var(--muted); font-size:.72rem; line-height:1.5; text-align:center; }
+
+/* The guest-mode escape hatch in the map header (page.tsx). Deliberately
+   quiet — it is a status indicator that happens to be tappable, not a call
+   to action competing with the map. */
+.guest-pill { display:inline-flex; align-items:center; gap:4px; padding:6px 11px; border:0; border-radius:999px; background:rgba(255,255,255,.87); color:var(--muted); font-size:.72rem; font-weight:700; box-shadow:var(--e1); backdrop-filter:blur(12px); transition:background .16s; }
+.guest-pill span { color:var(--deep); text-decoration:underline; text-underline-offset:2px; }
+.guest-pill:hover { background:#fff; }
+.guest-pill:active { transform:scale(.97); }

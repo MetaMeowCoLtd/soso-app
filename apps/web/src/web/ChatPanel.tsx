@@ -10,7 +10,7 @@ import {
   type SosoGateway,
 } from "soso-core";
 import DmInbox from "./DmInbox";
-import { MessageActionSheet } from "./MessageActionSheet";
+import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
 import { Icon, ICONS } from "./Icon";
@@ -426,13 +426,16 @@ function ChatMessageRow({
   const swipeTrackRef = useRef<HTMLDivElement>(null);
 
   function openMenu() {
-    const rect = bubbleRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    // pressedBubbleRect, not getBoundingClientRect — the bubble is still
+    // held down here, so it's mid-`:active` scale. See that function's own
+    // comment for what measuring the scaled box did to the clone's text.
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
     // A short tick of haptic feedback, the same confirmation a native
     // long-press gives. Absent on iOS Safari and desktop, which is why it
     // is optional-called rather than relied on.
     navigator.vibrate?.(8);
-    onOpenMenu(rect);
+    onOpenMenu(pressedBubbleRect(bubble));
   }
 
   const longPress = useLongPress(openMenu);

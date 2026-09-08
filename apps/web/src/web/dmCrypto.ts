@@ -133,6 +133,73 @@ async function rememberSelfUserId(userId: string): Promise<void> {
   await idbPut<StoredSelfUserId>(db, { id: MY_USER_ID_RECORD, userId });
 }
 
+function idbDelete(db: IDBDatabase, id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(STORE, "readwrite").objectStore(STORE).delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Discards this browser's DM identity — the private key, the published
+ * public half's local copy, the remembered user id, and every derived
+ * conversation key cached in memory.
+ *
+ * WHY THIS HAS TO EXIST AT ALL
+ * ---------------------------------------------------------------------
+ * Everything in this file is keyed on the record id `"self"`, not on a
+ * user id, which was exactly right while one browser meant one permanent
+ * anonymous account. Phone sign-in ends that assumption, and the resulting
+ * bug is not cosmetic: user A signs out, user B signs in on the same
+ * browser, `getSelfKeys()` returns A's private key because a key is
+ * present and nothing checks WHOSE, and then `ensurePublishedKey`
+ * publishes A's public key as B's. Everyone messaging B would encrypt to a
+ * key only A can open — B silently cannot read their own conversations,
+ * and A could.
+ *
+ * Called with `keepForUserId` on every auth state change, where it clears
+ * only if the stored identity belongs to somebody else, and with no
+ * argument on sign-out, where it always clears. The check reads the id the
+ * keystore itself recorded rather than anything held in memory, because a
+ * sign-in reloads the page and memory does not survive that — the stale
+ * key does.
+ *
+ * The module-level `selfPromise` cache has to be dropped too. Leaving it
+ * would mean the very next `getSelfKeys()` resolves from memory to the key
+ * that was just deleted from disk, which is the same bug with an extra
+ * step.
+ */
+export async function forgetSelfKeys(keepForUserId?: string | null): Promise<void> {
+  try {
+    const db = await openDb();
+
+    if (keepForUserId) {
+      const stored = await idbGet<StoredSelfUserId>(db, MY_USER_ID_RECORD);
+      // No recorded owner means a keystore from before this check existed.
+      // Claim it for the signed-in user rather than destroying it: on the
+      // overwhelmingly common single-account browser it is genuinely
+      // theirs, and wiping it would throw away readable history for
+      // everyone who upgraded.
+      if (!stored) {
+        await idbPut<StoredSelfUserId>(db, { id: MY_USER_ID_RECORD, userId: keepForUserId });
+        return;
+      }
+      if (stored.userId === keepForUserId) return;
+    }
+
+    await idbDelete(db, SELF_ID);
+    await idbDelete(db, MY_USER_ID_RECORD);
+  } catch {
+    // A browser that refuses IndexedDB (private mode, blocked site data)
+    // has no keystore to leak in the first place.
+  } finally {
+    selfPromise = null;
+    threadKeys.clear();
+    publishing = null;
+  }
+}
+
 /**
  * Derived keys, cached by the other side's PUBLIC KEY rather than by their
  * user id — so if they ever rotate, the new key derives a fresh entry

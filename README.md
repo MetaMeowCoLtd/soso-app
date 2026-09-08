@@ -185,10 +185,14 @@ only affects a local Docker-based stack and cannot reach a hosted project.
 4. Copy `apps/web/.env.local.example` to `apps/web/.env.local` and set the
    project's URL and anon key (Supabase dashboard > Settings > API).
 5. In the Supabase dashboard, enable Authentication > Providers > Anonymous.
-   The application signs users in anonymously to allow posting without a
-   signup flow. See [Known limitations](#known-limitations) regarding this
-   approach.
-6. Run `npm run dev`, or push to trigger the GitHub Pages workflow if
+   An anonymous session is what lets someone look at the map before handing
+   over a phone number; it can no longer post, chat, message or follow — see
+   [Phone authentication](#phone-authentication).
+6. Set up phone authentication. This is several dashboard settings rather
+   than one, and two of them are load-bearing — see
+   [Phone authentication](#phone-authentication) for the full list, including
+   the OTP expiry default that must be changed.
+7. Run `npm run dev`, or push to trigger the GitHub Pages workflow if
    deploying rather than running locally.
 
 If the backend is misconfigured or unreachable, the application falls back
@@ -681,6 +685,207 @@ worker against a live subscription, so the crypto here is confirmed
 algorithm-for-algorithm identical to the tested, on-screen path, not
 confirmed to actually decrypt a real notification on a real device.
 
+## Phone authentication
+
+Closes the gap this README flagged from the first migration onward:
+anonymous sign-in made an account free, so every per-account rate limit and
+reputation floor in the schema constrained one *account* rather than one
+*person with a script*. An account now costs an SMS.
+
+### Sign-up and login are the same flow
+
+There is no "sign up" screen and no "log in" screen, because there is no
+difference to draw. `signInWithOtp` creates the account if the number is new
+and signs into the existing one if it isn't, and neither the client nor the
+UI ever learns which happened.
+
+That is not a shortcut, it is the enumeration defence. A flow with two paths
+has to remember not to leak which one it took — in the copy, the button
+label, the error text, and the response timing. A flow with one path has
+nothing to leak, because the server genuinely does the same thing either
+way. It is also why the button reads **Continue** rather than "Sign up" or
+"Log in", and why a wrong code and an unregistered number produce the same
+message.
+
+The third screen — choosing a username — appears only for an account that
+has verified but not yet named itself, and that decision comes from
+`my_account`, which requires a session to read at all.
+
+### Why the OTP is not generated in this codebase
+
+Supabase's phone provider generates the code, stores only its hash, expires
+it, and burns it on first use. Reimplementing that would mean reimplementing
+it worse — the same reasoning that puts the DM cipher on `SubtleCrypto`
+rather than hand-written primitives. Instagram does not hand-roll SMS
+verification either; it buys a verification service.
+
+What this codebase adds is the half the platform cannot know about: who is
+allowed to *ask* for a code, and how often.
+
+### The attack this is mostly defending against
+
+Not code guessing — Supabase already bounds that. The expensive one is **SMS
+pumping** (toll fraud): an attacker drives signup requests at numbers on
+premium-rate ranges they control and take a revenue share of, and the victim
+is whoever pays the SMS bill. It is the most common way a phone-signup flow
+turns into a five-figure invoice, it costs the attacker nothing, and no
+amount of OTP hardening touches it — every one of those messages is a
+perfectly valid first send to a number nobody has tried before.
+
+So `soso.check_otp_throttle` (migration 0031) keys three ways at once,
+because any single key is trivially sidestepped:
+
+| Key | Limit | What it catches |
+|---|---|---|
+| Per number | Doubling cooldown, 5/day | Ordinary retry abuse |
+| Per device/IP | 10/hour | One script walking *thousands of different* numbers — the actual pumping shape, which a per-number limit cannot see at all |
+| Per country code | 200/hour | A circuit breaker; pumping concentrates on the ranges the attacker earns from |
+
+CAPTCHA on the send endpoint is the other half, and is dashboard
+configuration rather than code.
+
+### What is deliberately not stored
+
+The phone number. Not in `profiles`, not in the throttle table, and not
+returned by any RPC. `auth.users.phone` already holds it in a schema
+PostgREST does not expose, and one copy of a piece of PII is strictly better
+than two.
+
+The throttle keys on a **peppered HMAC** (`soso.phone_key`), which supports
+"have we seen this number before" without supporting "list the numbers we
+have seen" — the property that matters if that table is ever dumped. An
+*unkeyed* hash would be worthless here: every possible Japanese mobile number
+is about 10^8 candidates, which is a rounding error to brute force. A missing
+pepper fails loudly rather than silently degrading to exactly that.
+
+`my_account` returns the number **masked** (`+81 •••• 78`). Showing someone
+which of their own numbers an account is attached to needs nothing more, and
+a screen, a screenshot and a support ticket are all places the full number
+would otherwise end up for no benefit.
+
+**Contact-list upload / find-friends-by-number is not built, and that is not
+an oversight.** It requires uploading other people's numbers who never
+consented, it produced Meta's most expensive privacy settlements, and this
+app already has handle search that does the same job.
+
+### What signing in on a new device costs you
+
+Your account comes back. Your direct message history does not.
+
+This is the honest consequence of a choice made earlier: DM private keys are
+generated non-extractable and never leave the browser that made them (see
+[Direct messages](#direct-messages)). Previously that cost nothing extra,
+because losing your browser storage lost the anonymous account *and* the key
+together. Phone login breaks the symmetry — the account is now recoverable
+and the key still isn't.
+
+This is Signal's behaviour, and the machinery for it already existed:
+`publish_user_key` upserts, so a fresh key simply replaces the old one, and
+the inbox already renders "Can't be read on this device" as a first-class
+state rather than an error.
+
+### The account-switch bug this feature had to fix
+
+Worth calling out because adding login is what *introduced* it, and it was
+severe rather than cosmetic.
+
+`dmCrypto` stored the DM private key under a fixed record id, not keyed by
+user — which was correct while one browser meant one permanent anonymous
+account. Once sign-out and sign-in exist: user A signs out, user B signs in
+on the same browser, and `getSelfKeys()` hands B **A's private key**, because
+a key was present and nothing checked *whose*. `ensurePublishedKey` would
+then publish A's public key as B's, and everyone messaging B would encrypt to
+a key only A could open.
+
+`forgetSelfKeys` is the fix, and it runs on every auth state change rather
+than only on sign-out — the sign-out half can be skipped entirely by closing
+a tab, clearing a cookie, or a refresh token expiring.
+
+### Number recycling
+
+Carriers reissue disconnected numbers. So "controls this number" and "owns
+this account" are the same person right up until they aren't.
+
+Full mitigation needs a registration-lock PIN (Signal's answer) and is **not
+built**. What is built limits the blast radius: every successful verify calls
+`revoke_other_sessions`, which kills all other sessions and drops the
+published DM key. It runs unconditionally on every sign-in rather than only
+when recycling is suspected, because a check that has to be *correct* to be
+safe is worse than an action that is merely redundant when it isn't needed.
+
+### What is gated — currently nothing; guests have full access
+
+**As shipped, verification gates nothing.** Guest (anonymous) accounts can
+do everything a verified account can: post, chat, message, follow. That is
+the intended state for now.
+
+The gating *is written* — triggers requiring `soso.require_verified()` on
+`posts`, `chat_messages`, `dm_messages` and `follows` — but it lives in
+`supabase/migrations-pending/`, outside the folder `supabase db push`
+applies, so it does not run. When it is switched on it will leave reads open
+(the map should be browsable before handing over a number, and the content
+is public anyway) and require verification only for those four writes,
+enforced by triggers so the guard sits in front of the existing function
+bodies rather than being copied into four of them where the copies could
+drift.
+
+To switch it on later, move that file back into `supabase/migrations/` and
+push — but only after an SMS provider is delivering codes, or every
+unverified account is locked out of writing with no way to verify. See
+`supabase/migrations-pending/README.md`.
+
+Note the two abuse-prone writes that the gating migration does **not** cover
+even when applied: `post_votes` and `post_replies`. They were out of scope
+for that migration; if guest write access is later restricted, decide
+separately whether vote-brigading and reply-spam from unverified accounts
+need the same treatment.
+
+### Setup
+
+None of this happens automatically, and two of these settings are the
+difference between real hardening and decoration.
+
+1. **Authentication > Providers > Phone** — enable it and connect an SMS
+   provider. Twilio **Verify** is preferred over raw Twilio SMS: it has fraud
+   controls and geo-permissions built in, which is exactly the layer the
+   pumping attack targets.
+2. **Set the OTP expiry to 60–300 seconds.** Supabase's default is **3600**.
+   An hour-long window on a 6-digit code is the single weakest setting in the
+   default configuration, and leaving it there undoes much of the above.
+3. **Enable CAPTCHA** (Authentication > Settings) — hCaptcha or Turnstile.
+   The strongest single lever against toll fraud.
+4. **Restrict countries** to the ones actually served, if the provider
+   supports it (Twilio Verify does, under Geo Permissions).
+5. **Add the HMAC pepper to Vault** as `phone_hash_pepper`, at least 32
+   random characters. `soso.phone_key` fails rather than falling back to
+   unkeyed hashing when it is missing, so this is required, not optional:
+
+   ```sql
+   select vault.create_secret(
+     encode(extensions.gen_random_bytes(32), 'hex'),
+     'phone_hash_pepper'
+   );
+   ```
+
+6. Apply the migration with `supabase db push`.
+
+### Not verified end-to-end
+
+The same standing caveat as `notify-new-pin` and every migration since 0025:
+nothing in the sandbox that wrote this can run `supabase db push`, and no SMS
+provider is configured, so **no real code has ever been delivered through
+this flow**.
+
+What *is* verified: the phone, handle and OTP rules are unit-tested (26 tests
+in `packages/core/test/phone.test.ts`), and all three screens were driven in
+a real browser — including full-width IME digits enabling the Verify button,
+and reserved usernames being rejected as you type.
+
+What is most likely to need a fix on first real deploy is the Vault lookup in
+`soso.phone_key` and the `auth.sessions` delete in `revoke_other_sessions`,
+both of which reach into schemas whose exact shape varies with the Supabase
+platform version.
+
 ## Early resolution
 
 Lets an author remove their own report before its normal expiry.
@@ -1059,10 +1264,14 @@ stay in sync, as with `CELL_ZOOM`.
 - **No block list management UI.** Blocking works and is enforced, but there is
   no screen listing who you have blocked or letting you unblock. `unblock_user`
   exists and is reachable only via the API.
-- **Anonymous accounts remain the weak point.** Creating an account is free, so
-  nothing stops someone making several. The mutual-follow requirement limits
-  what that buys them, since an unwanted follower still sees nothing, but phone
-  verification remains a prerequisite for treating this as safe at scale.
+- **Account creation is still free.** The phone-auth flow exists but is not
+  enforced yet (see [What is
+  gated](#what-is-gated--currently-nothing-guests-have-full-access)), so an
+  anonymous account still costs nothing and nothing stops someone making
+  several. The mutual-follow requirement limits what that buys them, since an
+  unwanted follower still sees nothing, but enforcing phone verification —
+  by applying the pending gating migration once SMS is live — remains a
+  prerequisite for treating this as safe at scale.
 - **Demo mode reports zero, honestly.** With no backend there are no other
   users, so the panel says so rather than inventing plausible activity.
 
@@ -1299,12 +1508,21 @@ None of the following occurs automatically from a `git push`.
   fixing a pre-existing gap in a function neither stage of this work was
   asked to touch felt like the wrong moment to expand scope rather than
   flag it clearly.
-- **Anonymous sign-in is a development convenience, not a production
-  authentication model.** Creating an anonymous Supabase account has no
-  cost, so the per-user rate limit and reputation floor enforced by
-  `create_post` currently constrain one account, not one person operating a
-  script. Phone verification is required before using the Supabase-backed
-  mode with untrusted users.
+- **Anonymous sign-in is still the effective access model — verification is
+  built but not enforced.** The phone-auth flow exists and works, but the
+  migration that would actually *require* it for writing is held back in
+  `supabase/migrations-pending/` (see [What is
+  gated](#what-is-gated--currently-nothing-guests-have-full-access)): guest
+  accounts currently have the same access as verified ones, by choice. So
+  the original caveat still stands for now — creating an anonymous account
+  is free, and `create_post`'s per-account rate limit constrains one account
+  rather than one person with a script. That closes only when the gating
+  migration is applied against a working SMS provider. When it is, a further
+  residual remains — possession of the number becomes the whole credential,
+  with no registration-lock PIN, so a successful SIM-swap can take an
+  account (each sign-in revokes other sessions and drops the DM key, which
+  bounds but does not prevent it; 2FA is the natural next step, as on
+  Instagram).
 - **Early resolution exists but has no automatic trigger for `seats`
   specifically.** `resolve_post` lets an author remove any of their own
   posts early, and enough net-negative votes now can too (see [Validity

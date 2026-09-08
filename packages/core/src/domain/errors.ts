@@ -57,6 +57,15 @@ export const SOSO_ERROR_CODES = [
   'soso/invalid_key',
   'soso/no_key_yet',
   'soso/undecryptable',
+  'soso/verification_required',
+  'soso/unreachable',
+  'soso/otp_rate_limited',
+  'soso/otp_cooldown',
+  'soso/invalid_handle',
+  'soso/handle_taken',
+  'soso/handle_reserved',
+  'soso/handle_already_set',
+  'soso/invalid_display_name',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -143,6 +152,15 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/thread_not_found': 'That conversation is no longer available.',
   'soso/invalid_key': "This browser's messaging key looks wrong. Reload and try again.",
   'soso/no_key_yet': "They haven't opened messages yet, so there's no key to encrypt to. Try again once they have.",
-  'soso/undecryptable': "This message can't be read on this device — it was encrypted for a key this browser no longer has.",
+  'soso/undecryptable': "This message can't be read on this device.",
+  'soso/verification_required': 'Verify your phone number to do that.',
+  'soso/unreachable': "Couldn't reach SoSo. Check your connection and try again.",
+  'soso/otp_rate_limited': 'Too many verification attempts. Try again later.',
+  'soso/otp_cooldown': 'A code was just sent. Wait a moment before asking for another.',
+  'soso/invalid_handle': 'Usernames are 3-20 characters, using a-z, 0-9 and underscore.',
+  'soso/handle_taken': 'That username is taken.',
+  'soso/handle_reserved': 'That username is not available.',
+  'soso/handle_already_set': 'Your username has already been set.',
+  'soso/invalid_display_name': 'Enter a name between 1 and 40 characters.',
   'soso/unknown': 'Something went wrong. Try again.',
 };

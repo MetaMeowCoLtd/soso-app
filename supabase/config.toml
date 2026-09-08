@@ -26,3 +26,58 @@ site_url = "http://localhost:3000"
 # back to a local demo mode automatically rather than failing outright — see
 # apps/web/src/web/bootstrap.ts.
 enable_anonymous_sign_ins = true
+
+# Phone sign-in (migration 0031, apps/web/src/web/auth.ts).
+[auth.sms]
+enable_signup = true
+enable_confirmations = true
+
+# ============================================================================
+# TEST NUMBERS — sign in without sending an SMS
+# ============================================================================
+# A fixed number/code pair that Supabase accepts WITHOUT contacting any
+# provider. This is the debugging shortcut for the dev team: no SMS account,
+# no cost, no waiting.
+#
+# WHY THIS IS SCOPED TO SPECIFIC NUMBERS, NOT "ANY NUMBER"
+# ---------------------------------------------------------------------
+# There is deliberately no wildcard here, and it must never be turned into
+# one. A code that worked for ANY number would be a master key to every
+# account: type someone else's number plus that code and you are signed in
+# AS them — their DMs, their posts, their identity. That is not a test
+# bypass, it is an impersonation key for the whole userbase, and "we keep it
+# safe" is exactly the assumption that fails (it leaks in git history, a
+# cloned .env, a chat message) with a total blast radius when it does.
+#
+# Binding each code to a number you actually control keeps the failure
+# bounded: a leaked code opens only the handful of throwaway test accounts
+# listed below, never a real user's.
+#
+# HOW THE KEY IS SPELLED
+# ---------------------------------------------------------------------
+# The key is E.164 WITHOUT the leading `+`, and the value is the code that
+# number will always accept. `normalizePhone` turns typed input into `+81…`,
+# so `819012345678` here is what you reach by typing `090-1234-5678` in the
+# app.
+#
+# RULES THAT KEEP THIS SAFE — not optional
+# ---------------------------------------------------------------------
+#   * LOCAL ONLY. This block is for `supabase start`. On a hosted project,
+#     the equivalent lives under Auth > Providers > Phone > test numbers —
+#     and there it IS a real backdoor into those specific numbers, so only
+#     ever register burner numbers you own, and never on production.
+#   * STAYS COMMENTED IN GIT. It is a live bypass for real numbers; leaving
+#     it uncommented risks it riding into a deploy. Uncomment locally while
+#     developing, re-comment before you commit.
+#   * USE BURNER NUMBERS, not personal ones, for shared team entries — the
+#     code is shared, so treat the accounts as disposable.
+#
+# To use: uncomment the [auth.sms.test_otp] line and each teammate's line,
+# fill in real E.164 numbers, run `supabase start`, then in the app type the
+# number (local style is fine, e.g. 090-1234-5678) and enter the code.
+#
+# [auth.sms.test_otp]
+# 819000000001 = "424242"   # <dev 1 — replace with a burner number you own>
+# 819000000002 = "424242"   # <dev 2>
+# 819000000003 = "424242"   # <dev 3>
+# 819000000004 = "424242"   # <QA / shared device>
