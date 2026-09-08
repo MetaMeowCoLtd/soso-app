@@ -1165,6 +1165,73 @@ export function createDemoGateway(): SosoGateway {
       };
     },
 
+    // Profile view. Demo mode has effectively one "other" author (the seed
+    // feed's neighbour), so a tapped byline resolves to that person; the
+    // point here is to exercise the screen — its stats, badges section and
+    // post list — not to model a real social graph demo mode doesn't have.
+    async userProfile(handle: string) {
+      const posts = loadPosts().filter((p) => p.status === "live" && p.expiresAt > nowSeconds());
+      return {
+        id: "seed",
+        handle,
+        displayName: "A neighbour",
+        bio: "Sharing what's happening around the neighbourhood. 🌸",
+        pins: posts.filter((p) => p.authorId === "seed").length,
+        followers: 128,
+        following: 86,
+        isSelf: false,
+        isFollowing: false,
+        isMutual: false,
+        // One sample badge so the section renders with content in demo. Real
+        // accounts get [] until the award engine exists (see migration 0034).
+        badges: [
+          {
+            id: "demo-badge-1",
+            district: "Shibuya",
+            tier: "silver" as const,
+            label: "25 pins in Shibuya",
+            earnedAt: new Date().toISOString(),
+          },
+        ],
+      };
+    },
+
+    async listUserPosts(userId: string, before?: string): Promise<FeedPostsPage> {
+      const me = getMe();
+      const cursor = before ? Number(before) : null;
+      const now = nowSeconds();
+      const matching = loadPosts()
+        .filter(
+          (p) =>
+            p.authorId === userId &&
+            p.status === "live" &&
+            p.expiresAt > now &&
+            (cursor === null || p.createdAt < cursor),
+        )
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 20);
+      const last = matching.length > 0 ? matching[matching.length - 1] : undefined;
+      return {
+        cursor: last ? String(last.createdAt) : null,
+        posts: matching.map((post) => ({
+          ...toPin(post),
+          body: post.body,
+          confirmCount: post.confirmCount,
+          disputeCount: post.disputeCount,
+          address: null,
+          mine: post.authorId === me,
+          author: {
+            id: post.authorId,
+            handle: "demo",
+            displayName: post.authorId === me ? "You" : "A neighbour",
+          },
+          media: [],
+          replyCount: post.replyCount,
+          liked: hasLiked(post.id, me),
+        })),
+      };
+    },
+
     async createPostReply(postId: string, body: string): Promise<PostReply> {
       const me = getMe();
       const post = loadPosts().find((p) => p.id === postId);

@@ -41,6 +41,7 @@ import type {
   PostDetail,
   PostReply,
   SignedBoardTileUrl,
+  UserProfile,
   WalkResult,
 } from '../domain/types';
 
@@ -204,6 +205,20 @@ export interface SosoGateway {
 
   followByHandle(handle: string): Promise<FollowResult>;
   unfollowUser(userId: string): Promise<void>;
+
+  /**
+   * Another person's profile by handle, for the profile-view screen — name,
+   * bio, pin count, follower/following counts, and this viewer's follow
+   * state. Null when the handle doesn't exist or a block hides it.
+   */
+  userProfile(handle: string): Promise<UserProfile | null>;
+
+  /**
+   * One author's own posts, newest first, audience-checked per row. Same
+   * page shape as `listFeedPosts`, so the profile renders them with the feed
+   * card and pages the same way.
+   */
+  listUserPosts(userId: string, before?: string): Promise<FeedPostsPage>;
   blockUser(userId: string): Promise<void>;
   unblockUser(userId: string): Promise<void>;
 

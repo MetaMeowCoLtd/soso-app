@@ -356,6 +356,90 @@ export interface FollowResult {
   mutual: boolean;
 }
 
+/**
+ * A badge earned by contributing pins to a district of the city.
+ *
+ * The award engine and the district taxonomy are not built yet (naming real
+ * Tokyo wards needs boundary data the app doesn't carry; see the README).
+ * The shape is defined now so the profile's badge section is real and
+ * forward-compatible: when `user_profile` starts emitting a `badges` array,
+ * this decodes it with no further client change. Until then the array is
+ * empty for real accounts.
+ */
+export interface Badge {
+  id: string;
+  /** Human-readable district label, e.g. "Shibuya". */
+  district: string;
+  tier: "bronze" | "silver" | "gold";
+  /** Short earned-for description, e.g. "50 pins in Shibuya". */
+  label: string;
+  /** ISO timestamp it was earned. */
+  earnedAt: string;
+}
+
+/**
+ * Someone else's profile, as the viewer sees it (`user_profile`, migration
+ * 0034). The viewer-relative flags come back false for an anonymous viewer.
+ */
+export interface UserProfile {
+  id: string;
+  handle: string;
+  displayName: string;
+  bio: string;
+  /** Lifetime pins contributed — a tally, may exceed the posts a given viewer can open. */
+  pins: number;
+  followers: number;
+  following: number;
+  isSelf: boolean;
+  isFollowing: boolean;
+  /** Both follow each other — unlocks Message and presence. */
+  isMutual: boolean;
+  badges: Badge[];
+}
+
+export interface WireUserProfile {
+  id: string;
+  handle: string;
+  name: string;
+  bio: string;
+  pins: number;
+  followers: number;
+  following: number;
+  is_self: boolean;
+  is_following: boolean;
+  is_mutual: boolean;
+  /** Absent until the award engine exists; decoded as an empty list. */
+  badges?: {
+    id: string;
+    district: string;
+    tier: "bronze" | "silver" | "gold";
+    label: string;
+    earned_at: string;
+  }[];
+}
+
+export function decodeUserProfile(w: WireUserProfile): UserProfile {
+  return {
+    id: w.id,
+    handle: w.handle,
+    displayName: w.name,
+    bio: w.bio ?? "",
+    pins: Number(w.pins) || 0,
+    followers: Number(w.followers) || 0,
+    following: Number(w.following) || 0,
+    isSelf: Boolean(w.is_self),
+    isFollowing: Boolean(w.is_following),
+    isMutual: Boolean(w.is_mutual),
+    badges: (w.badges ?? []).map((b) => ({
+      id: b.id,
+      district: b.district,
+      tier: b.tier,
+      label: b.label,
+      earnedAt: b.earned_at,
+    })),
+  };
+}
+
 
 /**
  * A saved circular area whose pins are shared automatically.

@@ -16,6 +16,7 @@ import DmThreadView from "@/src/web/DmThreadView";
 import { ensurePublishedKey } from "@/src/web/dmCrypto";
 import ChatPanel from "@/src/web/ChatPanel";
 import ProfileSettings from "@/src/web/ProfileSettings";
+import ProfileView from "@/src/web/ProfileView";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import AuthScreens from "@/src/web/AuthScreens";
 import { isGuest, loadAccount, onAuthChange, setGuest, type Account } from "@/src/web/auth";
@@ -166,6 +167,9 @@ function Map({
   // freely with the tab itself.
   const [activeTab, setActiveTab] = useState<"map" | "feed" | "chat" | "people">("map");
   const [editingProfile, setEditingProfile] = useState(false);
+  // The handle whose profile is open, or null. A handle (not an id) because
+  // that's what a byline carries and what user_profile looks up.
+  const [profileHandle, setProfileHandle] = useState<string | null>(null);
 
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [locating, setLocating] = useState(false);
@@ -1038,6 +1042,7 @@ function Map({
           coinBalance={coinBalance}
           onPosted={() => void refreshCoinBalance()}
           onOpenPost={selectPin}
+          onOpenProfile={(handle) => setProfileHandle(handle)}
         />
       )}
 
@@ -1065,6 +1070,27 @@ function Map({
           toggle here shares page.tsx's single push subscription (state and
           handler) with the map's bell, so the two can never disagree about
           whether this browser is subscribed. */}
+      {/* Viewing another person's profile — opened from a feed byline, a
+          full-screen surface like the DM thread. Opening one of their posts
+          reuses the same openPostById the push deep-link and feed taps use;
+          Message reuses openDm (offered by ProfileView only when mutual). */}
+      {profileHandle && (
+        <ProfileView
+          key={profileHandle}
+          gateway={gateway}
+          handle={profileHandle}
+          onClose={() => setProfileHandle(null)}
+          onOpenPost={(postId) => {
+            setProfileHandle(null);
+            void openPostById(postId);
+          }}
+          onMessage={(userId) => {
+            setProfileHandle(null);
+            void openDm(userId);
+          }}
+        />
+      )}
+
       {editingProfile && (
         <ProfileSettings
           gateway={gateway}

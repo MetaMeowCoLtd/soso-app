@@ -147,6 +147,12 @@ class FakeGateway implements SosoGateway {
   async updateProfile(input: { displayName: string; bio: string }) {
     return { id: "u", handle: "u", displayName: input.displayName, bio: input.bio, coinBalance: 0 };
   }
+  async userProfile() {
+    return null;
+  }
+  async listUserPosts() {
+    return { cursor: null, posts: [] };
+  }
   async presenceHeartbeat() {}
   async stopSharingPresence() {}
   async areaPresenceCount() {

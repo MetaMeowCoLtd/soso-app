@@ -21,6 +21,8 @@ interface FeedTabProps {
    * same function the map itself already calls to open a pin.
    */
   onOpenPost: (pin: Pin) => void;
+  /** Open a person's profile from their byline. */
+  onOpenProfile: (handle: string) => void;
 }
 
 /**
@@ -55,7 +57,7 @@ interface FeedTabProps {
  * different signals with different UI treatments, which is why they're two
  * gateway subscriptions instead of one broader one.
  */
-export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, onOpenPost }: FeedTabProps) {
+export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, onOpenPost, onOpenProfile }: FeedTabProps) {
   const { posts, loading, loadingMore, atEnd, error, loadMore, refresh, hasNewPosts } = useFeedPosts(gateway);
   const [composing, setComposing] = useState(false);
   // A card the thread view has since deleted or changed, applied locally
@@ -139,6 +141,7 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, on
               nowSeconds={nowSeconds}
               gateway={gateway}
               onOpen={() => onOpenPost(post)}
+              onOpenProfile={onOpenProfile}
               onChanged={handlePostChanged}
             />
           ))}
@@ -212,12 +215,14 @@ function FeedCard({
   nowSeconds,
   gateway,
   onOpen,
+  onOpenProfile,
   onChanged,
 }: {
   post: PostDetail;
   nowSeconds: number;
   gateway: SosoGateway;
   onOpen: () => void;
+  onOpenProfile: (handle: string) => void;
   onChanged: (post: PostDetail) => void;
 }) {
   const [voting, setVoting] = useState(false);
@@ -250,13 +255,33 @@ function FeedCard({
 
   return (
     <li className="feed-card" onClick={onOpen} role="button" tabIndex={0}>
-      <div className="feed-card-avatar" aria-hidden="true">
+      {/* The avatar and name/handle open the AUTHOR's profile; the rest of
+          the card opens the post. stopPropagation keeps the two taps from
+          both firing — the card's own onClick would otherwise also run. */}
+      <button
+        type="button"
+        className="feed-card-avatar feed-card-avatar-button"
+        aria-label={`View ${post.author.displayName}'s profile`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenProfile(post.author.handle);
+        }}
+      >
         {initialsOf(post.author.displayName)}
-      </div>
+      </button>
       <div className="feed-card-body">
         <div className="feed-card-byline">
-          <strong>{post.author.displayName}</strong>
-          <span className="feed-card-handle">@{post.author.handle}</span>
+          <button
+            type="button"
+            className="feed-card-author"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenProfile(post.author.handle);
+            }}
+          >
+            <strong>{post.author.displayName}</strong>
+            <span className="feed-card-handle">@{post.author.handle}</span>
+          </button>
           {/* Pushed to the far right rather than trailing the handle: a
               long display name and handle together already fill a phone's
               width, and a time that wraps onto its own line under the name
