@@ -390,7 +390,16 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 
 /* Pulled up over the bubble's bottom edge so a reaction reads as attached
    to that message rather than floating between two of them. */
-.chat-reactions { display:flex; gap:3px; margin:-8px 0 0; padding:0 6px; }
+/* position+z-index, not just DOM order, because DOM order alone doesn't
+   survive `.chat-bubble:active`'s own `transform:scale(.98)` a few lines up
+   — the instant that's engaged (which is for the ENTIRE duration of a
+   press-and-drag, i.e. exactly while someone is swiping this message to
+   reply), the bubble becomes its own stacking context and starts painting
+   ABOVE any plain, non-positioned sibling, reactions included, regardless
+   of which one is later in the markup. Giving reactions an explicit,
+   higher stacking level pins them on top no matter what transform state
+   the bubble next to them is in. */
+.chat-reactions { position:relative; z-index:1; display:flex; gap:3px; margin:-8px 0 0; padding:0 6px; }
 .chat-row.mine .chat-reactions { justify-content:flex-end; }
 .chat-reaction { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border:0; border-radius:999px; background:#fff; box-shadow:0 1px 3px rgba(16,44,37,.2); font-size:.74rem; line-height:1.25; transition:transform .12s; }
 .chat-reaction.mine { box-shadow:0 1px 3px rgba(16,44,37,.2), inset 0 0 0 1.4px var(--teal); }
