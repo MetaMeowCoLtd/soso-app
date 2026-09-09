@@ -1025,8 +1025,12 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    only way out. See `switchTab` in page.tsx for the other half of this —
    a tab button has to close the open profile itself, since this overlay
    stays mounted independently of `activeTab` and would otherwise still
-   paint over whatever tab was just selected. */
-.profile-view { position:fixed; z-index:5; inset:0; display:flex; flex-direction:column; background:#f6f8f7; }
+   paint over whatever tab was just selected.
+
+   4, not 5, to leave exactly one layer between this and the tab bar for
+   .connections-view — which is opened FROM a profile and so must cover it,
+   while still sitting under the nav for the same reason this does. */
+.profile-view { position:fixed; z-index:4; inset:0; display:flex; flex-direction:column; background:#f6f8f7; }
 /* As the Profile TAB it sits lower still (z-index:1) since it's the tab
    content itself, not an overlay above it — the distinction no longer
    changes whether the nav is visible (both do now), only stacking order
@@ -1062,14 +1066,24 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .profile-view-bio { margin:10px 0 0; max-width:420px; color:var(--ink); font-size:.9rem; line-height:1.5; text-align:center; white-space:pre-wrap; }
 
 .profile-view-stats { display:flex; align-items:stretch; gap:8px; margin-top:18px; width:100%; max-width:380px; }
-.profile-view-stat { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:12px 6px; border-radius:16px; }
+/* `border:0; font:inherit` because two of these three are <button> now (the
+   follower/following ones open the connections list; pins has nowhere to
+   go). The tile must look identical either way — which element it is should
+   be invisible until you press it. */
+.profile-view-stat { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:12px 6px; border:0; border-radius:16px; font:inherit; text-align:center; }
 .profile-view-stat strong { font-size:1.3rem; font-weight:900; color:var(--deep); font-variant-numeric:tabular-nums; }
 .profile-view-stat span { color:var(--muted); font-size:.72rem; font-weight:750; }
 /* Each tile a different brand tint so the row reads as lively, not as a
    grey ledger — and pins, the stat this app is about, gets the boldest one:
-   the teal→mint gradient the map's own confirmed pins use. */
-.profile-view-stat:not(.primary):nth-of-type(2) { background:#fff0f4; }
-.profile-view-stat:not(.primary):nth-of-type(3) { background:#eef4ff; }
+   the teal→mint gradient the map's own confirmed pins use.
+
+   Explicit classes rather than :nth-of-type, which silently stopped working
+   the moment these became buttons: nth-of-type counts per ELEMENT type, so
+   with one div and two buttons the "third tile" selector matched nothing. */
+.profile-view-stat-followers { background:#fff0f4; }
+.profile-view-stat-following { background:#eef4ff; }
+button.profile-view-stat { transition:transform .16s, filter .16s; }
+button.profile-view-stat:active { transform:scale(.97); filter:brightness(.97); }
 .profile-view-stat.primary { background:linear-gradient(135deg, var(--teal), #37c9a9); box-shadow:0 6px 16px color-mix(in srgb, var(--teal), transparent 66%); }
 .profile-view-stat.primary strong { color:#fff; }
 .profile-view-stat.primary span { color:rgba(255,255,255,.92); }
@@ -1111,3 +1125,97 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    not a bespoke list — so there is no .profile-view-post* styling here on
    purpose. The .feed-tab-list wrapper gives them the same spacing as the
    feed. */
+
+/* ===========================================================================
+   Followers / following (ConnectionsView)
+   ===========================================================================
+   Layered at 5: above .profile-view (4), which is what opens it, and below
+   .tab-bar (6), which stays usable throughout — see the profile's own
+   z-index note above for why browsing people does not lock the nav away. */
+.connections-view { position:fixed; z-index:5; inset:0; display:flex; flex-direction:column; background:#f6f8f7; }
+
+.connections-head { display:flex; align-items:center; gap:10px; padding:12px 16px; padding-top:max(12px, env(safe-area-inset-top)); background:rgba(255,255,255,.92); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.connections-back { flex-shrink:0; display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:#f1f4f2; color:var(--deep); transition:background .16s, transform .16s; }
+.connections-back:hover { background:#e5eae7; }
+.connections-back:active { transform:scale(.94); }
+/* Name over handle rather than the handle alone in the title bar: whose
+   list this is should not require reading a username to work out. */
+.connections-title { min-width:0; display:flex; flex-direction:column; line-height:1.25; }
+.connections-title strong { color:var(--deep); font-size:.95rem; font-weight:900; letter-spacing:-.02em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.connections-title span { color:var(--muted); font-size:.75rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* A segmented pill, not underline tabs — the count sits with the label it
+   counts, and the filled state says which list you are in without the eye
+   having to find a 2px rule. */
+.connections-tabs { display:flex; gap:6px; margin:12px 16px 0; padding:5px; border-radius:999px; background:#eaefec; }
+.connections-tab { flex:1; display:flex; align-items:baseline; justify-content:center; gap:6px; padding:9px 10px; border:0; border-radius:999px; background:transparent; color:var(--muted); font:inherit; transition:background .18s, color .18s, box-shadow .18s; }
+.connections-tab strong { font-size:1rem; font-weight:900; font-variant-numeric:tabular-nums; }
+.connections-tab span { font-size:.78rem; font-weight:750; }
+.connections-tab.active { background:#fff; color:var(--deep); box-shadow:var(--e1); }
+.connections-tab:active { transform:scale(.99); }
+
+.connections-search { display:flex; align-items:center; gap:8px; margin:10px 16px 0; padding:0 12px; border-radius:14px; background:#fff; box-shadow:var(--e1); }
+.connections-search .icon { flex-shrink:0; color:var(--muted); }
+.connections-search input { flex:1; min-width:0; border:0; outline:0; padding:11px 0; background:transparent; color:var(--ink); font:inherit; font-size:.88rem; }
+/* The browser's own clear affordance is inconsistent across engines and
+   unstyleable; this replaces it with one that matches everything else. */
+.connections-search input::-webkit-search-cancel-button { display:none; }
+.connections-search-clear { flex-shrink:0; display:grid; place-items:center; width:22px; height:22px; border:0; border-radius:50%; background:#eef1f0; color:var(--muted); }
+.connections-search-clear:hover { background:#e2e7e4; color:var(--deep); }
+
+.connections-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 0 calc(84px + env(safe-area-inset-bottom)); }
+.connections-list { list-style:none; margin:0; padding:0 12px; display:flex; flex-direction:column; gap:8px; }
+
+.connection-row { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:18px; background:#fff; box-shadow:var(--e1); }
+.connection-who { flex:1; min-width:0; display:flex; align-items:center; gap:12px; border:0; background:transparent; padding:0; font:inherit; text-align:left; cursor:pointer; }
+.connection-id { min-width:0; display:flex; flex-direction:column; gap:1px; }
+/* Wraps rather than truncating. At 375px the name, its chip and the action
+   button cannot always share one line — "Kenji Nakamura" alone wants 127 of
+   the 154px this column gets once the chip is in it — and of the two ways to
+   lose, ellipsing a perfectly ordinary NAME down to "Kenji…" is much worse
+   than letting the chip drop onto its own line for the few rows that need
+   it. Short names (most of them) are unaffected and stay one line. */
+.connection-name { display:flex; align-items:center; flex-wrap:wrap; gap:5px; row-gap:3px; min-width:0; }
+/* min-width:0 as well as the ellipsis rules: a flex item defaults to
+   min-width:auto and refuses to shrink below its text, which makes it push
+   the chip off the row instead of ellipsing. */
+.connection-name strong { min-width:0; color:var(--deep); font-size:.92rem; font-weight:850; letter-spacing:-.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.connection-handle { color:var(--muted); font-size:.76rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.connection-pins { color:var(--teal); font-weight:800; font-variant-numeric:tabular-nums; }
+/* One line, clamped: enough bio to decide whether to follow back without a
+   long one turning the row into a paragraph. */
+.connection-bio { margin-top:2px; color:var(--ink); font-size:.78rem; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.75; }
+
+/* The chips are the point of this screen (see ConnectionsView's own comment):
+   they are what Instagram's version of these rows never tells you. Tinted
+   rather than grey so they read as information, not as disabled text. */
+/* Small and tight on purpose: at 375px the name, the chip and the action
+   button share one row, and an over-padded chip is what forces a perfectly
+   ordinary name like "Kenji Nakamura" to ellipse down to "Kenji…". The chip
+   is a qualifier on the name, not a peer of it. */
+.connection-chip { flex-shrink:0; padding:2px 7px; border-radius:999px; font-size:.62rem; font-weight:850; letter-spacing:.01em; white-space:nowrap; }
+.connection-chip.mutual { background:var(--mint); color:#0a6b58; }
+.connection-chip.follows-you { background:#fff0f4; color:#b01f52; }
+.connection-chip.self { background:#eef4ff; color:#2b4d8f; }
+
+/* Same two states as the profile's own Follow button, deliberately — a
+   follow control should not look like a different control depending on
+   which screen you press it from. */
+.connection-follow { flex-shrink:0; border:0; border-radius:999px; padding:8px 13px; background:linear-gradient(120deg, var(--teal), var(--deep)); color:#fff; font-size:.75rem; font-weight:850; white-space:nowrap; box-shadow:0 4px 11px color-mix(in srgb, var(--teal), transparent 68%); transition:transform .16s, opacity .16s; }
+.connection-follow:active:not(:disabled) { transform:scale(.97); }
+.connection-follow:disabled { opacity:.55; }
+.connection-follow.following { background:#fff; color:var(--deep); box-shadow:inset 0 0 0 1.6px var(--teal); }
+
+.connections-status { margin:0; padding:28px 20px; color:var(--muted); font-size:.85rem; text-align:center; }
+.connections-retry { border:0; background:transparent; padding:0; color:var(--teal); font:inherit; font-size:.85rem; font-weight:800; text-decoration:underline; }
+/* The honesty note about search only covering loaded rows — quiet, but
+   present, rather than letting a partial result look complete. */
+.connections-note { margin:4px 16px 0; padding:10px 12px; border-radius:12px; background:#eef4ff; color:#2b4d8f; font-size:.74rem; line-height:1.4; font-weight:600; text-align:center; }
+.connections-sentinel { min-height:24px; display:grid; place-items:center; }
+
+.connection-row-skeleton { pointer-events:none; }
+.connection-skeleton-avatar { flex-shrink:0; width:46px; height:46px; border-radius:50%; }
+.connection-skeleton-line { display:block; height:10px; }
+.connection-skeleton-name { width:120px; }
+.connection-skeleton-handle { width:80px; margin-top:7px; }
+.connection-skeleton-action { flex-shrink:0; width:78px; height:32px; border-radius:999px; }

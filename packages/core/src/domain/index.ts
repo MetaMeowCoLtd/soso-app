@@ -10,3 +10,4 @@ export * from './chat';
 export * from './dm-crypto';
 export * from './phone';
 export * from './profile';
+export * from './connections';

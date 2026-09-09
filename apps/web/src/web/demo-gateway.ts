@@ -63,6 +63,8 @@ import type {
   BoardTileMeta,
   BoardTilePutRequest,
   ChatMessage,
+  Connection,
+  ConnectionsPage,
   DmMessage,
   DmThread,
   FeedPostsPage,
@@ -75,6 +77,127 @@ import type {
   SignedBoardTileUrl,
   SosoGateway,
 } from "soso-core";
+
+// ---------------------------------------------------------------------------
+// Sample people for the follower / following lists.
+// ---------------------------------------------------------------------------
+// Chosen to cover every relationship state the list can render, because a
+// screen whose entire purpose is distinguishing them is untestable against a
+// cast where they all look the same: someone who follows you and whom you
+// follow back (mutual), someone who follows you and you haven't (the
+// "Follows you" + Follow back case), someone you follow one-directionally,
+// and a plain stranger. Pin counts vary for the same reason — the list sorts
+// nothing by them, but a column of identical numbers would hide that the
+// stat is there at all.
+const DEMO_PEOPLE = {
+  kenji: {
+    id: "seed",
+    handle: "kenji_naka",
+    displayName: "Kenji Nakamura",
+    bio: "New around Nakano — say hi 👋",
+    pins: 12,
+    isSelf: false,
+    isFollowing: false,
+    followsYou: true,
+  },
+  hiro: {
+    id: "demo-hiro",
+    handle: "i.am.hiro.jp",
+    displayName: "HiRO",
+    bio: "Street photography, mostly at night.",
+    pins: 84,
+    isSelf: false,
+    isFollowing: true,
+    followsYou: true,
+  },
+  enru: {
+    id: "demo-enru",
+    handle: "enrulin",
+    displayName: "Enru Lin",
+    bio: "Coffee, trains, and the occasional cat.",
+    pins: 41,
+    isSelf: false,
+    isFollowing: true,
+    followsYou: true,
+  },
+  patrol: {
+    id: "demo-patrol",
+    handle: "springpatrol",
+    displayName: "Tokyo Spring Patrol",
+    bio: "Volunteers keeping the neighbourhood tidy. 🌸",
+    pins: 213,
+    isSelf: false,
+    isFollowing: true,
+    followsYou: false,
+  },
+  jodi: {
+    id: "demo-jodi",
+    handle: "jdmln",
+    displayName: "jodi m",
+    bio: "",
+    pins: 3,
+    isSelf: false,
+    isFollowing: false,
+    followsYou: true,
+  },
+  bora: {
+    id: "demo-bora",
+    handle: "borapunzel",
+    displayName: "Bora",
+    bio: "Cat photos. That's the whole account.",
+    pins: 0,
+    isSelf: false,
+    isFollowing: false,
+    followsYou: false,
+  },
+  homebody: {
+    id: "demo-homebody",
+    handle: "lifehomebody",
+    displayName: "Homebody Life（温兜）",
+    bio: "Small apartments, big plants.",
+    pins: 27,
+    isSelf: false,
+    isFollowing: true,
+    followsYou: false,
+  },
+} satisfies Record<string, Connection>;
+
+const DEMO_FOLLOWERS: Connection[] = [
+  DEMO_PEOPLE.kenji,
+  DEMO_PEOPLE.hiro,
+  DEMO_PEOPLE.enru,
+  DEMO_PEOPLE.jodi,
+  DEMO_PEOPLE.bora,
+];
+
+const DEMO_FOLLOWING: Connection[] = [
+  DEMO_PEOPLE.hiro,
+  DEMO_PEOPLE.enru,
+  DEMO_PEOPLE.patrol,
+  DEMO_PEOPLE.homebody,
+];
+
+/**
+ * Pages a fixed demo list the same way the real RPC pages a real one.
+ *
+ * Small page size on purpose: the whole cast fits in one response, so a
+ * single page would leave the view's paging path (sentinel, loadMore, the
+ * "that was the last page" null cursor) never once exercised in the mode
+ * that is easiest to run. The cursor is just an index, since demo rows have
+ * no timestamps to key on — the client only ever passes it back verbatim.
+ */
+const DEMO_CONNECTIONS_PAGE_SIZE = 3;
+
+function demoConnectionPage(all: Connection[], before?: string): ConnectionsPage {
+  const start = before ? Number(before) : 0;
+  const from = Number.isFinite(start) && start > 0 ? start : 0;
+  const slice = all.slice(from, from + DEMO_CONNECTIONS_PAGE_SIZE);
+  const next = from + slice.length;
+  return {
+    cursor: next < all.length ? String(next) : null,
+    people: slice,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Category configuration, hand-mirrored from supabase/seed.sql's enabled rows.
@@ -1132,6 +1255,23 @@ export function createDemoGateway(): SosoGateway {
       ];
     },
 
+    // Enough sample people that the follower/following screen can actually be
+    // judged — its segmented control, search, relationship chips and the
+    // three different button states all need more than one row to mean
+    // anything. Deliberately a fixed cast rather than the one seed
+    // "neighbour" the rest of demo mode uses: this is the one screen whose
+    // whole job is showing a VARIETY of relationships at once, and a list of
+    // three identical strangers would exercise none of it. Real accounts get
+    // their actual edges from list_followers / list_following (migration
+    // 0036); nothing here is written anywhere or survives a reload.
+    async listFollowers(_userId: string, before?: string): Promise<ConnectionsPage> {
+      return demoConnectionPage(DEMO_FOLLOWERS, before);
+    },
+
+    async listFollowing(_userId: string, before?: string): Promise<ConnectionsPage> {
+      return demoConnectionPage(DEMO_FOLLOWING, before);
+    },
+
     async unfollowUser(): Promise<void> {},
     async blockUser(): Promise<void> {},
     async unblockUser(): Promise<void> {},
@@ -1227,8 +1367,12 @@ export function createDemoGateway(): SosoGateway {
           displayName: edits.displayName ?? "You (demo)",
           bio: edits.bio ?? "",
           pins: posts.filter((p) => p.authorId === me).length,
-          followers: 0,
-          following: 0,
+          // The length of the lists these numbers now open, not a
+          // stand-alone figure: tapping "5 followers" and being handed a
+          // list of a different size is the kind of small incoherence that
+          // makes a demo look broken rather than simplified.
+          followers: DEMO_FOLLOWERS.length,
+          following: DEMO_FOLLOWING.length,
           isSelf: true,
           isFollowing: false,
           isMutual: false,
@@ -1241,8 +1385,10 @@ export function createDemoGateway(): SosoGateway {
         displayName: "A neighbour",
         bio: "Sharing what's happening around the neighbourhood. 🌸",
         pins: posts.filter((p) => p.authorId === "seed").length,
-        followers: 128,
-        following: 86,
+        // Was a flattering 128/86 back when these were display-only. They
+        // open a real list now, so they have to be that list's length.
+        followers: DEMO_FOLLOWERS.length,
+        following: DEMO_FOLLOWING.length,
         isSelf: false,
         isFollowing: false,
         isMutual: false,

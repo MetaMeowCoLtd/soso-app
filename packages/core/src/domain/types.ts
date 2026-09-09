@@ -472,6 +472,84 @@ export function decodeUserProfile(w: WireUserProfile): UserProfile {
   };
 }
 
+/**
+ * One person as they appear in a follower or following list (`list_followers`
+ * / `list_following`, migration 0036).
+ *
+ * Carries BOTH directions of the follow edge — `isFollowing` (you → them)
+ * and `followsYou` (them → you) — rather than the single `isMutual` flag
+ * `UserProfile` gets. That is what lets a row say "Follows you" on someone
+ * you haven't followed back, which is the one thing these lists are actually
+ * for and the thing Instagram's own version of this screen never tells you:
+ * there, every row you don't follow looks identical whether or not that
+ * person follows you. Mutual is then derivable rather than transmitted
+ * separately — see `connectionRelationship` in ./connections.
+ *
+ * `pins` rides along because this app ranks people by contribution, not by
+ * follower count. A list of names tells you nothing about who is worth
+ * following back; a list of names with "82 pins" next to them does.
+ */
+export interface Connection {
+  id: string;
+  handle: string;
+  displayName: string;
+  bio: string;
+  /** Lifetime pins contributed. Same tally as `UserProfile.pins`. */
+  pins: number;
+  /** This row is the viewer themselves — no follow button is offered on yourself. */
+  isSelf: boolean;
+  /** The viewer follows this person. */
+  isFollowing: boolean;
+  /** This person follows the viewer. */
+  followsYou: boolean;
+}
+
+export interface WireConnection {
+  id: string;
+  handle: string;
+  name: string;
+  bio: string;
+  pins: number;
+  is_self: boolean;
+  is_following: boolean;
+  follows_you: boolean;
+}
+
+/**
+ * A page of connections. Same `{ cursor, ... }` shape as `FeedPostsPage`,
+ * for the same reason: keyset pagination over a timestamp, with null meaning
+ * "that was the last page".
+ */
+export interface ConnectionsPage {
+  cursor: string | null;
+  people: Connection[];
+}
+
+export interface WireConnectionsPage {
+  cursor: string | null;
+  people: WireConnection[];
+}
+
+export function decodeConnection(w: WireConnection): Connection {
+  return {
+    id: w.id,
+    handle: w.handle,
+    displayName: w.name,
+    bio: w.bio ?? '',
+    pins: Number(w.pins) || 0,
+    isSelf: Boolean(w.is_self),
+    isFollowing: Boolean(w.is_following),
+    followsYou: Boolean(w.follows_you),
+  };
+}
+
+export function decodeConnectionsPage(w: WireConnectionsPage): ConnectionsPage {
+  return {
+    cursor: w.cursor ?? null,
+    people: (w.people ?? []).map(decodeConnection),
+  };
+}
+
 
 /**
  * A saved circular area whose pins are shared automatically.

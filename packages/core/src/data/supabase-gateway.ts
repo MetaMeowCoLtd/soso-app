@@ -54,6 +54,7 @@ import {
   decodeFeedPostsPage,
   decodeUserProfile,
   decodeIncomingFollow,
+  decodeConnectionsPage,
   decodePostReply,
   type Board,
   type BoardStrokeBatch,
@@ -68,6 +69,8 @@ import {
   type FeedPostsPage,
   type WireFeedPostsPage,
   type UserProfile,
+  type ConnectionsPage,
+  type WireConnectionsPage,
   type IncomingFollow,
   type WireIncomingFollow,
   type WireUserProfile,
@@ -389,6 +392,24 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       });
       if (error) throw toSosoError(error);
       return decodeFeedPostsPage(data as WireFeedPostsPage);
+    },
+
+    async listFollowers(userId: string, before?: string): Promise<ConnectionsPage> {
+      const { data, error } = await client.rpc('list_followers', {
+        p_user_id: userId,
+        p_before: before ?? null,
+      });
+      if (error) throw toSosoError(error);
+      return decodeConnectionsPage(data as WireConnectionsPage);
+    },
+
+    async listFollowing(userId: string, before?: string): Promise<ConnectionsPage> {
+      const { data, error } = await client.rpc('list_following', {
+        p_user_id: userId,
+        p_before: before ?? null,
+      });
+      if (error) throw toSosoError(error);
+      return decodeConnectionsPage(data as WireConnectionsPage);
     },
 
     async blockUser(userId: string): Promise<void> {

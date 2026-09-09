@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DmThread, NewPost, Pin, PostDetail, ReportReason, SosoGateway } from "soso-core";
+import type { DmThread, NewPost, Pin, PostDetail, ReportReason, SosoGateway, UserProfile } from "soso-core";
 import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
 import PoiPreview, { type SelectedPoi } from "@/src/web/PoiPreview";
@@ -17,6 +17,7 @@ import { ensurePublishedKey } from "@/src/web/dmCrypto";
 import ChatPanel from "@/src/web/ChatPanel";
 import ProfileSettings from "@/src/web/ProfileSettings";
 import ProfileView from "@/src/web/ProfileView";
+import ConnectionsView from "@/src/web/ConnectionsView";
 import { Avatar } from "@/src/web/Avatar";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import AuthScreens from "@/src/web/AuthScreens";
@@ -242,6 +243,10 @@ function Map({
    */
   function switchTab(tab: typeof activeTab) {
     setProfileHandle(null);
+    // Same reasoning as the profile overlay above it: a connections list
+    // stays mounted independently of activeTab and would otherwise keep
+    // covering the tab that was just tapped.
+    setConnections(null);
     setActiveTab(tab);
   }
 
@@ -523,6 +528,16 @@ function Map({
     setCommentsPostId(null);
     setCommentsPost(null);
   }
+
+  /**
+   * Whose follower/following list is open, and on which tab. Holds the whole
+   * profile rather than an id, because ProfileView already has it loaded —
+   * the list screen's own header would otherwise refetch a profile that was
+   * on screen a moment ago just to learn the name it should show.
+   */
+  const [connections, setConnections] = useState<{ profile: UserProfile; tab: "followers" | "following" } | null>(
+    null,
+  );
 
   // Transient feedback only. The old permanent "click anywhere to drop a pin"
   // copy is gone: with a single unambiguous compose button, a standing
@@ -1279,6 +1294,7 @@ function Map({
             onOpenProfile={openProfile}
             onOpenPost={(postId) => void openPostById(postId)}
             onOpenComments={openComments}
+            onOpenConnections={(profile, tab) => setConnections({ profile, tab })}
             onMessage={(userId) => void openDm(userId)}
           />
         ) : (
@@ -1308,9 +1324,35 @@ function Map({
             void openPostById(postId);
           }}
           onOpenComments={openComments}
+          onOpenConnections={(profile, tab) => setConnections({ profile, tab })}
           onMessage={(userId) => {
             setProfileHandle(null);
             void openDm(userId);
+          }}
+        />
+      )}
+
+      {/* Someone's followers/following, above whichever profile opened it
+          (see the z-index pair in globals.css) but still below the tab bar,
+          for the same reason the profile underneath it is: this is browsing,
+          not a task to be held inside. Tapping a row closes this on the way
+          to that person's profile — there is no navigation stack here to
+          come back to, so leaving it open would strand a stale list on top
+          of the profile it just sent you to. */}
+      {connections && (
+        <ConnectionsView
+          key={`${connections.profile.id}-${connections.tab}`}
+          gateway={gateway}
+          userId={connections.profile.id}
+          handle={connections.profile.handle}
+          displayName={connections.profile.displayName}
+          followers={connections.profile.followers}
+          following={connections.profile.following}
+          initialTab={connections.tab}
+          onClose={() => setConnections(null)}
+          onOpenProfile={(handle) => {
+            setConnections(null);
+            openProfile(handle);
           }}
         />
       )}

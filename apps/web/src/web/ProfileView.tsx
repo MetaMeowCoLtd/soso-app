@@ -43,6 +43,13 @@ interface ProfileViewProps {
   onOpenPost: (postId: string) => void;
   /** The shared FeedCard's comment icon — see its own comment on why this is distinct from onOpenPost. */
   onOpenComments: (postId: string) => void;
+  /**
+   * Opens this person's follower/following list on the tapped stat. Takes
+   * the whole profile, not just a tab name, because the list screen needs
+   * the id to query on and the name/handle/counts for its own header — all
+   * of which are already loaded here and would otherwise be refetched.
+   */
+  onOpenConnections: (profile: UserProfile, tab: "followers" | "following") => void;
   /** Open another profile — the shared FeedCard byline needs it; here it's the same person. */
   onOpenProfile: (handle: string) => void;
   /** Start a DM. Offered only when the two of you follow each other. */
@@ -92,6 +99,7 @@ export default function ProfileView({
   onClose,
   onOpenPost,
   onOpenComments,
+  onOpenConnections,
   onOpenProfile,
   onMessage,
   variant = "overlay",
@@ -207,20 +215,34 @@ export default function ProfileView({
             {profile.bio && <p className="profile-view-bio">{profile.bio}</p>}
 
             {/* Pins first and given the most weight — the contribution stat
-                is the one this app is actually about. */}
+                is the one this app is actually about.
+
+                Pins stays a plain tile; the other two are buttons, because
+                only they have somewhere to go. There is no "list of your
+                pins" screen distinct from the Posts section already further
+                down this page, and a tile that looked identically tappable
+                but did nothing would be worse than one that plainly isn't. */}
             <div className="profile-view-stats">
               <div className="profile-view-stat primary">
                 <strong>{profile.pins}</strong>
                 <span>📍 pins</span>
               </div>
-              <div className="profile-view-stat">
+              <button
+                type="button"
+                className="profile-view-stat profile-view-stat-followers"
+                onClick={() => onOpenConnections(profile, "followers")}
+              >
                 <strong>{profile.followers}</strong>
                 <span>followers</span>
-              </div>
-              <div className="profile-view-stat">
+              </button>
+              <button
+                type="button"
+                className="profile-view-stat profile-view-stat-following"
+                onClick={() => onOpenConnections(profile, "following")}
+              >
                 <strong>{profile.following}</strong>
                 <span>following</span>
-              </div>
+              </button>
             </div>
 
             {profile.isSelf ? (

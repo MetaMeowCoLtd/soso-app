@@ -23,6 +23,7 @@ import type {
   BoardTileMeta,
   BoardTilePutRequest,
   ChatMessage,
+  ConnectionsPage,
   DmMessage,
   DmThread,
   FeedPostsPage,
@@ -227,6 +228,19 @@ export interface SosoGateway {
    * card and pages the same way.
    */
   listUserPosts(userId: string, before?: string): Promise<FeedPostsPage>;
+
+  /**
+   * Who follows this person, and who this person follows — the two lists
+   * behind the follower/following counts on a profile.
+   *
+   * Paged the same way `listUserPosts` is (keyset on the follow's own
+   * timestamp, newest edge first), because a well-followed account is not a
+   * list you fetch in one go. Each row carries both follow edges relative to
+   * the VIEWER, not to the profile being looked at — see `Connection`.
+   */
+  listFollowers(userId: string, before?: string): Promise<ConnectionsPage>;
+  listFollowing(userId: string, before?: string): Promise<ConnectionsPage>;
+
   blockUser(userId: string): Promise<void>;
   unblockUser(userId: string): Promise<void>;
 
