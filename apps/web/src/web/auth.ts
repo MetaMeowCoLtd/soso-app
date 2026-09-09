@@ -180,7 +180,7 @@ export async function sendCode(rawPhone: string): Promise<SendCodeResult> {
     return { ok: false, cooldownSeconds: remaining, errorCode: "soso/otp_cooldown" };
   }
 
-  let error: { status?: number } | null = null;
+  let error: { status?: number; message?: string } | null = null;
   try {
     ({ error } = await withTimeout(
       getSupabase().auth.signInWithOtp({ phone: parsed.phone.e164 }),
@@ -194,6 +194,13 @@ export async function sendCode(rawPhone: string): Promise<SendCodeResult> {
   }
 
   if (error) {
+    // The user-facing copy is deliberately vague (it must not leak whether a
+    // number is registered), but the DEVELOPER needs the real reason — a
+    // disabled phone provider, an SMS provider that can't send, a signup
+    // that isn't allowed. Supabase's own message says which; log it so the
+    // failure is diagnosable from the console instead of guessed at. Safe to
+    // log: it is the platform's own error text, not the user's number or code.
+    console.warn("[soso] signInWithOtp failed:", error.status, error.message);
     // Supabase's own rate limiter answers with 429 before ours is even
     // consulted. Surfaced as the same code the database uses so the UI has
     // one message for "too many", not one per layer that can say it.
@@ -238,7 +245,7 @@ export async function verifyCode(rawPhone: string, code: string): Promise<Verify
   // caller's `busy` flag stuck true and the button disabled at "Checking…"
   // with no error and no way back.
   let supabase: ReturnType<typeof getSupabase>;
-  let error: { status?: number } | null = null;
+  let error: { status?: number; message?: string } | null = null;
   try {
     supabase = getSupabase();
     ({ error } = await withTimeout(
@@ -256,6 +263,10 @@ export async function verifyCode(rawPhone: string, code: string): Promise<Verify
   }
 
   if (error) {
+    // See sendCode's note: vague to the user, but logged in full for the
+    // developer. A wrong code and an unusable provider both land here and
+    // read identically on screen; the console is where they separate.
+    console.warn("[soso] verifyOtp failed:", error.status, error.message);
     return {
       ok: false,
       errorCode: error.status === 429 ? "soso/otp_rate_limited" : "soso/invalid_code",

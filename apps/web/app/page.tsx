@@ -626,6 +626,21 @@ function Map({
     if (pin.lat !== null && pin.lng !== null) {
       setFocusAt({ latitude: pin.lat, longitude: pin.lng });
     }
+    // A plain pin's preview (".sheet") is nested inside <main
+    // className="map-app">, which is display:none via .tab-hidden whenever
+    // activeTab isn't "map" — so opening one from the Posts tab (FeedTab's
+    // onOpenPost is this function) has to switch back to Map or the preview
+    // renders invisibly. selectedPin turning non-null already hides the tab
+    // bar (see its render below), so skipping this left the screen with no
+    // tab bar and nothing to replace it — exactly this bug. A board or
+    // "thought" thread render as their own tab-independent overlay instead
+    // (see the comment above BoardCanvas/ThoughtThread further down) and
+    // show correctly regardless of activeTab, so only the remaining case
+    // needs switching; forcing it for the other two would undo the fix that
+    // moved them out of .map-app in the first place.
+    if (pin.category !== "board" && pin.category !== "thought") {
+      setActiveTab("map");
+    }
     void gateway
       .postDetail(pin.id)
       .then(setSelectedDetail)
@@ -1064,6 +1079,26 @@ function Map({
           onPostChanged={(updated) => setSelectedDetail(updated)}
           onPostDeleted={() => deselectPin()}
         />
+      )}
+
+      {/* The gap between selectPin setting selectedPin (which already hid
+          the tab bar, below) and gateway.postDetail resolving into
+          selectedDetail, which is what the branch above actually waits on.
+          Demo mode's postDetail resolves off local storage, fast enough
+          that this gap is imperceptible — a real network round trip is not,
+          and a fetch that FAILS (selectPin's own .catch leaves
+          selectedDetail permanently null) never resolves it at all. Without
+          this, either case reads exactly like the reported bug: the tab bar
+          disappears and nothing ever takes its place. Rendered as its own
+          overlay, not folded into ThoughtThread, because there is no
+          PostDetail yet to hand it. */}
+      {viewingThought && selectedPin && !selectedDetail && (
+        <div className="pin-loading-overlay" role="status">
+          <button type="button" className="pin-loading-overlay-close" onClick={deselectPin} aria-label="Close">
+            <Icon src={ICONS.close} size={15} />
+          </button>
+          <p>Opening post…</p>
+        </div>
       )}
 
       {activeTab === "feed" && (
