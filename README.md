@@ -581,6 +581,39 @@ None of the following occurs automatically from a `git push`.
     the Friends tab (that part needs no push and no webhook — it reads
     `list_incoming_follows`, migration 0035).
 
+4f. **Create a sixth Database Webhook, for the shared chat room.** Same
+    function, same secret header, different table.
+
+    - Name: `notify-chat-message`
+    - Table: `public.chat_messages`
+    - Events: **Insert** only
+    - Type: **Supabase Edge Function**
+    - Edge Function: `notify-new-pin` (the same one)
+    - HTTP header: identical to step 4, `x-push-secret` with the same value
+
+    The preview is plain text here, unlike the DM one, because this room is
+    not encrypted — the body is already readable to every signed-in client
+    via `list_recent_chat_messages`, so nothing is withheld by including it.
+
+    **Who gets notified, and why it is not everyone.** The chat is one global
+    room (migration 0015 is explicit that it is deliberately not per-area),
+    so there is no membership list. Notifying every account on every message
+    would be a push to the whole userbase each time anybody types, so instead
+    a message notifies:
+
+    - anyone who has **posted in the room in the last 24 hours** — the
+      closest thing to membership this schema has; and
+    - the **author of a message being replied to**, always, even if they have
+      been quiet.
+
+    Bursts are suppressed: if another message landed in the previous minute,
+    only a direct reply goes out, so a fast exchange between two people is
+    not twenty pushes to everybody else. That check asks whether another
+    message exists, not whether it actually notified anyone — a deliberate
+    approximation, since the exact version needs per-recipient delivery state
+    (a table, a write per send, and something to prune it). It can therefore
+    miss a notification during a busy minute, which is the safer direction.
+
 5. **Provide the client with the public key.** This value is safe to
    expose; that is the purpose of a VAPID public key. Add it to
    `apps/web/.env.local` for local development and as a repository variable
@@ -634,6 +667,36 @@ contains `processing post` and `delivery complete` with a nonzero `sent`.
 cell; `Unauthorized` means the webhook header is missing or does not match
 `PUSH_TRIGGER_SECRET`; `unexpected webhook payload` means it is not
 configured as an INSERT webhook on `public.posts`.
+
+**If DMs, follows or chat produce no notification, check the webhook before
+the code.** Each of steps 4b–4f is a *separate* Database Webhook that has to
+be created by hand in the Dashboard, and the app gives no sign that one is
+missing: the feature itself keeps working (the DM arrives, the follow lands
+in Follow requests, the chat message appears), only the push is silent. The
+single most common cause of "notifications don't work" here is a webhook
+that was never created for that table, or a function deployed before the
+handler for it existed. To tell which:
+
+```sql
+-- Which webhooks exist. Each is a trigger on the table it fires for.
+select event_object_table, trigger_name
+from information_schema.triggers
+where trigger_schema = 'public'
+order by event_object_table;
+```
+
+Expect a row for `posts`, `post_votes`, `post_replies`, `dm_messages`,
+`follows` and `chat_messages`. A table missing from that list has no
+webhook, and no amount of redeploying will make it notify.
+
+Then open **Edge Functions > notify-new-pin > Logs** and send one of each. A
+webhook that exists but reaches an outdated deployment logs `unexpected
+webhook payload` with a `table` field the function does not recognise —
+redeploy with `supabase functions deploy notify-new-pin`. A healthy send logs
+`dm notification complete`, `follow notification complete` or `chat
+notification complete`. `sent: 0` with `reason` says which precondition
+failed, and `vapid keys not configured` means step 1's secrets were never set
+on the function.
 
 **Tapping a notification opens that post directly**, on both platforms this
 app targets push notifications on: the service worker passes the post's id

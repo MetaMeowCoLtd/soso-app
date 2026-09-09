@@ -23,6 +23,7 @@ import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import AuthScreens from "@/src/web/AuthScreens";
 import { ensureGuestSession, isGuest, loadAccount, onAuthChange, setGuest, type Account } from "@/src/web/auth";
 import { usePresence } from "@/src/web/usePresence";
+import { useUnreadCounts } from "@/src/web/useUnreadCounts";
 import { lookOf } from "@/src/web/theme";
 import { COIN_ICON, Icon, ICONS, ImageIcon } from "@/src/web/Icon";
 import { useCategories, useFeed, useNowSeconds } from "@/src/web/hooks";
@@ -176,6 +177,11 @@ function Map({
 }) {
   const { categories } = useCategories(gateway);
   const nowSeconds = useNowSeconds();
+
+  // Lives here rather than inside ChatPanel because the badge's whole job is
+  // to be visible while the Chat tab is NOT open — and that tab unmounts
+  // when you leave it, taking any state it owned with it.
+  const unread = useUnreadCounts(gateway);
 
   // 'map' | 'feed' — the map stays mounted and is only ever hidden via CSS
   // (see the tab-hidden class on the returned <main> below), never
@@ -354,16 +360,43 @@ function Map({
   /**
    * The explicit "jump to current location" button. Unlike the quiet attempt
    * above, a press here is a direct request, so a failure gets a visible
-   * notice instead of silently doing nothing — and accuracy is high, since
-   * the person is asking specifically to be shown exactly where they are.
-   * Always requests a fresh fix rather than reusing `userLocation`, in case
-   * they've moved since the last one.
+   * notice instead of silently doing nothing.
+   *
+   * MOVES IMMEDIATELY when the blue-dot watch already has a position.
+   *
+   * It used to call `getCurrentPosition` with `maximumAge: 0` and high
+   * accuracy every time, deliberately refusing any cached fix "in case
+   * they've moved since the last one". That reasoning predates the live
+   * `watchPosition` stream feeding `myLocation` above, and with that stream
+   * running it is now simply wrong: a fix no older than five seconds is
+   * already sitting in state, continuously updated, and `maximumAge: 0`
+   * threw it away to spend several seconds acquiring a fresh GPS lock that
+   * lands in the same place. The camera sat still for that entire wait,
+   * which is the delay this removes — the position was never missing, only
+   * declined.
+   *
+   * The one-shot request is kept for the case where the watch has not
+   * produced anything yet (permission granted just now, or the watch is
+   * failing), and it now accepts a recent cached fix rather than insisting
+   * on a cold one.
    */
   function locateMe() {
     if (!("geolocation" in navigator)) {
       setNotice("Your browser can't share a location.");
       return;
     }
+
+    if (myLocation) {
+      setUserLocation(myLocation.at);
+      flyTo(myLocation.at);
+      // No spinner and no follow-up request: the watch is still running and
+      // will keep the dot current on its own. Firing a second fix here just
+      // to re-centre on a point a few metres away would move the camera a
+      // second time, seconds after it arrived, which reads as drift rather
+      // than precision.
+      return;
+    }
+
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -380,7 +413,10 @@ function Map({
             : "Couldn't get your location. Try again.",
         );
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      // A fix from the last half-minute is worth having instantly over a
+      // perfect one that arrives after a visible pause; the watch stream
+      // corrects the dot either way.
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
     );
   }
 
@@ -839,6 +875,9 @@ function Map({
     // A new-follower notification deep-links here: the follower's handle, so
     // the recipient lands on their profile and can follow back in one tap.
     const profileParam = params.get("profile");
+    // A shared-chat-room notification. No id: the room is global, so the
+    // only thing to say is "open the chat".
+    const chatParam = params.get("chat");
     if (postId) {
       void openPostById(postId);
     }
@@ -848,7 +887,10 @@ function Map({
     if (profileParam) {
       openProfile(profileParam);
     }
-    if (postId || dmSenderId || profileParam) {
+    if (chatParam) {
+      switchTab("chat");
+    }
+    if (postId || dmSenderId || profileParam || chatParam) {
       // Stripped immediately rather than left in the address bar —
       // otherwise reloading the page (or sharing the URL) would keep
       // reopening the same post, thread, or profile indefinitely.
@@ -856,6 +898,7 @@ function Map({
       url.searchParams.delete("post");
       url.searchParams.delete("dm");
       url.searchParams.delete("profile");
+      url.searchParams.delete("chat");
       window.history.replaceState({}, "", url.toString());
     }
 
@@ -870,6 +913,9 @@ function Map({
       }
       if (event.data?.type === "open-profile" && typeof event.data.handle === "string") {
         openProfile(event.data.handle);
+      }
+      if (event.data?.type === "open-chat") {
+        switchTab("chat");
       }
     }
     navigator.serviceWorker?.addEventListener("message", onMessage);
@@ -993,31 +1039,15 @@ function Map({
             </button>
           )}
         </div>
-        <button
-          className={`people-button ${presence.sharing ? "sharing" : ""}`}
-          onClick={() => switchTab("people")}
-          type="button"
-          aria-label="People"
-          title="People"
-        >
-          <Icon src={ICONS.people} size={20} />
-          {presence.areaCount !== null && presence.areaCount > 0 && (
-            <span className="people-count">{presence.areaCount}</span>
-          )}
-        </button>
-        {mode === "supabase" && pushAvailability !== "unsupported" && (
-          <button
-            className={`notify-button ${pushSubscribed ? "active" : ""}`}
-            onClick={() => void toggleNotifications()}
-            type="button"
-            disabled={pushBusy}
-            aria-pressed={pushSubscribed}
-            aria-label={pushSubscribed ? "Turn off notifications" : "Get notified about pins near here"}
-            title={pushSubscribed ? "Notifications on" : "Get notified about pins near here"}
-          >
-            <Icon src={pushSubscribed ? ICONS.bell : ICONS.bellMuted} size={20} />
-          </button>
-        )}
+        {/* The People shortcut and the notification bell both used to sit
+            here. Both now have a permanent home of their own — Friends is
+            its own tab in the nav, and the notification toggle lives in
+            profile settings — so a second copy on the map was one more piece
+            of chrome over the map for a control that is no longer anywhere
+            else's only route. The state behind the bell is untouched and
+            still shared: `pushSubscribed` / `toggleNotifications` are passed
+            to ProfileSettings below, which is now the single place either is
+            reached from. */}
       </header>
 
       {(statusLabel ?? transientNotice) && (
@@ -1282,6 +1312,9 @@ function Map({
           myId={presence.me?.id ?? null}
           onOpenThread={setDmThread}
           refreshToken={dmRefresh}
+          unreadDm={unread.dm}
+          unreadRoom={unread.room}
+          onRoomSeen={unread.markRoomSeen}
         />
       )}
 
@@ -1408,6 +1441,12 @@ function Map({
           onClose={() => {
             setDmThread(null);
             setDmRefresh((n) => n + 1);
+            // DmThreadView calls markDmRead on open, which clears that
+            // thread's unread server-side — but reading a thread inserts no
+            // row, so the realtime subscription behind the badge never hears
+            // about it. Without this the tab badge keeps showing messages
+            // you have already read until something else happens to refresh.
+            unread.refresh();
           }}
         />
       )}
@@ -1446,8 +1485,26 @@ function Map({
             className={`tab-bar-button${activeTab === "chat" ? " active" : ""}`}
             onClick={() => switchTab("chat")}
           >
-            <Icon src={ICONS.chat} size={21} />
+            {/* The count sits on the icon, not the label, so it reads as a
+                badge on the thing rather than as part of the word. Capped
+                at "9+": past that the exact number changes nothing about
+                what you do next, and a three-digit badge stops fitting in
+                the nav. */}
+            <span className="tab-bar-icon-wrap">
+              <Icon src={ICONS.chat} size={21} />
+              {unread.dmPlusRoom > 0 && (
+                <span className="tab-bar-badge" aria-hidden="true">
+                  {unread.dmPlusRoom > 9 ? "9+" : unread.dmPlusRoom}
+                </span>
+              )}
+            </span>
+            {/* The badge itself is aria-hidden, so the count reaches a
+                screen reader once, here, as words rather than as a stray
+                number floating next to the tab name. */}
             <span>Chat</span>
+            {unread.dmPlusRoom > 0 && (
+              <span className="sr-only">{unread.dmPlusRoom} unread</span>
+            )}
           </button>
           <button
             type="button"

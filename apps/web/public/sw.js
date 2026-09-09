@@ -34,6 +34,10 @@ async function handlePush(event) {
     // A new-follower push carries the follower's handle; tapping it opens
     // their profile so you can follow back.
     profileHandle: null,
+    // A shared-chat-room push carries no id, just this flag: the room is
+    // global (one room, see migration 0015), so there is nothing to
+    // identify beyond "open the chat".
+    chat: false,
   };
   try {
     if (event.data) payload = { ...payload, ...event.data.json() };
@@ -61,6 +65,7 @@ async function handlePush(event) {
       postId: payload.postId,
       dmSenderId: payload.dmSenderId,
       profileHandle: payload.profileHandle,
+      chat: payload.chat === true,
     },
   });
 }
@@ -188,6 +193,7 @@ self.addEventListener("notificationclick", (event) => {
   const postId = event.notification.data?.postId ?? null;
   const dmSenderId = event.notification.data?.dmSenderId ?? null;
   const profileHandle = event.notification.data?.profileHandle ?? null;
+  const chat = event.notification.data?.chat === true;
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
@@ -200,6 +206,7 @@ self.addEventListener("notificationclick", (event) => {
           if (postId) client.postMessage({ type: "open-post", postId });
           if (dmSenderId) client.postMessage({ type: "open-dm", dmSenderId });
           if (profileHandle) client.postMessage({ type: "open-profile", handle: profileHandle });
+          if (chat) client.postMessage({ type: "open-chat" });
           return client.focus();
         }
       }
@@ -213,7 +220,9 @@ self.addEventListener("notificationclick", (event) => {
             ? `./?dm=${encodeURIComponent(dmSenderId)}`
             : profileHandle
               ? `./?profile=${encodeURIComponent(profileHandle)}`
-              : "./";
+              : chat
+                ? "./?chat=1"
+                : "./";
         return self.clients.openWindow(url);
       }
     }),

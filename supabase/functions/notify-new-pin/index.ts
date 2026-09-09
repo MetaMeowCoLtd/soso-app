@@ -563,6 +563,207 @@ async function handleNewFollow(
   return new Response(JSON.stringify(result), { status: 200 });
 }
 
+interface ChatPayload {
+  id: string;
+  author_id: string;
+  body: string;
+  reply_to_id: string | null;
+}
+
+function parseChatPayload(value: unknown): ChatPayload | null {
+  if (!isRecord(value) || value.type !== "INSERT" || !isRecord(value.record)) return null;
+  const r = value.record;
+  if (typeof r.id !== "string" || typeof r.author_id !== "string" || typeof r.body !== "string") {
+    return null;
+  }
+  return {
+    id: r.id,
+    author_id: r.author_id,
+    body: r.body,
+    reply_to_id: typeof r.reply_to_id === "string" ? r.reply_to_id : null,
+  };
+}
+
+/**
+ * How far back someone must have spoken to still count as "in" the room.
+ *
+ * The chat is ONE GLOBAL ROOM — migration 0015's header is explicit that it
+ * is deliberately not per-area — so there is no membership list to notify,
+ * and "every account" is not an acceptable stand-in for one: that is a push
+ * to the entire userbase every time anybody types, which is how an app
+ * teaches people to turn notifications off. Recent participation is the
+ * closest thing to membership this schema actually has. If you spoke in the
+ * last day, the conversation is plausibly yours; if you have never spoken,
+ * the room is not something you asked to be interrupted by.
+ */
+const CHAT_ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Messages this close together count as one burst, and only the first of
+ * them notifies the room.
+ *
+ * Without it, two people exchanging twenty quick messages is twenty separate
+ * pushes to everyone else who spoke today. This is knowingly a crude proxy
+ * for "have we notified recently": it asks whether another message landed in
+ * the window, not whether that message actually sent anything. The precise
+ * version needs per-recipient delivery state — a table, a write on every
+ * send, and something to prune it — which is a real feature rather than a
+ * detail to slip in here. The approximation's failure mode is a missed
+ * notification during a busy minute, which is the safe direction to be wrong
+ * in; the opposite failure is the one that makes people disable push.
+ */
+const CHAT_BURST_WINDOW_MS = 60 * 1000;
+
+/** Ceiling on how many people one chat message may notify. A runaway guard. */
+const CHAT_MAX_RECIPIENTS = 200;
+
+/** Long enough to be worth reading on a lock screen, short enough not to be truncated by the OS anyway. */
+const CHAT_PREVIEW_LIMIT = 140;
+
+/**
+ * A new message in the shared chat room.
+ *
+ * The preview here is built server-side and is plain text, unlike the DM
+ * handler next door which forwards ciphertext for the service worker to open
+ * on-device. That is not an inconsistency: this room is not encrypted.
+ * `chat_messages.body` is stored readable and `list_recent_chat_messages`
+ * already hands it to every signed-in client, so there is nothing to decrypt
+ * and nothing withheld by including it here.
+ */
+async function handleChatMessage(
+  supabase: ReturnType<typeof createClient>,
+  rawPayload: unknown,
+): Promise<Response> {
+  const payload = parseChatPayload(rawPayload);
+  if (!payload) {
+    console.error("[notify-new-pin] unexpected chat_messages payload", rawPayload);
+    return new Response("Bad request", { status: 400 });
+  }
+
+  if (!VAPID_CONFIGURED) {
+    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
+  }
+
+  const now = Date.now();
+
+  // Resolved first, because this is the one recipient exempt from the burst
+  // suppression below.
+  let repliedToAuthor: string | null = null;
+  if (payload.reply_to_id) {
+    const { data: parent } = await supabase
+      .from("chat_messages")
+      .select("author_id")
+      .eq("id", payload.reply_to_id)
+      .maybeSingle();
+    const parentAuthor = parent?.author_id;
+    if (typeof parentAuthor === "string" && parentAuthor !== payload.author_id) {
+      repliedToAuthor = parentAuthor;
+    }
+  }
+
+  // Anything else said in the last minute means this is mid-conversation, and
+  // only a direct reply gets through.
+  const { count: recentCount, error: burstError } = await supabase
+    .from("chat_messages")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", new Date(now - CHAT_BURST_WINDOW_MS).toISOString())
+    .neq("id", payload.id);
+  if (burstError) {
+    console.error("[notify-new-pin] chat burst check failed:", burstError);
+    return new Response("Internal error", { status: 500 });
+  }
+  const midBurst = (recentCount ?? 0) > 0;
+
+  const recipients = new Set<string>();
+  if (repliedToAuthor) recipients.add(repliedToAuthor);
+
+  if (!midBurst) {
+    const { data: recent, error: recentError } = await supabase
+      .from("chat_messages")
+      .select("author_id")
+      .gte("created_at", new Date(now - CHAT_ACTIVE_WINDOW_MS).toISOString())
+      .neq("author_id", payload.author_id)
+      .limit(1000);
+    if (recentError) {
+      console.error("[notify-new-pin] chat participants query failed:", recentError);
+      return new Response("Internal error", { status: 500 });
+    }
+    for (const row of recent ?? []) {
+      if (typeof row.author_id === "string") recipients.add(row.author_id);
+    }
+  }
+
+  // Never the author, whichever path added them.
+  recipients.delete(payload.author_id);
+  if (recipients.size === 0) {
+    return new Response(
+      JSON.stringify({ sent: 0, reason: midBurst ? "burst" : "no active participants" }),
+      { status: 200 },
+    );
+  }
+
+  // Blocks in either direction, fetched once for the author rather than once
+  // per candidate: someone who blocked this account should not have their
+  // phone buzzed by it, and nor should the reverse.
+  const { data: blocks, error: blocksError } = await supabase
+    .from("blocks")
+    .select("blocker_id, blocked_id")
+    .or(`blocker_id.eq.${payload.author_id},blocked_id.eq.${payload.author_id}`);
+  if (blocksError) {
+    console.error("[notify-new-pin] blocks lookup failed:", blocksError);
+    return new Response("Internal error", { status: 500 });
+  }
+  for (const b of blocks ?? []) {
+    const other = b.blocker_id === payload.author_id ? b.blocked_id : b.blocker_id;
+    if (typeof other === "string") recipients.delete(other);
+  }
+
+  const ids = [...recipients].slice(0, CHAT_MAX_RECIPIENTS);
+  if (ids.length < recipients.size) {
+    console.warn("[notify-new-pin] chat recipients truncated", {
+      wanted: recipients.size,
+      notified: ids.length,
+    });
+  }
+
+  const [{ data: author }, { data: endpoints, error: endpointsError }] = await Promise.all([
+    supabase.from("profiles").select("handle, display_name").eq("id", payload.author_id).maybeSingle(),
+    supabase.from("push_endpoints").select("endpoint, p256dh, auth").in("user_id", ids),
+  ]);
+  if (endpointsError) {
+    console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
+    return new Response("Internal error", { status: 500 });
+  }
+
+  const name = author?.display_name || (author?.handle ? `@${author.handle}` : "Someone");
+  const text =
+    payload.body.length > CHAT_PREVIEW_LIMIT
+      ? `${payload.body.slice(0, CHAT_PREVIEW_LIMIT)}…`
+      : payload.body;
+
+  const notificationBody = JSON.stringify({
+    title: "SoSo",
+    // "replied to you" only when that is the whole audience — saying it to a
+    // room that also received this as ordinary chatter would be wrong for
+    // everyone but one person, and the payload is shared by all of them.
+    body:
+      repliedToAuthor && ids.length === 1
+        ? `${name} replied to you: ${text}`
+        : `${name}: ${text}`,
+    // Opens the Chat tab — see sw.js, and page.tsx's `?chat=` handling.
+    chat: true,
+  });
+
+  const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
+  console.log("[notify-new-pin] chat notification complete", {
+    messageId: payload.id,
+    notified: ids.length,
+    midBurst,
+    ...result,
+  });
+  return new Response(JSON.stringify(result), { status: 200 });
+}
+
 /**
  * Reverse-geocodes a post's stored (already precision-fuzzed, for categories
  * that fuzz) location into a human-readable address, and writes it to
@@ -709,6 +910,9 @@ Deno.serve(async (req: Request) => {
   }
   if (isRecord(rawPayload) && rawPayload.table === "follows") {
     return await handleNewFollow(supabase, rawPayload);
+  }
+  if (isRecord(rawPayload) && rawPayload.table === "chat_messages") {
+    return await handleChatMessage(supabase, rawPayload);
   }
 
   const payload = parsePostPayload(rawPayload);

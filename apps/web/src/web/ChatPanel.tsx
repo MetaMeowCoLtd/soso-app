@@ -64,6 +64,16 @@ interface ChatPanelProps {
   onOpenThread: (thread: DmThread) => void;
   /** Passed through to the inbox — see DmInbox's own note on why it exists. */
   refreshToken: number;
+  /** Unread totals, counted in page.tsx so they survive this tab unmounting. */
+  unreadDm: number;
+  unreadRoom: number;
+  /**
+   * Reports the newest room message this view has actually shown, which is
+   * what clears the room's badge. Takes that timestamp rather than clearing
+   * a flag, so anything arriving between the fetch and the call is still
+   * counted as unread instead of being silently swallowed.
+   */
+  onRoomSeen: (latestCreatedAt: string | null) => void;
 }
 
 /** Consecutive messages from one person inside this window render as a single run. */
@@ -104,7 +114,16 @@ interface OpenMenu {
   rect: DOMRect;
 }
 
-export default function ChatPanel({ gateway, demoMode, myId, onOpenThread, refreshToken }: ChatPanelProps) {
+export default function ChatPanel({
+  gateway,
+  demoMode,
+  myId,
+  onOpenThread,
+  refreshToken,
+  unreadDm,
+  unreadRoom,
+  onRoomSeen,
+}: ChatPanelProps) {
   // Two things live under one tab: the single global room this app started
   // with, and direct messages. They are the same activity from the user's
   // side ("talking to people") and splitting them into a fifth tab would
@@ -146,6 +165,19 @@ export default function ChatPanel({ gateway, demoMode, myId, onOpenThread, refre
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
+
+  // Marks the room read up to whatever is actually rendered, and keeps doing
+  // so as new messages land while you sit here — which is why it depends on
+  // `messages` rather than firing once on mount. Scoped to the room view, so
+  // reading DMs does not silently clear the room's badge.
+  useEffect(() => {
+    if (view !== "room" || messages.length === 0) return;
+    const newest = messages.reduce<string | null>(
+      (max, m) => (max === null || m.createdAt > max ? m.createdAt : max),
+      null,
+    );
+    onRoomSeen(newest);
+  }, [view, messages, onRoomSeen]);
 
   async function send() {
     const body = input.trim();
@@ -258,6 +290,13 @@ export default function ChatPanel({ gateway, demoMode, myId, onOpenThread, refre
           onClick={() => setView("room")}
         >
           Room
+          {/* Only on the side you are not looking at. A count on the view
+              already open is noise: it is about to be zero, and while you
+              sit there it would flicker up and straight back down on every
+              arriving message. */}
+          {view !== "room" && unreadRoom > 0 && (
+            <span className="chat-switch-badge">{unreadRoom > 9 ? "9+" : unreadRoom}</span>
+          )}
         </button>
         <button
           type="button"
@@ -267,6 +306,13 @@ export default function ChatPanel({ gateway, demoMode, myId, onOpenThread, refre
           onClick={() => setView("direct")}
         >
           Direct
+          {/* Shown even while the inbox is open, unlike the room's: this
+              total is the sum of per-thread counts that only clear when you
+              open each thread, so it stays truthful while you look at the
+              list rather than resetting merely because you glanced at it. */}
+          {unreadDm > 0 && (
+            <span className="chat-switch-badge">{unreadDm > 9 ? "9+" : unreadDm}</span>
+          )}
         </button>
       </div>
 
