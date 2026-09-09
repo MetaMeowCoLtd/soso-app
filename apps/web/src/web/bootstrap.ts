@@ -17,7 +17,7 @@
 
 import { type SosoGateway } from "soso-core";
 import { createDemoGateway } from "./demo-gateway";
-import { ensureSession, getGateway, isConfigured } from "./supabase";
+import { getGateway, isConfigured } from "./supabase";
 
 export type GatewayMode = "supabase" | "demo";
 
@@ -56,14 +56,20 @@ export async function resolveGateway(timeoutMs = 6000): Promise<ResolvedGateway>
 
   try {
     await withTimeout(
-      (async () => {
-        const uid = await ensureSession();
-        if (!uid) throw new Error("no session");
-        // A session alone doesn't prove the database itself is reachable —
-        // categories are anon-readable per RLS, so a successful read here is
-        // a real end-to-end check, not just an auth check.
-        await getGateway().loadCategories();
-      })(),
+      // Categories are anon-readable per RLS, so this one read is a real
+      // end-to-end check of config, network, project and database at once.
+      //
+      // Deliberately does NOT establish a session first. It used to call
+      // `ensureSession()` here and treat "no session" as unreachable, which
+      // conflated two unrelated questions — "is the backend up" and "is
+      // anyone signed in" — and answered the first by silently creating an
+      // anonymous account for anyone whose real session was momentarily
+      // unavailable (see startGuestSession's note on the damage that did).
+      // Whether someone is signed in is the auth gate's business, decided
+      // from `my_account` after this resolves; reachability is this
+      // function's business, and a read that RLS lets anybody do answers it
+      // without touching anyone's session.
+      getGateway().loadCategories(),
       timeoutMs,
     );
     return { gateway: getGateway(), mode: "supabase" };

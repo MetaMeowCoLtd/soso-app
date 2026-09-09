@@ -47,7 +47,7 @@ import {
   type PhoneProblem,
 } from "soso-core";
 import { forgetSelfKeys } from "./dmCrypto";
-import { getSupabase } from "./supabase";
+import { currentUserId, getSupabase, startGuestSession } from "./supabase";
 
 /**
  * Numbers typed without a country code are assumed to be in this one.
@@ -129,6 +129,21 @@ export function setGuest(on: boolean): void {
     // Nothing to do: the session still works for this tab, it just won't
     // be remembered across a reload.
   }
+}
+
+/**
+ * Gives a guest the anonymous session their choice implies, creating one
+ * only if this browser doesn't already have a session of any kind.
+ *
+ * Startup no longer does this for everybody (see `startGuestSession`), so it
+ * has to happen here: both when the choice is first made, and again on a
+ * later launch for someone whose stored guest flag outlived the anonymous
+ * session it was paired with. Returns whether there is now a session — a
+ * guest without one can still read, since the map, feed and categories are
+ * all anon-readable, but nothing they write would land.
+ */
+export async function ensureGuestSession(): Promise<boolean> {
+  return (await startGuestSession()) !== null;
 }
 
 export interface SendCodeResult {
@@ -304,6 +319,16 @@ export interface Account {
 }
 
 export async function loadAccount(): Promise<Account | null> {
+  // Awaited FIRST, and not just as an optimisation to skip a pointless RPC
+  // for a signed-out visitor. Restoring a persisted session from storage is
+  // asynchronous, and `my_account` returns null for a caller it sees as
+  // anonymous — so calling the RPC before the restore finishes produces
+  // exactly the same answer as "no account", and the auth gate reads that as
+  // "make them verify their phone" despite a perfectly good session sitting
+  // in storage, on every single launch. `getSession()` resolves only once
+  // that restore has completed, which turns the race into a wait.
+  if (!(await currentUserId())) return null;
+
   const { data, error } = await getSupabase().rpc("my_account");
   if (error || !data) return null;
   const row = data as {

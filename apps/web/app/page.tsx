@@ -21,7 +21,7 @@ import ConnectionsView from "@/src/web/ConnectionsView";
 import { Avatar } from "@/src/web/Avatar";
 import { resolveGateway, type GatewayMode } from "@/src/web/bootstrap";
 import AuthScreens from "@/src/web/AuthScreens";
-import { isGuest, loadAccount, onAuthChange, setGuest, type Account } from "@/src/web/auth";
+import { ensureGuestSession, isGuest, loadAccount, onAuthChange, setGuest, type Account } from "@/src/web/auth";
 import { usePresence } from "@/src/web/usePresence";
 import { lookOf } from "@/src/web/theme";
 import { COIN_ICON, Icon, ICONS, ImageIcon } from "@/src/web/Icon";
@@ -101,6 +101,16 @@ export default function Home() {
     return onAuthChange(() => void refreshAccount(resolved.mode));
   }, [resolved, refreshAccount]);
 
+  // A returning guest: the stored flag can outlive the anonymous session it
+  // was paired with (that session expires like any other), and startup no
+  // longer quietly mints a replacement for everyone. Without this, such a
+  // guest would browse fine — reads are open — and then find that nothing
+  // they post is accepted, with no visible reason why.
+  useEffect(() => {
+    if (!resolved || resolved.mode !== "supabase" || !browsing) return;
+    void ensureGuestSession();
+  }, [resolved, browsing]);
+
   if (!resolved || !accountChecked) {
     return <div className="map-loading">Connecting…</div>;
   }
@@ -123,6 +133,13 @@ export default function Home() {
             : () => {
                 setGuest(true);
                 setBrowsing(true);
+                // Startup no longer signs anyone in anonymously, so the
+                // guest session is created here, by the choice that asks
+                // for it. Not awaited before showing the app: every read
+                // the map and feed do is anon-readable, so browsing works
+                // immediately either way, and the session lands well
+                // before anyone could reach a control that writes.
+                void ensureGuestSession();
               }
         }
       />

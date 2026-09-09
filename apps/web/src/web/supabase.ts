@@ -48,11 +48,48 @@ export function getGateway(): SosoGateway {
   return gateway;
 }
 
-/** Returns the user id, signing in anonymously if there is no session yet. */
-export async function ensureSession(): Promise<string | null> {
+/**
+ * The signed-in user id, or null. Never creates a session.
+ *
+ * `getSession()` also completes the restore of a persisted session from
+ * storage, so awaiting this is how a caller avoids racing startup: before it
+ * resolves, a request would go out with no user attached and `auth.uid()`
+ * would be null server-side, which reads as "not signed in" rather than "not
+ * loaded yet".
+ */
+export async function currentUserId(): Promise<string | null> {
+  const { data } = await getSupabase().auth.getSession();
+  return data.session?.user?.id ?? null;
+}
+
+/**
+ * Creates an anonymous session, for someone who chose "Continue as guest".
+ *
+ * ONLY EVER CALLED FROM THAT EXPLICIT CHOICE — never from startup.
+ *
+ * It used to run on every launch, as `ensureSession`: get the session, and
+ * if there isn't one, sign in anonymously. That was written before phone
+ * auth existed, when an anonymous account WAS the account (see this module's
+ * own note calling it a development shortcut to remove "before either client
+ * ships for real"). Once real accounts arrived it became actively
+ * destructive, because signing in anonymously does not merely fill a gap —
+ * it writes a brand new session into the same storage slot the real one
+ * lives in. So any moment where the stored session could not be produced,
+ * whether a dead refresh token, a failed refresh, being offline at launch,
+ * or a slow network, stopped being recoverable and became permanent: the
+ * evidence needed to get the real account back was overwritten by an
+ * anonymous one, and the app then correctly reported that this brand new
+ * anonymous user has no verified phone. Which is the sign-in screen, again,
+ * on every launch.
+ *
+ * A guest session is now something you opt into, once, deliberately.
+ */
+export async function startGuestSession(): Promise<string | null> {
   const supabase = getSupabase();
-  const { data } = await supabase.auth.getSession();
-  if (data.session?.user) return data.session.user.id;
+  const existing = await supabase.auth.getSession();
+  // Not unconditional: someone already signed in who somehow reaches this
+  // must not have their real session replaced by an anonymous one.
+  if (existing.data.session?.user) return existing.data.session.user.id;
 
   const { data: created, error } = await supabase.auth.signInAnonymously();
   if (error) return null;
