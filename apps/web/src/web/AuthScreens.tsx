@@ -342,7 +342,7 @@ function HandleStep({ onDone }: { onDone: () => void }) {
           autoComplete="name"
           autoFocus
           maxLength={40}
-          placeholder="Michal Rutkowski"
+          placeholder="Your name"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
@@ -356,7 +356,7 @@ function HandleStep({ onDone }: { onDone: () => void }) {
           autoCorrect="off"
           spellCheck={false}
           maxLength={20}
-          placeholder="michal"
+          placeholder="yourname"
           value={handle}
           onChange={(e) => setHandle(e.target.value)}
           aria-invalid={handleProblem !== null}

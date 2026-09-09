@@ -192,6 +192,59 @@ function Map({
   // that's what a byline carries and what user_profile looks up.
   const [profileHandle, setProfileHandle] = useState<string | null>(null);
 
+  /**
+   * Every byline in the app — a feed card's author, a post inside someone's
+   * profile, a push notification's deep link — calls this rather than
+   * `setProfileHandle` directly, so "that byline happens to be you" is
+   * handled in exactly one place instead of at every call site.
+   *
+   * Your own identity already has a permanent home, the Profile tab, so
+   * tapping your own name opens THAT instead of a second overlay stacked on
+   * top of whatever's already open. Without this, tapping your own byline
+   * inside an already-open profile overlay (your own post, reshared or
+   * quoted somewhere) pushed a new `key={profileHandle}` ProfileView on top
+   * of the one already showing — a redundant, stacked copy of yourself. Not
+   * a no-op, because someone who taps their own name is asking to go to
+   * their profile; closing whatever overlay is open and landing on the tab
+   * that already shows exactly that is the honest way to answer.
+   *
+   * Checks `myHandleRef`, not the `myHandle` state variable directly — the
+   * push-notification deep-link effect below installs its listeners once,
+   * on mount, deliberately (see that effect's own comment), and a plain
+   * closure over `myHandle` would freeze this function at whatever
+   * `myHandle` was AT that mount — null, since it only resolves later from
+   * `refreshMyIdentity`. A ref always reads the current value no matter how
+   * long ago the closure holding it was created.
+   */
+  const myHandleRef = useRef<string | null>(null);
+  useEffect(() => {
+    myHandleRef.current = myHandle;
+  }, [myHandle]);
+
+  const openProfile = useCallback((handle: string) => {
+    if (myHandleRef.current && handle === myHandleRef.current) {
+      setProfileHandle(null);
+      setActiveTab("profile");
+      return;
+    }
+    setProfileHandle(handle);
+  }, []);
+
+  /**
+   * The tab bar's own buttons call this, not `setActiveTab` directly.
+   * Viewing someone else's profile now leaves the tab bar visible (see
+   * `.profile-view`'s z-index in globals.css) so it's genuinely tappable
+   * rather than decorative — but the overlay itself stays mounted at
+   * `profileHandle !== null` regardless of `activeTab`, so switching tabs
+   * while it's open would otherwise just change state invisibly, still
+   * covered by the profile on top. Closing it here is what makes the tab
+   * you just tapped actually appear.
+   */
+  function switchTab(tab: typeof activeTab) {
+    setProfileHandle(null);
+    setActiveTab(tab);
+  }
+
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [locating, setLocating] = useState(false);
   const [isAtMyLocation, setIsAtMyLocation] = useState(false);
@@ -446,6 +499,31 @@ function Map({
   const [selectedPoi, setSelectedPoi] = useState<SelectedPoi | null>(null);
   const [focusAt, setFocusAt] = useState<Coordinates | null>(null);
 
+  // The comment icon's own state — deliberately separate from
+  // selectedPin/selectedDetail above, which drive the Map tab (focusing the
+  // pin, switching activeTab for a located post, PinPreview's vote UI).
+  // Comments have to work the same way for every category, located or not,
+  // and never touch the map — see FeedCard's own comment on why the reply
+  // icon can no longer just reuse "open the post." Keeping this on its own
+  // state means opening comments can never accidentally trip any of the
+  // map-focusing logic selectPin/openPostById are responsible for.
+  const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
+  const [commentsPost, setCommentsPost] = useState<PostDetail | null>(null);
+
+  function openComments(postId: string) {
+    setCommentsPostId(postId);
+    setCommentsPost(null);
+    void gateway
+      .postDetail(postId)
+      .then(setCommentsPost)
+      .catch(() => setCommentsPost(null));
+  }
+
+  function closeComments() {
+    setCommentsPostId(null);
+    setCommentsPost(null);
+  }
+
   // Transient feedback only. The old permanent "click anywhere to drop a pin"
   // copy is gone: with a single unambiguous compose button, a standing
   // instruction is redundant chrome sitting on top of the content it
@@ -465,12 +543,21 @@ function Map({
 
   const transientNotice = notice;
 
+  const viewingBoard = selectedPin?.category === "board";
+  // A "thought" thread, identified by having no real location rather than
+  // by the literal category name "thought" — every location-optional
+  // category is this kind of view, and pinning the check to one specific
+  // name is exactly what silently breaks the moment that category is
+  // renamed or doesn't exist yet in whatever database this pin came from
+  // (see selectPin's own comment on this). Board is excluded explicitly
+  // because it's the one category with a real location that still isn't a
+  // plain pin preview — it gets BoardCanvas instead, for a different reason
+  // entirely (a drawing canvas, not a thread).
+  const viewingThought = selectedPin !== null && !viewingBoard && selectedPin.lat === null && selectedPin.lng === null;
   // A pin preview takes visual priority over whatever browse state the
   // sheet was already in — selecting a pin always shows it, regardless of
   // whether the feed list happened to be expanded at the time.
-  const previewingPin = selectedPin !== null && selectedPin.category !== "board" && selectedPin.category !== "thought";
-  const viewingBoard = selectedPin?.category === "board";
-  const viewingThought = selectedPin?.category === "thought";
+  const previewingPin = selectedPin !== null && !viewingBoard && !viewingThought;
   const viewingPoi = selectedPoi !== null;
 
   /**
@@ -632,13 +719,22 @@ function Map({
     // onOpenPost is this function) has to switch back to Map or the preview
     // renders invisibly. selectedPin turning non-null already hides the tab
     // bar (see its render below), so skipping this left the screen with no
-    // tab bar and nothing to replace it — exactly this bug. A board or
-    // "thought" thread render as their own tab-independent overlay instead
-    // (see the comment above BoardCanvas/ThoughtThread further down) and
-    // show correctly regardless of activeTab, so only the remaining case
-    // needs switching; forcing it for the other two would undo the fix that
-    // moved them out of .map-app in the first place.
-    if (pin.category !== "board" && pin.category !== "thought") {
+    // tab bar and nothing to replace it — exactly this bug.
+    //
+    // Gated on having a real location, not on `category === "thought"`:
+    // every post the Posts tab can ever show is location-optional BY
+    // CONSTRUCTION (list_feed_posts/listFeedPosts only returns posts with
+    // no cell — see that method's own comment), so checking the coordinates
+    // themselves is the invariant that's actually true, rather than one
+    // specific category name that happens to be the location-optional one
+    // today. A category-name check is also one migration away from silently
+    // going stale on a database where that category was renamed or hasn't
+    // been created yet. `category !== "board"` stays a separate, explicit
+    // exception: a board post DOES have a location (it's dropped at a real
+    // spot) but still renders as its own tab-independent overlay (see the
+    // comment above BoardCanvas/ThoughtThread further down), so it needs
+    // excluding on its own terms, not through the location check.
+    if (pin.lat !== null && pin.lng !== null && pin.category !== "board") {
       setActiveTab("map");
     }
     void gateway
@@ -683,7 +779,14 @@ function Map({
       // that remaining case needs switching back to the Map tab explicitly;
       // forcing it for the other two would undo the fix above by yanking
       // someone back to Map after they open a board/thread from Chat.
-      if (detail.category !== "board" && detail.category !== "thought") {
+      //
+      // Gated on having a real location, matching selectPin's own reasoning
+      // above: a location-optional post never needs the Map tab regardless
+      // of which category name currently denotes "location-optional" in
+      // whatever database this deep link happens to be resolved against.
+      // `category !== "board"` stays explicit since a board post has real
+      // coordinates but is still its own tab-independent overlay.
+      if (detail.lat !== null && detail.lng !== null && detail.category !== "board") {
         setActiveTab("map");
       }
     } catch {
@@ -711,7 +814,7 @@ function Map({
       void openDm(dmSenderId);
     }
     if (profileParam) {
-      setProfileHandle(profileParam);
+      openProfile(profileParam);
     }
     if (postId || dmSenderId || profileParam) {
       // Stripped immediately rather than left in the address bar —
@@ -734,7 +837,7 @@ function Map({
         void openDm(event.data.dmSenderId);
       }
       if (event.data?.type === "open-profile" && typeof event.data.handle === "string") {
-        setProfileHandle(event.data.handle);
+        openProfile(event.data.handle);
       }
     }
     navigator.serviceWorker?.addEventListener("message", onMessage);
@@ -860,7 +963,7 @@ function Map({
         </div>
         <button
           className={`people-button ${presence.sharing ? "sharing" : ""}`}
-          onClick={() => setActiveTab("people")}
+          onClick={() => switchTab("people")}
           type="button"
           aria-label="People"
           title="People"
@@ -1101,6 +1204,33 @@ function Map({
         </div>
       )}
 
+      {/* The comment icon's own overlay — entirely independent of
+          selectedPin/activeTab above, on purpose (see commentsPostId's own
+          comment). Reuses ThoughtThread as-is: it has no category-specific
+          logic anywhere in it (it only ever reads body/author/replies), so
+          it already renders a real, located post's comments exactly as
+          well as a location-optional one's — the map is simply never
+          involved in reaching it. */}
+      {commentsPostId && commentsPost && (
+        <ThoughtThread
+          key={commentsPostId}
+          post={commentsPost}
+          gateway={gateway}
+          nowSeconds={nowSeconds}
+          onClose={closeComments}
+          onPostChanged={(updated) => setCommentsPost(updated)}
+          onPostDeleted={() => closeComments()}
+        />
+      )}
+      {commentsPostId && !commentsPost && (
+        <div className="pin-loading-overlay" role="status">
+          <button type="button" className="pin-loading-overlay-close" onClick={closeComments} aria-label="Close">
+            <Icon src={ICONS.close} size={15} />
+          </button>
+          <p>Opening post…</p>
+        </div>
+      )}
+
       {activeTab === "feed" && (
         <FeedTab
           gateway={gateway}
@@ -1108,7 +1238,8 @@ function Map({
           coinBalance={coinBalance}
           onPosted={() => void refreshCoinBalance()}
           onOpenPost={selectPin}
-          onOpenProfile={(handle) => setProfileHandle(handle)}
+          onOpenComments={openComments}
+          onOpenProfile={openProfile}
         />
       )}
 
@@ -1129,7 +1260,7 @@ function Map({
           gateway={gateway}
           onMessage={(userId) => void openDm(userId)}
           onEditProfile={() => setEditingProfile(true)}
-          onOpenProfile={(handle) => setProfileHandle(handle)}
+          onOpenProfile={openProfile}
         />
       )}
 
@@ -1145,8 +1276,9 @@ function Map({
             handle={myHandle}
             variant="tab"
             onEditProfile={() => setEditingProfile(true)}
-            onOpenProfile={(handle) => setProfileHandle(handle)}
+            onOpenProfile={openProfile}
             onOpenPost={(postId) => void openPostById(postId)}
+            onOpenComments={openComments}
             onMessage={(userId) => void openDm(userId)}
           />
         ) : (
@@ -1170,11 +1302,12 @@ function Map({
           gateway={gateway}
           handle={profileHandle}
           onClose={() => setProfileHandle(null)}
-          onOpenProfile={(handle) => setProfileHandle(handle)}
+          onOpenProfile={openProfile}
           onOpenPost={(postId) => {
             setProfileHandle(null);
             void openPostById(postId);
           }}
+          onOpenComments={openComments}
           onMessage={(userId) => {
             setProfileHandle(null);
             void openDm(userId);
@@ -1232,7 +1365,7 @@ function Map({
             role="tab"
             aria-selected={activeTab === "map"}
             className={`tab-bar-button${activeTab === "map" ? " active" : ""}`}
-            onClick={() => setActiveTab("map")}
+            onClick={() => switchTab("map")}
           >
             <Icon src={ICONS.map} size={21} />
             <span>Map</span>
@@ -1242,7 +1375,7 @@ function Map({
             role="tab"
             aria-selected={activeTab === "feed"}
             className={`tab-bar-button${activeTab === "feed" ? " active" : ""}`}
-            onClick={() => setActiveTab("feed")}
+            onClick={() => switchTab("feed")}
           >
             <Icon src={ICONS.feed} size={21} />
             <span>Posts</span>
@@ -1252,7 +1385,7 @@ function Map({
             role="tab"
             aria-selected={activeTab === "chat"}
             className={`tab-bar-button${activeTab === "chat" ? " active" : ""}`}
-            onClick={() => setActiveTab("chat")}
+            onClick={() => switchTab("chat")}
           >
             <Icon src={ICONS.chat} size={21} />
             <span>Chat</span>
@@ -1262,7 +1395,7 @@ function Map({
             role="tab"
             aria-selected={activeTab === "people"}
             className={`tab-bar-button${activeTab === "people" ? " active" : ""}`}
-            onClick={() => setActiveTab("people")}
+            onClick={() => switchTab("people")}
           >
             <Icon src={ICONS.people} size={21} />
             <span>Friends</span>
@@ -1276,7 +1409,7 @@ function Map({
             role="tab"
             aria-selected={activeTab === "profile"}
             className={`tab-bar-button${activeTab === "profile" ? " active" : ""}`}
-            onClick={() => setActiveTab("profile")}
+            onClick={() => switchTab("profile")}
           >
             <span className={`tab-bar-avatar${activeTab === "profile" ? " active" : ""}`}>
               <Avatar name={myName} seed={myHandle ?? "you"} size={22} />

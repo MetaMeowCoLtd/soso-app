@@ -41,6 +41,8 @@ interface ProfileViewProps {
   onClose?: () => void;
   /** Open one of their posts full-screen — reuses page.tsx's own post opener. */
   onOpenPost: (postId: string) => void;
+  /** The shared FeedCard's comment icon — see its own comment on why this is distinct from onOpenPost. */
+  onOpenComments: (postId: string) => void;
   /** Open another profile — the shared FeedCard byline needs it; here it's the same person. */
   onOpenProfile: (handle: string) => void;
   /** Start a DM. Offered only when the two of you follow each other. */
@@ -89,6 +91,7 @@ export default function ProfileView({
   handle,
   onClose,
   onOpenPost,
+  onOpenComments,
   onOpenProfile,
   onMessage,
   variant = "overlay",
@@ -294,6 +297,7 @@ export default function ProfileView({
                     nowSeconds={nowSeconds}
                     gateway={gateway}
                     onOpen={() => onOpenPost(post.id)}
+                    onOpenComments={onOpenComments}
                     onOpenProfile={onOpenProfile}
                     onChanged={(updated) =>
                       setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))

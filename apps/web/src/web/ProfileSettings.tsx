@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   bioRemaining,
   BIO_MAX,
@@ -84,8 +84,6 @@ export default function ProfileSettings({
   const [saved, setSaved] = useState<{ name: string; bio: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [justSaved, setJustSaved] = useState(false);
-  const justSavedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -113,13 +111,6 @@ export default function ProfileSettings({
     };
   }, [gateway]);
 
-  useEffect(
-    () => () => {
-      if (justSavedTimer.current) clearTimeout(justSavedTimer.current);
-    },
-    [],
-  );
-
   const nameCheck = useMemo(() => validateDisplayName(name), [name]);
   const bioCheck = useMemo(() => validateBio(bio), [bio]);
   const remaining = bioRemaining(bio);
@@ -134,13 +125,13 @@ export default function ProfileSettings({
     setError(null);
     try {
       const updated = await gateway.updateProfile({ displayName: nameCheck.value, bio: bioCheck.value });
-      setName(updated.displayName);
-      setBio(updated.bio);
-      setSaved({ name: updated.displayName, bio: updated.bio });
+      // Closes the screen rather than sitting on a "Saved ✓" state — Save
+      // is the one action here with somewhere to go back TO (the profile
+      // that just changed), so completing it should return there, the same
+      // way submitting the handle step of sign-up moves on instead of
+      // lingering on its own confirmation.
       onSaved(updated);
-      setJustSaved(true);
-      if (justSavedTimer.current) clearTimeout(justSavedTimer.current);
-      justSavedTimer.current = setTimeout(() => setJustSaved(false), 2200);
+      onClose();
     } catch (err) {
       const code = (err as { code?: string; message?: string }).code
         ?? (err as { message?: string }).message
@@ -170,7 +161,7 @@ export default function ProfileSettings({
         </button>
         <h1>Edit profile</h1>
         <button type="button" className="settings-save" onClick={() => void save()} disabled={!canSave}>
-          {saving ? "Saving…" : justSaved ? "Saved ✓" : "Save"}
+          {saving ? "Saving…" : "Save"}
         </button>
       </header>
 

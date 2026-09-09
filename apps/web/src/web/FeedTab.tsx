@@ -21,6 +21,12 @@ interface FeedTabProps {
    * same function the map itself already calls to open a pin.
    */
   onOpenPost: (pin: Pin) => void;
+  /**
+   * The comment icon's own handler, separate from `onOpenPost` — see
+   * FeedCard's own comment on why "open the post" and "open its comments"
+   * are no longer the same action for every category.
+   */
+  onOpenComments: (postId: string) => void;
   /** Open a person's profile from their byline. */
   onOpenProfile: (handle: string) => void;
 }
@@ -57,7 +63,7 @@ interface FeedTabProps {
  * different signals with different UI treatments, which is why they're two
  * gateway subscriptions instead of one broader one.
  */
-export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, onOpenPost, onOpenProfile }: FeedTabProps) {
+export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, onOpenPost, onOpenComments, onOpenProfile }: FeedTabProps) {
   const { posts, loading, loadingMore, atEnd, error, loadMore, refresh, hasNewPosts } = useFeedPosts(gateway);
   const [composing, setComposing] = useState(false);
   // A card the thread view has since deleted or changed, applied locally
@@ -141,6 +147,7 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, on
               nowSeconds={nowSeconds}
               gateway={gateway}
               onOpen={() => onOpenPost(post)}
+              onOpenComments={onOpenComments}
               onOpenProfile={onOpenProfile}
               onChanged={handlePostChanged}
             />
@@ -221,6 +228,7 @@ export function FeedCard({
   nowSeconds,
   gateway,
   onOpen,
+  onOpenComments,
   onOpenProfile,
   onChanged,
 }: {
@@ -228,6 +236,23 @@ export function FeedCard({
   nowSeconds: number;
   gateway: SosoGateway;
   onOpen: () => void;
+  /**
+   * The comment icon's own handler — deliberately not just `onOpen` a
+   * second time. `onOpen` is category-dependent (a real, located post opens
+   * on the map; a location-optional one opens its comment thread directly —
+   * see page.tsx's `selectPin`), because seeing where a pin actually is is
+   * part of what tapping it means. But EVERY category supports replies
+   * (`create_post_reply`/`get_post_replies` are generic over `posts.id`,
+   * not scoped to one category — see list_user_posts' own comment), and
+   * this icon promises "see the comments," specifically, regardless of
+   * what kind of post it's on. Routing it through `onOpen` used to mean
+   * tapping it on a real pin opened the map instead — PinPreview has no
+   * comment thread at all, so the promise this icon makes was simply
+   * broken for every located post. `postId`, not the full `post`, because
+   * the handler this reaches (`openComments` in page.tsx) re-fetches its
+   * own detail anyway, the same as any other post-opening path here.
+   */
+  onOpenComments: (postId: string) => void;
   onOpenProfile: (handle: string) => void;
   onChanged: (post: PostDetail) => void;
 }) {
@@ -328,7 +353,19 @@ export function FeedCard({
             <Icon src={post.liked ? ICONS.heartFilled : ICONS.heart} size={22} />
             {post.confirmCount > 0 && <span>{post.confirmCount}</span>}
           </button>
-          <button type="button" className="feed-action" onClick={onOpen} aria-label="Replies">
+          <button
+            type="button"
+            className="feed-action"
+            onClick={(e) => {
+              // Without this, the card's own onClick (onOpen) would ALSO
+              // fire — for a located post that means opening the map right
+              // behind the comments this button just opened, same as the
+              // avatar/byline buttons above already guard against.
+              e.stopPropagation();
+              onOpenComments(post.id);
+            }}
+            aria-label="Replies"
+          >
             <Icon src={ICONS.comment} size={22} />
             {post.replyCount > 0 && <span>{post.replyCount}</span>}
           </button>

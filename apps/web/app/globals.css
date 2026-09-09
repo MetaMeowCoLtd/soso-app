@@ -1014,12 +1014,24 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    the first pass read as a finance app; this leans into SoSo's own palette
    (teal / mint / hot pink) the way the map pins already do, so a profile
    feels like social media, not a dashboard. */
-.profile-view { position:fixed; z-index:20; inset:0; display:flex; flex-direction:column; background:#f6f8f7; }
-/* As the Profile TAB it sits in the tab stack (z-index:1, below the floating
-   tab bar at z-index:6) rather than as an overlay above everything, and its
-   scroll clears the nav so the last post isn't hidden behind it. */
+/* Below the floating tab bar (z-index:6), on purpose, unlike the DM thread,
+   the thought thread and board canvas at z-index:20 — those are exclusive
+   full-screen tasks with nothing to switch away to mid-task, but looking at
+   a person is closer to browsing than to a focused task, and the
+   Instagram/Threads convention this app otherwise departs from (see the
+   module comment in ProfileView.tsx) is worth keeping here: the tab bar
+   stays reachable while a profile is open, whoever's it is, so leaving it
+   is one tap on any other tab rather than a dedicated back button being the
+   only way out. See `switchTab` in page.tsx for the other half of this —
+   a tab button has to close the open profile itself, since this overlay
+   stays mounted independently of `activeTab` and would otherwise still
+   paint over whatever tab was just selected. */
+.profile-view { position:fixed; z-index:5; inset:0; display:flex; flex-direction:column; background:#f6f8f7; }
+/* As the Profile TAB it sits lower still (z-index:1) since it's the tab
+   content itself, not an overlay above it — the distinction no longer
+   changes whether the nav is visible (both do now), only stacking order
+   between this and a stray overlay from another tab. */
 .profile-view-tab { z-index:1; }
-.profile-view-tab .profile-view-scroll { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
 /* No back button in the tab, so the cover must clear the status bar itself
    rather than relying on the floating button's own safe-area inset. */
 .profile-view-tab .profile-view-cover { margin-top:env(safe-area-inset-top); }
@@ -1029,7 +1041,11 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .profile-view-back:hover { background:#fff; }
 .profile-view-back:active { transform:scale(.94); }
 .profile-view-status { margin:auto; color:var(--muted); font-size:.85rem; padding:40px 20px; text-align:center; }
-.profile-view-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:0 0 calc(28px + env(safe-area-inset-bottom)); }
+/* 84px bottom padding, not the plain 28px this had before the tab bar
+   stayed visible on the overlay variant too — the floating nav now sits
+   over the last post/badge here exactly as it does on the Profile tab
+   itself, and needs the same clearance both places. */
+.profile-view-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:0 0 calc(84px + env(safe-area-inset-bottom)); }
 
 /* The per-person gradient banner (inline background from coverGradient). A
    soft sheen on top gives it depth rather than a flat block of colour. */

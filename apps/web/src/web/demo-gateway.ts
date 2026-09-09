@@ -817,7 +817,18 @@ export function createDemoGateway(): SosoGateway {
         // meaning the real gateway uses while a post is still waiting on it.
         address: null,
         mine: post.authorId === me,
-        author: { id: post.authorId, handle: "demo", displayName: post.authorId === me ? "You" : "A neighbour" },
+        // The handle has to actually distinguish "you" from "the neighbour"
+        // — it used to be the literal string "demo" for every post
+        // regardless of authorship, which meant tapping your OWN byline
+        // opened the neighbour's profile instead of recognising itself as
+        // self (userProfile's own self-check, just below, keys off exactly
+        // "demo_user"). Real gateway posts never have this problem since a
+        // post's author.handle is always whoever actually wrote it.
+        author: {
+          id: post.authorId,
+          handle: post.authorId === me ? "demo_user" : "demo",
+          displayName: post.authorId === me ? "You" : "A neighbour",
+        },
         media: [],
         replyCount: post.replyCount,
         liked: hasLiked(post.id, me),
@@ -1179,7 +1190,18 @@ export function createDemoGateway(): SosoGateway {
           disputeCount: post.disputeCount,
           address: null,
           mine: post.authorId === me,
-          author: { id: post.authorId, handle: "demo", displayName: post.authorId === me ? "You" : "A neighbour" },
+          // The handle has to actually distinguish "you" from "the neighbour"
+        // — it used to be the literal string "demo" for every post
+        // regardless of authorship, which meant tapping your OWN byline
+        // opened the neighbour's profile instead of recognising itself as
+        // self (userProfile's own self-check, just below, keys off exactly
+        // "demo_user"). Real gateway posts never have this problem since a
+        // post's author.handle is always whoever actually wrote it.
+        author: {
+          id: post.authorId,
+          handle: post.authorId === me ? "demo_user" : "demo",
+          displayName: post.authorId === me ? "You" : "A neighbour",
+        },
           media: [],
           replyCount: post.replyCount,
           liked: hasLiked(post.id, me),
@@ -1262,9 +1284,12 @@ export function createDemoGateway(): SosoGateway {
           disputeCount: post.disputeCount,
           address: null,
           mine: post.authorId === me,
+          // See postDetail's identical comment: the handle has to actually
+          // distinguish self from the neighbour, or a byline never
+          // recognises itself as "you".
           author: {
             id: post.authorId,
-            handle: "demo",
+            handle: post.authorId === me ? "demo_user" : "demo",
             displayName: post.authorId === me ? "You" : "A neighbour",
           },
           media: [],
