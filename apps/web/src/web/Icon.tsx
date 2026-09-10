@@ -31,9 +31,6 @@ import type { CSSProperties } from "react";
  * a mask keeps one asset per icon and lets CSS colour it, the same job
  * `stroke="currentColor"` used to do for the inline SVGs.
  *
- * Multi-coloured icons are the exception — a gold coin is gold everywhere —
- * and those use `<ImageIcon>` below instead, which is a plain <img>.
- *
  * PATHS ARE RELATIVE ON PURPOSE
  * ---------------------------------------------------------------------
  * "icons/ui/close.svg", never "/icons/ui/close.svg". This app deploys under
@@ -93,7 +90,6 @@ export const ICONS = {
 } as const;
 
 /** Multi-coloured, so it is a picture rather than a mask — see the module comment. */
-export const COIN_ICON = "icons/ui/coin.svg";
 
 interface IconProps {
   /** One of `ICONS`, or a category icon path from `lookOf`. */
@@ -119,20 +115,6 @@ export function Icon({ src, size = 18, className }: IconProps) {
         width: size,
         height: size,
       } as CSSProperties}
-      aria-hidden="true"
-    />
-  );
-}
-
-/** For icons whose colour is part of the icon (the coin), where a mask would flatten it. */
-export function ImageIcon({ src, size = 18, className }: IconProps) {
-  return (
-    <img
-      className={className ? `icon-image ${className}` : "icon-image"}
-      src={src}
-      width={size}
-      height={size}
-      alt=""
       aria-hidden="true"
     />
   );

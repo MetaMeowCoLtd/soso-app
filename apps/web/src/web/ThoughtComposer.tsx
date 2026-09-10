@@ -3,18 +3,14 @@
 import { useState } from "react";
 import {
   ERROR_MESSAGES_EN,
-  canAffordPost,
-  POST_PIN_COST,
   type NewPost,
   type PostAudience,
   type PostDetail,
   type SosoGateway,
 } from "soso-core";
-import { COIN_ICON, ImageIcon } from "./Icon";
 
 interface ThoughtComposerProps {
   gateway: SosoGateway;
-  coinBalance: number | null;
   onCancel: () => void;
   onPosted: (post: PostDetail) => void;
 }
@@ -42,15 +38,14 @@ const BODY_MAX_LENGTH = 500;
  * worse than a composer that is honest about only doing what already
  * works end to end.
  */
-export default function ThoughtComposer({ gateway, coinBalance, onCancel, onPosted }: ThoughtComposerProps) {
+export default function ThoughtComposer({ gateway, onCancel, onPosted }: ThoughtComposerProps) {
   const [body, setBody] = useState("");
   const [audience, setAudience] = useState<PostAudience>("public");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canAfford = coinBalance === null || canAffordPost(coinBalance);
   const trimmed = body.trim();
-  const canSubmit = trimmed.length > 0 && trimmed.length <= BODY_MAX_LENGTH && !busy && canAfford;
+  const canSubmit = trimmed.length > 0 && trimmed.length <= BODY_MAX_LENGTH && !busy;
 
   async function submit() {
     if (!canSubmit) return;
@@ -141,16 +136,9 @@ export default function ThoughtComposer({ gateway, coinBalance, onCancel, onPost
           </div>
         </div>
 
-        <p className="composer-meta">
-          Costs{" "}
-          <strong>
-            {POST_PIN_COST} <ImageIcon src={COIN_ICON} size={13} />
-          </strong>
-        </p>
-
-        {(error || !canAfford) && (
+        {error && (
           <p className="form-errors" role="alert">
-            {error ?? ERROR_MESSAGES_EN["soso/insufficient_coins"]}
+            {error}
           </p>
         )}
       </div>

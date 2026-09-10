@@ -280,8 +280,6 @@ export interface MyProfile {
   bio: string;
   /** See `AvatarPath` — a path, not a URL. */
   avatarPath: AvatarPath;
-  /** Spendable balance. Earned by walking, spent posting a pin. */
-  coinBalance: number;
 }
 
 /** `my_profile` response. Single-character-free here; only the pin wire shape uses those. */
@@ -291,7 +289,6 @@ export interface WireMyProfile {
   name: string;
   bio: string;
   avatar?: string | null;
-  coins: number;
 }
 
 export function decodeMyProfile(w: WireMyProfile): MyProfile {
@@ -307,28 +304,7 @@ export function decodeMyProfile(w: WireMyProfile): MyProfile {
     // response from a database that has not run 0038 omits the key entirely,
     // which is the same "no picture" as an explicit null.
     avatarPath: w.avatar ?? null,
-    coinBalance: Number(w.coins) || 0,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Coins
-// ---------------------------------------------------------------------------
-
-/** Result of a successful `record_walk` call. */
-export interface WalkResult {
-  coinsEarned: number;
-  /** Balance after crediting this walk. */
-  balance: number;
-}
-
-export interface WireWalkResult {
-  coinsEarned: number;
-  balance: number;
-}
-
-export function decodeWalkResult(w: WireWalkResult): WalkResult {
-  return { coinsEarned: Number(w.coinsEarned) || 0, balance: Number(w.balance) || 0 };
 }
 
 /**

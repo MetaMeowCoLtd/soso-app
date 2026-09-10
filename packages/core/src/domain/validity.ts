@@ -19,9 +19,8 @@
  * `DELETE_NET_THRESHOLD` is pure documentation on the client: only the
  * database can actually delete a post (`soso.tg_votes_recount`, via
  * `soso.dispute_threshold()`), and this constant must be hand-kept equal to
- * `-soso.dispute_threshold()`. Same caveat as `coins.ts` — no automated
- * mechanism keeps a TypeScript constant and a Postgres function in sync; if
- * one changes, change the other.
+ * `-soso.dispute_threshold()`. No automated mechanism keeps a TypeScript
+ * constant and a Postgres function in sync; if one changes, change the other.
  */
 
 /**

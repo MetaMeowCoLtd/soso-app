@@ -24,7 +24,7 @@ import { ensureGuestSession, isGuest, loadAccount, onAuthChange, setGuest, type 
 import { usePresence } from "@/src/web/usePresence";
 import { useUnreadCounts } from "@/src/web/useUnreadCounts";
 import { lookOf } from "@/src/web/theme";
-import { COIN_ICON, Icon, ICONS, ImageIcon } from "@/src/web/Icon";
+import { Icon, ICONS } from "@/src/web/Icon";
 import { useCategories, useFeed, useNowSeconds } from "@/src/web/hooks";
 import { DEFAULT_CENTER, distanceMetres, leafletBoundsToBounds, nearbyCells, type Coordinates } from "@/src/web/region";
 import {
@@ -435,43 +435,6 @@ function Map({
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
-  // null while loading, distinct from 0 — ReportForm treats null as "don't
-  // block on this yet" rather than falsely showing "you can't afford this"
-  // before the real balance has even loaded.
-  const [coinBalance, setCoinBalance] = useState<number | null>(null);
-  const [debugGranting, setDebugGranting] = useState(false);
-
-  async function refreshCoinBalance() {
-    try {
-      setCoinBalance(await gateway.myCoinBalance());
-    } catch {
-      // Leaves whatever was last known showing rather than clearing it —
-      // a stale balance is a far better failure mode here than the
-      // compose flow suddenly looking like it has no idea what you can
-      // afford.
-    }
-  }
-
-  async function debugGrantCoins() {
-    setDebugGranting(true);
-    try {
-      const result = await gateway.debugGrantCoins();
-      setCoinBalance(result.balance);
-      setNotice(`+${result.granted} coins (debug) — balance now ${result.balance}`);
-    } catch (err) {
-      const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
-      setNotice(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
-    } finally {
-      setDebugGranting(false);
-    }
-  }
-
-  useEffect(() => {
-    void refreshCoinBalance();
-    // Runs once on mount. gateway is resolved once for the whole session
-    // and never changes (see resolveGateway in Home above).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   // Presence tracks the map centre rather than the device's GPS: the area
   // count answers "is where I'm looking busy", and tying it to the viewport
   // means it works without a second location permission prompt.
@@ -935,7 +898,6 @@ function Map({
     // the coordinates server-side, so the authoritative pin is whatever the
     // next delta returns, not the one the client sent.
     refresh();
-    void refreshCoinBalance();
     setNotice(mode === "supabase" ? "Your pin is live for everyone! ✨" : "Your pin is live on this device ✨");
 
     if (pin.category === "board") {
@@ -1011,24 +973,6 @@ function Map({
           <a className="brand" href="#top" aria-label="SoSo home">
             <span>So</span>So
           </a>
-          <div className="coin-badge" title="Coins — spent posting, earned by walking">
-            <span className="coin-badge-amount">
-              <ImageIcon src={COIN_ICON} size={15} /> {coinBalance ?? "…"}
-            </span>
-            {/* DEV TOOL, not a real feature — see the migration and gateway
-                comments on debug_grant_coins for why this needs to be
-                removed or locked down before this app has real users. */}
-            <button
-              className="coin-debug-button"
-              type="button"
-              onClick={() => void debugGrantCoins()}
-              disabled={debugGranting}
-              title="DEBUG: grant 200 coins (dev only, max 3/day)"
-              aria-label="Debug: grant coins"
-            >
-              +
-            </button>
-          </div>
           {/* The only way back to the sign-in screen once guest mode is
               remembered across reloads. Without it, choosing "Continue as
               guest" once would be a one-way door with no visible exit —
@@ -1201,7 +1145,6 @@ function Map({
             <ReportForm
               categories={categories}
               location={draftAt}
-              coinBalance={coinBalance}
               onCancel={cancelComposer}
               onSubmit={submitReport}
             />
@@ -1299,8 +1242,6 @@ function Map({
         <FeedTab
           gateway={gateway}
           nowSeconds={nowSeconds}
-          coinBalance={coinBalance}
-          onPosted={() => void refreshCoinBalance()}
           onOpenPost={selectPin}
           onOpenComments={openComments}
           onOpenProfile={openProfile}

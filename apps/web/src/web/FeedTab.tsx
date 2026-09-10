@@ -9,8 +9,6 @@ import ThoughtComposer from "./ThoughtComposer";
 interface FeedTabProps {
   gateway: SosoGateway;
   nowSeconds: number;
-  coinBalance: number | null;
-  onPosted: () => void;
   /**
    * Opening a post's full thread is handled at page.tsx's own top level
    * (see its viewingThought branch), not inside this component — the exact
@@ -63,7 +61,7 @@ interface FeedTabProps {
  * different signals with different UI treatments, which is why they're two
  * gateway subscriptions instead of one broader one.
  */
-export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, onOpenPost, onOpenComments, onOpenProfile }: FeedTabProps) {
+export default function FeedTab({ gateway, nowSeconds, onOpenPost, onOpenComments, onOpenProfile }: FeedTabProps) {
   const { posts, loading, loadingMore, atEnd, error, loadMore, refresh, hasNewPosts } = useFeedPosts(gateway);
   const [composing, setComposing] = useState(false);
   // A card the thread view has since deleted or changed, applied locally
@@ -171,17 +169,13 @@ export default function FeedTab({ gateway, nowSeconds, coinBalance, onPosted, on
       {composing && (
         <ThoughtComposer
           gateway={gateway}
-          coinBalance={coinBalance}
           onCancel={() => setComposing(false)}
           onPosted={(post) => {
             setComposing(false);
             // Prepended locally rather than waiting for refresh() — the
-            // coin balance callback (onPosted from page.tsx) already
-            // reflects the charge immediately elsewhere in this app on the
-            // same principle: the person who just acted should see the
-            // result of their own action without a round trip.
+            // person who just acted should see the result of their own
+            // action without a round trip.
             setLocalPosts((current) => [post, ...(current ?? posts)]);
-            onPosted();
           }}
         />
       )}

@@ -48,16 +48,12 @@ import {
   randomAvatarToken,
   SosoError,
   cellOf,
-  coinsForDistanceMetres,
-  isPlausibleWalk,
-  POST_PIN_COST,
   type CategoryConfig,
   type CellCount,
   type FeedDelta,
   type NewPost,
   type Pin,
   type PostDetail,
-  type WalkResult,
   type Zone,
 } from "soso-core";
 import type {
@@ -428,8 +424,6 @@ const ME_KEY = "soso-demo:me:v1";
 const PROFILE_KEY = "soso-demo:profile:v1";
 const CHAT_KEY = "soso-demo:chat:v1";
 const CHAT_REACTIONS_KEY = "soso-demo:chat-reactions:v1";
-const COINS_KEY = "soso-demo:coins:v1";
-const WALKS_KEY = "soso-demo:walks:v1";
 const BOARDS_KEY = "soso-demo:boards:v1";
 const BOARD_TILES_KEY = "soso-demo:board-tiles:v1";
 const AVATARS_KEY = "soso-demo:avatars:v1";
@@ -442,17 +436,6 @@ const AVATARS_KEY = "soso-demo:avatars:v1";
  * that cannot be tried without a Cloudflare bucket.
  */
 const MESSAGE_IMAGES_KEY = "soso-demo:message-images:v1";
-
-// Same ceiling record_walk enforces server-side (migration 0016): how many
-// coins one user can earn from walking per hour, regardless of how many
-// separate calls it takes to get there.
-const MAX_WALK_COINS_PER_HOUR = 150;
-
-interface DemoWalk {
-  userId: string;
-  coinsEarned: number;
-  createdAt: number; // epoch seconds
-}
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -837,29 +820,6 @@ function chatReactionsFor(messageId: string, me: string): { emoji: string; count
     .sort((a, b) => a.emoji.localeCompare(b.emoji));
 }
 
-// Mirrors the 500-coin starting grant every profile gets from
-// `coin_balance`'s column default in migration 0016.
-const STARTING_COIN_BALANCE = 500;
-
-function getCoinBalance(userId: string): number {
-  const balances = readJSON<Record<string, number>>(COINS_KEY, {});
-  return balances[userId] ?? STARTING_COIN_BALANCE;
-}
-
-function setCoinBalance(userId: string, balance: number): void {
-  const balances = readJSON<Record<string, number>>(COINS_KEY, {});
-  balances[userId] = balance;
-  writeJSON(COINS_KEY, balances);
-}
-
-function loadWalks(): DemoWalk[] {
-  return readJSON<DemoWalk[]>(WALKS_KEY, []);
-}
-
-function saveWalks(walks: DemoWalk[]): void {
-  writeJSON(WALKS_KEY, walks);
-}
-
 /**
  * Demo drawing boards.
  *
@@ -1066,13 +1026,7 @@ export function createDemoGateway(): SosoGateway {
     },
 
     async createPost(input: NewPost): Promise<Pin> {
-      // Checked first, same as create_post server-side: a user without
-      // enough coins finds out before spending effort on the rest of the
-      // form's validation.
       const me = getMe();
-      if (getCoinBalance(me) < POST_PIN_COST) {
-        throw new SosoError("soso/insufficient_coins");
-      }
 
       const category = DEMO_CATEGORIES.find((c) => c.key === input.category);
       if (!category) throw new SosoError("soso/category_unavailable");
@@ -1155,7 +1109,6 @@ export function createDemoGateway(): SosoGateway {
       };
 
       savePosts([post, ...loadPosts()]);
-      setCoinBalance(me, getCoinBalance(me) - POST_PIN_COST);
       if (category.key === "board") ensureDemoBoard(post.id);
       return toPin(post);
     },
@@ -1242,7 +1195,6 @@ export function createDemoGateway(): SosoGateway {
         displayName: edits.displayName ?? "You (demo)",
         bio: edits.bio ?? "",
         avatarPath: edits.avatarPath ?? null,
-        coinBalance: getCoinBalance(me),
       };
     },
 
@@ -1277,7 +1229,6 @@ export function createDemoGateway(): SosoGateway {
         displayName,
         bio,
         avatarPath,
-        coinBalance: getCoinBalance(me),
       };
     },
 
@@ -1304,60 +1255,6 @@ export function createDemoGateway(): SosoGateway {
       // URL the real gateway returns — so no component has to know which
       // mode produced it.
       return loadAvatars()[path] ?? null;
-    },
-
-    // --- Coins -------------------------------------------------------------
-    //
-    // Same rules as `record_walk` (migration 0016), copied by hand for the
-    // reason explained at the top of this file: distance/time shape and
-    // plausibility come from `coinsForDistanceMetres` / `isPlausibleWalk` in
-    // soso-core so at least the arithmetic can't drift, but the per-hour cap
-    // is reimplemented against localStorage instead of a real table.
-
-    async myCoinBalance(): Promise<number> {
-      return getCoinBalance(getMe());
-    },
-
-    async recordWalk(distanceMetres: number, elapsedSeconds: number): Promise<WalkResult> {
-      if (!isPlausibleWalk(distanceMetres, elapsedSeconds)) {
-        // Mirrors the server's two distinct failure reasons: too short/too
-        // far in one call, versus too fast to be walking. Demo mode collapses
-        // both into the same client check that produces them, so it re-derives
-        // which one applies rather than inventing a third.
-        const tooShortOrTooFar =
-          elapsedSeconds < 30 || distanceMetres <= 0 || distanceMetres > 20_000;
-        throw new SosoError(tooShortOrTooFar ? "soso/invalid_walk_distance" : "soso/implausible_walk");
-      }
-
-      const me = getMe();
-      const oneHourAgo = nowSeconds() - 3600;
-      const recentCoins = loadWalks()
-        .filter((w) => w.userId === me && w.createdAt > oneHourAgo)
-        .reduce((sum, w) => sum + w.coinsEarned, 0);
-
-      const coinsEarned = coinsForDistanceMetres(distanceMetres);
-      if (recentCoins + coinsEarned > MAX_WALK_COINS_PER_HOUR) {
-        throw new SosoError("soso/walk_rate_limited");
-      }
-
-      saveWalks([...loadWalks(), { userId: me, coinsEarned, createdAt: nowSeconds() }]);
-      const balance = getCoinBalance(me) + coinsEarned;
-      setCoinBalance(me, balance);
-      return { coinsEarned, balance };
-    },
-
-    // Demo mode skips the 3-per-24-hours rate limit the real backend
-    // enforces: the whole reason that limit exists is to cap how much a
-    // debug tool can undermine the coin economy for OTHER accounts on a
-    // shared server, and there is no such thing in a single-device local
-    // demo — the only balance being "abused" is your own, on your own
-    // device.
-    async debugGrantCoins(): Promise<{ balance: number; granted: number }> {
-      const me = getMe();
-      const granted = 200;
-      const balance = getCoinBalance(me) + granted;
-      setCoinBalance(me, balance);
-      return { balance, granted };
     },
 
     async presenceHeartbeat(): Promise<void> {

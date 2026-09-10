@@ -4,14 +4,12 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   ERROR_MESSAGES_EN,
   formatDuration,
-  canAffordPost,
-  POST_PIN_COST,
   type CategoryConfig,
   type NewPost,
   type Pin,
 } from "soso-core";
 import { lookOf } from "./theme";
-import { COIN_ICON, Icon, ICONS, ImageIcon } from "./Icon";
+import { Icon, ICONS } from "./Icon";
 import { toLngLat, type Coordinates } from "./region";
 import type { PostAudience } from "soso-core";
 
@@ -42,15 +40,6 @@ import type { PostAudience } from "soso-core";
 interface ReportFormProps {
   categories: CategoryConfig[];
   location: Coordinates;
-  /**
-   * null while the balance is still loading. Treated as "don't block yet"
-   * rather than "can't afford it" — the server is always the actual
-   * authority on this (create_post enforces the same check independently),
-   * so a stale or not-yet-loaded balance should never be the thing that
-   * prevents a legitimate post; it's purely a head start on the message
-   * the server would otherwise deliver only after a failed attempt.
-   */
-  coinBalance: number | null;
   onCancel: () => void;
   onSubmit: (input: NewPost) => Promise<Pin>;
 }
@@ -58,9 +47,8 @@ interface ReportFormProps {
 type GeoState = "unknown" | "locating" | "denied" | "timeout" | "unavailable" | "granted" | "unsupported";
 type Step = "category" | "details";
 
-export default function ReportForm({ categories, location, coinBalance, onCancel, onSubmit }: ReportFormProps) {
+export default function ReportForm({ categories, location, onCancel, onSubmit }: ReportFormProps) {
   const [step, setStep] = useState<Step>("category");
-  const canAfford = coinBalance === null || canAffordPost(coinBalance);
   const [categoryKey, setCategoryKey] = useState<string | null>(null);
   const [subtypeKey, setSubtypeKey] = useState<string | null>(null);
   const [description, setDescription] = useState("");
@@ -133,7 +121,7 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
   // succeeds where the first one was still warming up.
   const canRetryLocation = geoState === "denied" || geoState === "timeout" || geoState === "unavailable";
 
-  const canSubmit = Boolean(category && !blockedReason && !busy && canAfford);
+  const canSubmit = Boolean(category && !blockedReason && !busy);
 
   /** A category with nothing optional to add has no reason to show a second step at all. */
   function hasOptionalDetails(c: CategoryConfig): boolean {
@@ -295,9 +283,9 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
               ` Location is rounded to about ${category.locationPrecisionM} m so it can't point at one address.`}
           </p>
 
-          {(error ?? blockedReason ?? (!canAfford ? ERROR_MESSAGES_EN["soso/insufficient_coins"] : null)) && (
+          {(error ?? blockedReason) && (
             <div className="form-errors" role="alert">
-              <p>{error ?? blockedReason ?? ERROR_MESSAGES_EN["soso/insufficient_coins"]}</p>
+              <p>{error ?? blockedReason}</p>
               {!error && canRetryLocation && (
                 <button type="button" onClick={() => setGeoState("unknown")} className="composer-retry">
                   Try again
@@ -309,13 +297,6 @@ export default function ReportForm({ categories, location, coinBalance, onCancel
           <div className="composer-footer">
             <span>
               <Icon src={ICONS.place} size={13} /> {location.latitude.toFixed(3)}, {location.longitude.toFixed(3)}
-              {/* Shown even when affordable — the cost should be visible
-                  before someone commits to filling out the rest of the
-                  form, not just when it's the reason they're blocked. */}
-              <span className="composer-cost">
-                {" "}
-                · costs {POST_PIN_COST} <ImageIcon src={COIN_ICON} size={13} />
-              </span>
             </span>
             <button
               className="share-button"

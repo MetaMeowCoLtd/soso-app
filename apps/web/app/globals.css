@@ -57,11 +57,6 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .leaflet-control-attribution { background:rgba(255,255,255,.65)!important; font-size:9px!important; }.leaflet-container { font-family:inherit!important; }
 .map-header { position:absolute; z-index:10; top:0; left:0; right:0; padding:14px clamp(14px,3vw,28px); padding-top:max(14px, env(safe-area-inset-top)); display:flex; align-items:center; gap:8px; pointer-events:none; }.map-header > * { pointer-events:auto; }.map-header .brand { }
 .header-left { display:flex; align-items:center; gap:8px; margin-right:auto; }
-.coin-badge { display:flex; align-items:center; gap:5px; padding:6px 6px 6px 11px; border-radius:999px; background:rgba(255,255,255,.92); box-shadow:var(--e1); }
-.coin-badge-amount { font-size:.78rem; font-weight:750; color:var(--deep); }
-.coin-debug-button { display:grid; place-items:center; width:20px; height:20px; border-radius:50%; border:1px dashed #c9a13c; background:#fff8e6; color:#8a6a1a; font-size:.8rem; font-weight:800; line-height:1; transition:background .16s, transform .16s; }
-.coin-debug-button:hover:not(:disabled) { background:#fdedc4; transform:scale(1.08); }
-.coin-debug-button:disabled { opacity:.5; }
 .brand { display:inline-flex; align-items:center; height:38px; padding:0 13px; border-radius:999px; background:rgba(255,255,255,.9); border:1px solid rgba(255,255,255,.7); box-shadow:var(--e1); backdrop-filter:blur(20px) saturate(180%); color:var(--deep); font-size:1.12rem; font-weight:900; line-height:1; letter-spacing:-.045em; text-decoration:none; }.brand span { color:var(--hot); }
 /* .notify-button and .people-button were removed along with the map header's
    bell and People shortcut — notifications are reached from profile settings
@@ -244,7 +239,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    this rule used to carry as CSS `content`. */
 .soso-pin-lock { position:absolute; top:-5px; right:-5px; box-sizing:content-box; padding:3px; border-radius:50%; background:#fff; color:#41564f; box-shadow:var(--e1); transform:rotate(45deg); z-index:2; }
 
-@media (max-width:600px) { .brand { height:34px; padding:0 11px; font-size:1rem; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; }.coin-badge { padding:5px 5px 5px 9px; }.coin-badge-amount { font-size:.72rem; }.coin-debug-button { width:18px; height:18px; font-size:.72rem; } }
+@media (max-width:600px) { .brand { height:34px; padding:0 11px; font-size:1rem; }.map-notice { top:58px; font-size:.72rem; }.rail-button { width:42px; height:42px; }.fab { width:54px; height:54px; }.sheet-title h2 { font-size:1rem; }.quick-composer { padding:25px 18px 18px; }.vibe-picker { gap:5px; }.composer-footer { align-items:flex-end; }.soso-pin { width:38px; height:38px; }.composer-backdrop { padding:11px; } }
 
 /* --- Added for the Supabase-backed rewrite: subtype chips reuse .vibe-picker/
    .vibe-option above as-is. Everything below is new: the detail panel (tap a
@@ -303,7 +298,6 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    here. `flex-shrink:0` because most of these sit beside text in a flex
    row, where a squeezed icon is the first thing to distort. */
 .icon { display:inline-block; flex-shrink:0; background-color:currentColor; -webkit-mask-position:center; mask-position:center; -webkit-mask-size:contain; mask-size:contain; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; vertical-align:-.16em; }
-.icon-image { display:inline-block; flex-shrink:0; vertical-align:-.16em; }
 
 /* -------------------------------------------------------------- chat --- */
 /* Its own full-screen tab now, not a floating panel — see page.tsx's tab-bar
