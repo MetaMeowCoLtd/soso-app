@@ -1355,20 +1355,39 @@ decoding image never shoves the conversation around.
 
 **Saving an image** is offered in two places — a button in the full-screen
 viewer, and "Save photo" in the long-press sheet (absent on a message with
-no image). Both go through `saveMessageImage`, which fetches the bytes into
-a blob first rather than pointing an `<a download>` at the presigned URL:
-the `download` attribute is **ignored for cross-origin URLs**, and every one
-of these is on a different origin, so an anchor aimed straight at it would
-navigate to the image instead of saving it — on a phone, that means leaving
-the conversation. A blob URL is same-origin, so `download` is honoured. The
-cross-origin read needs no new bucket configuration: board tiles already
-load through `img.crossOrigin = "anonymous"`, which only works against a
-CORS-enabled response.
+no image). Both go through `saveMessageImage`, which tries the **Web Share
+API first** and falls back to `<a download>`.
 
-On **iOS** this saves to Files, not Photos, and Safari's support for
-programmatic downloads is uneven — so a failure says "press and hold the
-image instead", which is the platform's own reliable route to the camera
-roll, rather than "try again".
+That order is the whole design, and it is about iOS. **A web page cannot
+write to the iOS Photos library** — there is no API for it. `<a download>`
+hands Safari's download manager a file that lands in Files (On My iPhone,
+or iCloud Drive depending on the Safari setting), which is the wrong place
+for a photo. `navigator.share({ files })` opens the native share sheet,
+whose **"Save Image" action writes to Photos** exactly as saving from
+Messages does. So the share sheet is used wherever it exists, and the
+anchor is the fallback for browsers without it — mostly desktops, where a
+downloads folder is the right destination anyway.
+
+Three cases are handled rather than collapsed: cancelling the share sheet
+(`AbortError`) is not a failure and shows nothing; losing the user-gesture
+window (`NotAllowedError`, which a slow `fetch` can cause, since Safari
+requires `share()` inside the gesture that began it) falls through to the
+anchor so the save still happens; anything else is a real error.
+
+The bytes are fetched into a blob either way — `download` is ignored for
+cross-origin URLs and `canShare` needs a real `File`, and every one of
+these is a presigned R2 URL on another origin. That read needs no new
+bucket configuration: board tiles already load through
+`img.crossOrigin = "anonymous"`, which only succeeds against a CORS-enabled
+response.
+
+**Safari's own long-press "Add to Photos" is NOT available inside a
+bubble**, and it is worth knowing why rather than rediscovering it:
+`.chat-bubble` sets `-webkit-touch-callout: none` and `useLongPress`
+preventDefaults, both so that press-and-hold opens the app's own action
+sheet instead of the browser's. That is the right trade — the sheet is how
+you reply, react and save — but it does mean the share sheet is the only
+route to the gallery, so it must not regress.
 
 **Not built, and named rather than implied:** one image per message (no
 galleries); no thumbnails or server-side transcoding; and **no orphan

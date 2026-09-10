@@ -160,48 +160,99 @@ function downloadName(image: MessageImage): string {
 export class MessageImageSaveError extends Error {}
 
 /**
- * Saves an image to the device.
- *
- * FETCHED INTO A BLOB FIRST, rather than pointed at with `<a download>`.
- * That is not belt-and-braces: the `download` attribute is IGNORED for
- * cross-origin URLs, and every one of these is a presigned R2 URL on a
- * different origin — so an anchor pointing straight at it would navigate to
- * the image instead of saving it, which on a phone means leaving the
- * conversation. A blob URL is same-origin, so `download` is honoured.
- *
- * The cross-origin fetch works because the bucket already allows it: board
- * tiles load through `img.crossOrigin = "anonymous"`, which only succeeds
- * against a CORS-enabled response. No new bucket configuration is needed
- * for this — if boards render, this can read.
- *
- * A fresh URL is minted rather than reusing whatever the on-screen <img>
- * has, since that one may be minutes old and close to expiry.
+ * What actually happened, so the caller can tell a cancellation apart from a
+ * failure. Pressing Cancel on a share sheet is not an error and must not
+ * produce an error message.
  */
-export async function saveMessageImage(gateway: SosoGateway, image: MessageImage): Promise<void> {
-  const url = await messageImageUrlNow(gateway, image.path);
-  if (!url) throw new MessageImageSaveError("no url");
+export type SaveOutcome = "shared" | "downloaded" | "cancelled";
 
-  const res = await fetch(url);
-  if (!res.ok) throw new MessageImageSaveError(`fetch ${res.status}`);
-  const blob = await res.blob();
-
-  const objectUrl = URL.createObjectURL(blob);
+/**
+ * The `<a download>` route. Same-origin blob URL only — see `saveMessageImage`.
+ */
+function downloadViaAnchor(file: File): void {
+  const objectUrl = URL.createObjectURL(file);
   try {
     const a = document.createElement("a");
     a.href = objectUrl;
-    a.download = downloadName(image);
+    a.download = file.name;
     // Appended before clicking: a detached anchor's click is ignored in
     // Firefox, and this is the one line that makes the difference there.
     document.body.appendChild(a);
     a.click();
     a.remove();
   } finally {
-    // Not revoked synchronously — the browser is still reading it to
-    // perform the save. A tick is enough to let the download start, and
-    // leaking it instead would pin the whole decoded image for the life of
-    // the page.
+    // Not revoked synchronously — the browser is still reading it to perform
+    // the save. Ten seconds is enough to let the download start, and leaking
+    // it instead would pin the whole decoded image for the life of the page.
     setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
   }
+}
+
+/**
+ * Saves an image to the device.
+ *
+ * TRIES THE SHARE SHEET FIRST, AND THAT IS THE WHOLE POINT ON iOS
+ * ---------------------------------------------------------------------
+ * A web page cannot write to the iOS Photos library. There is no API for
+ * it, and `<a download>` — which every desktop browser treats as "save this
+ * file" — hands iOS Safari's download manager a file that lands in Files
+ * (On My iPhone, or iCloud Drive depending on the Safari setting). That is
+ * the wrong place for a photo and is not what anyone means by "save".
+ *
+ * `navigator.share({ files })` is the one route that reaches the gallery:
+ * it opens the native share sheet, whose "Save Image" action writes to
+ * Photos exactly as saving from Messages or Safari does. So the share sheet
+ * is tried wherever it exists, and the anchor is the fallback for browsers
+ * without it — which is most desktops, where a download folder IS the right
+ * destination and a share sheet would be the wrong one.
+ *
+ * FETCHED INTO A BLOB EITHER WAY. The `download` attribute is ignored for
+ * cross-origin URLs and `canShare` needs a real `File`, and every one of
+ * these images is a presigned R2 URL on another origin. The cross-origin
+ * read needs no new bucket configuration: board tiles already load through
+ * `img.crossOrigin = "anonymous"`, which only succeeds against a
+ * CORS-enabled response.
+ *
+ * A fresh URL is minted rather than reusing whatever the on-screen <img>
+ * has, since that one may be minutes old and close to expiry.
+ */
+export async function saveMessageImage(
+  gateway: SosoGateway,
+  image: MessageImage,
+): Promise<SaveOutcome> {
+  const url = await messageImageUrlNow(gateway, image.path);
+  if (!url) throw new MessageImageSaveError("no url");
+
+  const res = await fetch(url);
+  if (!res.ok) throw new MessageImageSaveError(`fetch ${res.status}`);
+  const blob = await res.blob();
+  const file = new File([blob], downloadName(image), { type: blob.type || "image/jpeg" });
+
+  const canShare =
+    typeof navigator !== "undefined" &&
+    typeof navigator.share === "function" &&
+    typeof navigator.canShare === "function" &&
+    navigator.canShare({ files: [file] });
+
+  if (canShare) {
+    try {
+      await navigator.share({ files: [file] });
+      return "shared";
+    } catch (err) {
+      const name = (err as DOMException | undefined)?.name;
+      // Cancelled the sheet. Not a failure, and showing one would be wrong.
+      if (name === "AbortError") return "cancelled";
+      // `NotAllowedError` is the one worth falling through for rather than
+      // reporting: Safari requires share() to happen inside the user
+      // gesture that started it, and the `await fetch` above can outlast
+      // that window on a slow connection. The anchor has no such
+      // requirement, so the save still happens — just into Files.
+      if (name !== "NotAllowedError") throw err;
+    }
+  }
+
+  downloadViaAnchor(file);
+  return "downloaded";
 }
 
 /**
@@ -283,7 +334,7 @@ export function MessageImageLightbox({
 }: {
   url: string;
   /** Omitted where saving is not offered; the button disappears rather than failing. */
-  onSave?: () => Promise<void>;
+  onSave?: () => Promise<SaveOutcome>;
   onClose: () => void;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -298,13 +349,17 @@ export function MessageImageLightbox({
     setSaving(true);
     setError(null);
     try {
+      // The outcome is deliberately ignored on success: "shared" and
+      // "downloaded" both mean it worked, and which one happened is the
+      // platform's business, not something to narrate back.
       await onSave();
     } catch {
-      // Deliberately not "try again": the common causes are a URL that has
-      // expired and a browser that refuses programmatic downloads, and
-      // neither is fixed by pressing the same button harder. On a phone the
-      // reliable route is the platform's own, which is why it is named.
-      setError("Couldn't save that. Press and hold the image instead.");
+      // Not "press and hold the image instead", which is what this used to
+      // say and was simply untrue here: `.chat-bubble` sets
+      // `-webkit-touch-callout: none` and `useLongPress` preventDefaults, so
+      // Safari's own image menu never opens inside a bubble. Advice that
+      // cannot be followed is worse than none.
+      setError("Couldn't save that image.");
     } finally {
       setSaving(false);
     }
