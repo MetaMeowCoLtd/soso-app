@@ -7,7 +7,6 @@ export * from './duration';
 export * from './coins';
 export * from './validity';
 export * from './chat';
-export * from './dm-crypto';
 export * from './phone';
 export * from './profile';
 export * from './avatar';

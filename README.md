@@ -40,7 +40,7 @@ Supabase.
 | Suspicious activity reporting | Implemented, enabled |
 | Location-optional posts (Threads-style feed, no pin) | Implemented as its own category, "thought" (migration 0030). "update" played this role until migration 0027 gave it a real map pin instead — see [Location-optional posts](#location-optional-posts). |
 | Shared chat (one global room) | Implemented. Bubbles with reactions, replies, and a long-press action sheet. See [Shared chat](#shared-chat). |
-| Direct messages | Implemented, not verified against a live database. Mutual follows only, end-to-end encrypted. See [Direct messages](#direct-messages). |
+| Direct messages | Implemented, not verified against a live database. Mutual follows only. Stored server-side and readable by the server — see [What the server can read](#what-the-server-can-read). |
 | Per-category expiry (TTL) | Implemented. Server-assigned; the client cannot extend it. |
 | Server-side validation (proximity, rate limits, body length, subtype) | Implemented. Enforced in Postgres, not in the client. |
 | Validity voting (votes fade and eventually expire a post) | Implemented, not verified end-to-end. See [Validity voting](#validity-voting). |
@@ -558,9 +558,8 @@ None of the following occurs automatically from a `git push`.
     - HTTP header: identical to step 4, `x-push-secret` with the same value
 
     See [DM notification previews](#dm-notification-previews) below for why
-    this one gets a message preview when the like/reply ones deliberately
-    don't, and how that's done without the server ever reading a plaintext
-    message. Also optional — skip it and DMs still work, just silently.
+    this one carries a message preview when the like/reply ones deliberately
+    don't. Also optional — skip it and DMs still work, just silently.
 
 4e. **Create a fifth Database Webhook, for new followers.** Same function,
     same secret header, different table — one deployed function still routes
@@ -713,61 +712,33 @@ uses) rather than a specific message.
 
 ### DM notification previews
 
-Every other notification in this app is deliberately anonymous —
-"Someone liked your post," "New reply on your post" — because the server
-holds the plaintext and chose not to say it. A DM notification cannot use
-that excuse: [Direct messages](#direct-messages) below means the server
-*never has* the plaintext to withhold. Showing "Alex: see you at 6?" the
-way Messenger or Instagram does — the explicit ask this feature was built
-to satisfy — meant finding a way to produce that preview without the
-server ever decrypting anything, not relaxing the no-plaintext rule.
+Every other notification in this app is deliberately anonymous — "Someone
+liked your post", "New reply on your post" — because the notification is a
+nudge to open the app, not a place to reproduce content. A DM is the
+exception: it names the sender and quotes up to 140 characters of the
+message, because a message you cannot see the sender or subject of is a
+notification you have to open to triage, every time.
 
-**What actually happens:** `notify-new-pin`'s DM handler embeds the raw
-materials for decryption in the push payload — the message's ciphertext
-and IV (already sitting in `dm_messages`, unchanged) and the sender's
-*public* key (already handed to any mutual follow by `dm_public_key_of`).
-None of that is new disclosure; it's the same values the recipient's own
-client already fetches to render the thread on screen, just riding along
-on the push instead. The server still never calls `crypto.subtle.decrypt`
-on anything. Only `apps/web/public/sw.js`'s own `push` handler does that,
-inside the recipient's browser, using the recipient's private key — which
-still never leaves that browser's IndexedDB (see
-[Direct messages](#direct-messages) for why it lives there rather than in
-`localStorage`). That handler is a hand-copied twin of
-`packages/core/src/domain/dm-crypto.ts`'s ECDH/HKDF/AES-GCM composition,
-duplicated rather than imported only because a classic (non-module)
-service worker — required for Safari, which has never shipped module
-service workers — cannot `import` from anywhere. If that algorithm ever
-changes, both copies need to change together, or a message this device can
-read on screen would inexplicably fail to preview.
+Naming the sender discloses nothing new. DMs exist only between mutual
+follows, and the inbox shows that same name the instant it loads.
 
-**A service worker's own limitation forced one extra piece of state.**
-Deriving the per-thread key needs this device's own user id, and a service
-worker can read IndexedDB but not `localStorage`, where the Supabase
-session (and therefore the signed-in user's id) normally lives. So
-`ensurePublishedKey` — already the one function guaranteed to run on every
-path into a conversation — now also writes the current user's own id into
-the same `soso-dm` IndexedDB database the private key lives in, under a
-`my-user-id` record. Not secret; just otherwise unreachable from a push
-handler with no live app session to ask.
-
-**This degrades, it doesn't fail.** If the ciphertext won't fit in a push
-message (Web Push's practical ceiling is roughly 4KB, and `dm_messages`
-allows up to 6000 base64 characters of ciphertext), if the sender never
-published a key, or if local decryption throws for any reason at all
-(wrong device, rotated key, corrupted payload), the notification still
-shows — just as "Alex sent you a message" instead of the actual text. That
-fallback names the sender rather than staying fully anonymous, unlike the
-like/reply notifications: DMs only exist between mutual follows, and the
-name is already the first thing the inbox shows, so it discloses nothing
-a push notification is introducing for the first time.
+This section used to describe something considerably more elaborate. Under
+end-to-end encryption the server had no preview to send, so the push payload
+carried the message's **ciphertext**, its nonce, and the sender's public key,
+and the service worker decrypted the preview on the device — using a
+hand-copied duplicate of the app's ECDH/HKDF/AES-GCM composition that had to
+stay byte-for-byte in step with a module it could not import. It degraded to
+a generic body whenever the encrypted payload exceeded Web Push's ~4KB
+ceiling or the device lacked the key, which on a second device was almost
+always. Migration `20260910000039_dm_plaintext.sql` removed DM encryption;
+the edge function now reads `dm_messages.body` and writes the preview
+directly, and roughly a hundred lines of service-worker cryptography went
+with it.
 
 **Not verified end-to-end**, the same caveat as the rest of this feature
 (see the UNVERIFIED comment at the top of `notify-new-pin/index.ts`):
 nothing in this sandbox can trigger a real push or run a real service
-worker against a live subscription, so the crypto here is confirmed
-algorithm-for-algorithm identical to the tested, on-screen path, not
-confirmed to actually decrypt a real notification on a real device.
+worker against a live subscription.
 
 ## Phone authentication
 
@@ -854,36 +825,26 @@ app already has handle search that does the same job.
 
 ### What signing in on a new device costs you
 
-Your account comes back. Your direct message history does not.
+Nothing, now. Your account and your full message history both come back.
 
-This is the honest consequence of a choice made earlier: DM private keys are
-generated non-extractable and never leave the browser that made them (see
-[Direct messages](#direct-messages)). Previously that cost nothing extra,
-because losing your browser storage lost the anonymous account *and* the key
-together. Phone login breaks the symmetry — the account is now recoverable
-and the key still isn't.
+This section used to say the opposite, and the change is worth recording.
+DM private keys were generated non-extractable and never left the browser
+that made them, so signing in elsewhere got you the account and not the
+conversations — Signal's behaviour, and the honest consequence of that
+design. Migration `20260910000039_dm_plaintext.sql` removed DM encryption
+(see [What the server can read](#what-the-server-can-read) for what that
+traded away), and with it the whole class of problem: there is no key to
+be missing, so there is nothing a second device cannot read.
 
-This is Signal's behaviour, and the machinery for it already existed:
-`publish_user_key` upserts, so a fresh key simply replaces the old one, and
-the inbox already renders "Can't be read on this device" as a first-class
-state rather than an error.
-
-### The account-switch bug this feature had to fix
-
-Worth calling out because adding login is what *introduced* it, and it was
-severe rather than cosmetic.
-
-`dmCrypto` stored the DM private key under a fixed record id, not keyed by
-user — which was correct while one browser meant one permanent anonymous
-account. Once sign-out and sign-in exist: user A signs out, user B signs in
-on the same browser, and `getSelfKeys()` hands B **A's private key**, because
-a key was present and nothing checked *whose*. `ensurePublishedKey` would
-then publish A's public key as B's, and everyone messaging B would encrypt to
-a key only A could open.
-
-`forgetSelfKeys` is the fix, and it runs on every auth state change rather
-than only on sign-out — the sign-out half can be skipped entirely by closing
-a tab, clearing a cookie, or a refresh token expiring.
+Two pieces of machinery went with it. `dmCrypto` kept the private key under
+a fixed record id rather than one keyed by user, which was correct while one
+browser meant one permanent anonymous account but became severe the moment
+sign-out and sign-in existed: A signs out, B signs in on the same browser,
+and `getSelfKeys()` hands B **A's private key**, because a key was present
+and nothing checked whose — after which B's published key was A's, and
+everyone messaging B encrypted to a key only A could open. `forgetSelfKeys`
+existed to catch that on every auth state change. Neither the bug nor its
+fix has anything left to act on.
 
 ### Number recycling
 
@@ -891,11 +852,19 @@ Carriers reissue disconnected numbers. So "controls this number" and "owns
 this account" are the same person right up until they aren't.
 
 Full mitigation needs a registration-lock PIN (Signal's answer) and is **not
-built**. What is built limits the blast radius: every successful verify calls
-`revoke_other_sessions`, which kills all other sessions and drops the
-published DM key. It runs unconditionally on every sign-in rather than only
-when recycling is suspected, because a check that has to be *correct* to be
-safe is worse than an action that is merely redundant when it isn't needed.
+built**. `revoke_other_sessions` exists and still kills every other session
+on the account, but it is **no longer called automatically on sign-in**. It
+used to be, and with one device that was invisible; with two it meant
+signing in on a laptop silently ended the session on the phone and vice
+versa, permanently. The capability is kept for a deliberate "sign out of
+other devices" action rather than fired at everyone who owns two devices.
+
+What that gives up is narrower than it looks. The part people care about —
+that a new holder of a recycled number cannot read the previous owner's
+history — was never what this call provided; it came from the DM private key
+never leaving its device. That protection is gone too now, for a different
+reason (see above), which makes a registration-lock PIN the thing that would
+actually address recycling, and it remains unbuilt.
 
 ### What is gated — currently nothing; guests have full access
 
@@ -1211,9 +1180,12 @@ reaction arrives the same way their message does.
 
 ## Direct messages
 
-Private, end-to-end encrypted conversations between mutual follows. Started
-from a friend's row in the People tab; read in the Chat tab's **Direct**
-view. Schema and RPCs in `supabase/migrations/20260907000026_direct_messages.sql`.
+Private conversations between mutual follows — private from other users,
+not from the server; see [What the server can read](#what-the-server-can-read).
+Started from a friend's row in the Friends tab; read in the Chat tab's
+**Direct** view. Schema and RPCs in
+`supabase/migrations/20260907000026_direct_messages.sql`, with encryption
+removed in `20260910000039_dm_plaintext.sql`.
 
 ### Who can message whom
 
@@ -1232,86 +1204,81 @@ row-level security policy rather than by the client hiding it.
 
 ### What the server can read
 
-Nothing. `dm_messages` has a `ciphertext` column and no plaintext column of
-any kind. A database dump, a leaked `service_role` key, or a subpoena served
-on the host yields ciphertext.
+**Everything.** `dm_messages.body` is plain text. A database dump, a leaked
+`service_role` key, or a subpoena served on the host yields readable
+conversations. The project owner can read every DM.
 
-- **Key agreement:** ECDH on P-256, one static pair per account.
-- **Key derivation:** HKDF-SHA256 over the ECDH secret, with `info` binding
-  the result to the two account ids in a fixed order.
-- **Encryption:** AES-256-GCM, fresh 96-bit nonce per message, with the
-  thread id as additional authenticated data so a ciphertext cannot be
-  replayed into a different conversation.
-- **Primitives:** all from the platform's SubtleCrypto. Nothing in this
-  repository implements a cipher, a curve, or a KDF. The composition of them
-  is in `packages/core/src/domain/dm-crypto.ts` and is covered by
-  `packages/core/test/dm-crypto.test.ts`, which asserts round-trip,
-  outsider-exclusion, cross-thread replay rejection, pair binding, nonce
-  uniqueness, and tamper detection.
-- **Key storage:** the private key is generated non-extractable and kept as a
-  live `CryptoKey` in IndexedDB (`apps/web/src/web/dmCrypto.ts`). Script on
-  the origin — including injected script — can use it but cannot read its
-  bytes out, so an XSS can decrypt while it runs but cannot steal the key and
-  decrypt forever. A JWK in `localStorage`, the obvious shortcut, gives that
-  away.
+This is a deliberate reversal. DMs were end-to-end encrypted until migration
+`20260910000039_dm_plaintext.sql`, which replaced the encryption with
+server-side storage — the model Instagram used for years and most chat apps
+still use. That migration's header carries the full reasoning; the short
+version is that one published key per ACCOUNT and one private key per DEVICE
+cannot both hold, so signing in on a second device published a new key over
+the first, and each device could then read only what was encrypted while its
+own key was current. Reading your phone's messages in a browser was not a
+missing feature, it was excluded by the design — and closing that inside
+E2EE needs either a user-held PIN (Meta's and WhatsApp's answer) or
+device-to-device key transfer, both real projects rather than adjustments.
 
-### What that costs
+### What still protects a conversation
 
-Stated plainly, because these are consequences of the design and not
-oversights:
+Everything that protected it from other USERS, unchanged, and all of it
+enforced server-side rather than by the client:
 
-- **Moderation cannot read content.** Reporting works the way Instagram's
-  does under E2EE: the reporter's own client attaches the plaintext it
-  already holds, and `dm_message_reports.disclosed_plaintext` stores what a
-  participant chose to disclose. The report UI says so before sending. A
-  report with no disclosure is still accepted.
-- **Push notifications cannot preview.** The server has nothing to preview.
-- **No escrow, no recovery.** The key exists in one browser profile. Clearing
-  site data loses the history — though in this app that also destroys the
-  anonymous account itself, which lives in the same storage, so the marginal
-  loss is smaller than it first appears.
-- **Messages that cannot be decrypted are shown as such**, in place, rather
-  than hidden or treated as an error.
+- **Participants only.** RLS on `dm_messages` and `dm_threads` restricts
+  every read to the two people in the thread, per row, against `auth.uid()`.
+- **Blocks cut history.** `soso.is_blocked_pair` sits inside those same
+  policies, so a block hides a thread in both directions immediately,
+  without rewriting a row.
+- **Mutual follows only**, re-checked by `soso.dm_can_message` on every send
+  rather than trusted from when the thread was opened.
+- **Transport is TLS**, and the database is encrypted at rest by the host.
 
-### What this is not
+What changed is who ELSE can read: the server now can. Nothing about which
+of your contacts can changed at all.
 
-Not the Signal protocol, and the gap is worth being precise about:
+### What that costs, and what it stopped costing
 
-- **No forward secrecy.** One static ECDH agreement per pair means a private
-  key recovered later decrypts everything captured earlier. A double ratchet
-  is what fixes this.
-- **No key verification.** Nothing proves the public key the server handed
-  you belongs to the person you think it does; a server that lied could sit
-  in the middle. Safety numbers or key transparency close this.
-- **One device.** The key lives in one browser profile. Another browser is a
-  different key, and messages encrypted to the old one stay unreadable there.
+Gained by giving up E2EE:
 
-Both gaps need a protocol, not more calls into SubtleCrypto. They are named
-here so that "end-to-end encrypted" is not read as more than what is built.
+- **Every device reads everything**, history included, with no PIN, no
+  recovery code and no device-linking step.
+- **Push notifications preview properly.** The old ones tried to decrypt on
+  the device and fell back to "X sent you a message" whenever the key was
+  not there — which was most of the time on a second device.
+- **Moderation can act on a report** rather than depending on the reporter's
+  client to attach what it saw. `dm_message_reports.disclosed_plaintext` is
+  still stored, but now as a record of what the reporter was looking at,
+  which survives the message being deleted afterwards.
+
+Lost:
+
+- **The server is inside the trust boundary now.** Anyone who can read the
+  database can read every message. If that stops being acceptable for what
+  this app becomes, the way back is a PIN-protected encrypted key backup —
+  not a return to the old one-key-per-account scheme, which had the
+  multi-device failure baked into it.
 
 ### Replies and reactions
 
 Both features the shared room has, added in migration
-`20260907000029_dm_replies_and_reactions.sql`, and both had to be adapted
-for encryption rather than copied from the room's own version of them:
+`20260907000029_dm_replies_and_reactions.sql` and brought back into line
+with the room's own versions by migration 0039. Each had been adapted for
+encryption, and each adaptation existed only because of it:
 
-- **Replies quote ciphertext, not a body.** The room's reply preview
-  (`soso.chat_reply_preview`) returns the quoted message's plaintext,
-  because the room has plaintext to return. A DM has none — so
-  `soso.dm_reply_preview` returns the quoted message's ciphertext and
-  nonce instead, and the client decrypts it with the same per-thread key
-  it already uses for everything else in that thread.
-- **Reactions have no counts.** A DM thread has exactly two possible
-  reactors, ever, so "how many people reacted with ❤️" isn't a question
-  that means anything here — only "did each of us react, and with what".
-  That shape is also what makes an encrypted reaction tractable at all:
-  the room's `toggle_chat_reaction` decides add/replace/clear by comparing
-  the incoming plaintext emoji against the caller's existing one, which
-  the server cannot do when both are independently-nonced ciphertext (two
-  encryptions of the same emoji are two different byte strings). The
-  client — which already decrypted its own previous reaction, if any —
-  makes that decision instead, through two honest, non-comparing calls:
-  `set_dm_reaction` and `clear_dm_reaction`.
+- **Replies quote text again.** `soso.dm_reply_preview` used to return the
+  quoted message's ciphertext and nonce, because the server had no plaintext
+  to return and the client had to decrypt the quote itself. It returns
+  `body` now, exactly like the room's `soso.chat_reply_preview`.
+- **Reactions are a toggle with counts again.** `toggle_chat_reaction`
+  decides add/replace/clear by comparing the incoming emoji against the
+  caller's existing one — which the server could not do when both were
+  independently-nonced ciphertexts, since two encryptions of one emoji are
+  different byte strings. DMs therefore had a non-comparing
+  `set_dm_reaction`/`clear_dm_reaction` pair and no counts at all. A single
+  `toggle_dm_reaction` replaces both, and `DmMessageReaction` is now the
+  same `{emoji, count, mine}` shape as the room's — which is what lets the
+  two surfaces share the components that render them.
 
 ### One sheet, one gesture, both surfaces
 

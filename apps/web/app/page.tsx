@@ -13,7 +13,6 @@ import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeopleTab from "@/src/web/PeopleTab";
 import DmThreadView from "@/src/web/DmThreadView";
-import { ensurePublishedKey } from "@/src/web/dmCrypto";
 import ChatPanel from "@/src/web/ChatPanel";
 import ProfileSettings from "@/src/web/ProfileSettings";
 import ProfileView from "@/src/web/ProfileView";
@@ -659,10 +658,6 @@ function Map({
       return;
     }
     try {
-      // Publishing our own key is what makes messages sent from here
-      // readable by the recipient — see ensurePublishedKey. Not fatal if it
-      // fails; the conversation still opens and the next attempt retries.
-      await ensurePublishedKey(gateway, myId).catch(() => {});
       const thread = await gateway.openDmThread(userId);
       setDmThread(thread);
     } catch (err) {

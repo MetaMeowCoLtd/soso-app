@@ -97,10 +97,6 @@ class FakeGateway implements SosoGateway {
   async deleteChatMessage() {}
   async reportChatMessage() {}
   async toggleChatReaction() {}
-  async publishUserKey() {}
-  async dmPublicKeyOf() {
-    return null;
-  }
   async openDmThread() {
     return {} as never;
   }
@@ -116,8 +112,7 @@ class FakeGateway implements SosoGateway {
   async markDmRead() {}
   async deleteDmMessage() {}
   async reportDmMessage() {}
-  async setDmReaction() {}
-  async clearDmReaction() {}
+  async toggleDmReaction() {}
   subscribeDmMessagesChanged() {
     return () => {};
   }

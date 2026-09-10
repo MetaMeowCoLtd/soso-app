@@ -991,10 +991,12 @@ export function decodeFeedPostsPage(w: WireFeedPostsPage): FeedPostsPage {
 // ---------------------------------------------------------------------------
 
 /**
- * A thread, as the server can describe it — which is deliberately not very
- * much. `lastCiphertext` is here instead of a preview string because the
- * server holds no plaintext to build a preview from; whoever renders the
- * inbox decrypts that one message itself. See the migration's own comment.
+ * A thread, with the last message's text for the inbox preview.
+ *
+ * That preview used to be `lastCiphertext`/`lastIv`, because the server held
+ * no plaintext to build one from and the inbox had to decrypt each thread's
+ * newest message itself before it could draw a row. Migration 0039 ended
+ * that; see its header for what was traded for it.
  */
 export interface DmThread {
   id: string;
@@ -1002,11 +1004,9 @@ export interface DmThread {
   otherHandle: string;
   otherName: string;
   otherAvatarPath: AvatarPath;
-  /** Their ECDH public key, base64 SPKI. Null until they've opened messages once. */
-  otherKey: string | null;
   lastMessageAt: string | null;
-  lastCiphertext: string | null;
-  lastIv: string | null;
+  /** The last message's text, for the inbox preview. Null on a thread with no messages yet. */
+  lastBody: string | null;
   lastSenderId: string | null;
   unread: number;
 }
@@ -1017,10 +1017,8 @@ export interface WireDmThread {
   other_handle: string;
   other_name: string;
   other_avatar?: string | null;
-  other_key: string | null;
   last_message_at: string | null;
-  last_ciphertext?: string | null;
-  last_iv?: string | null;
+  last_body?: string | null;
   last_sender_id?: string | null;
   unread: number | string;
 }
@@ -1032,10 +1030,8 @@ export function decodeDmThread(w: WireDmThread): DmThread {
     otherHandle: w.other_handle,
     otherName: w.other_name,
     otherAvatarPath: w.other_avatar ?? null,
-    otherKey: w.other_key ?? null,
     lastMessageAt: w.last_message_at ?? null,
-    lastCiphertext: w.last_ciphertext ?? null,
-    lastIv: w.last_iv ?? null,
+    lastBody: w.last_body ?? null,
     lastSenderId: w.last_sender_id ?? null,
     // `count(*)` comes back as a string from PostgREST for bigint columns.
     unread: Number(w.unread) || 0,
@@ -1043,35 +1039,33 @@ export function decodeDmThread(w: WireDmThread): DmThread {
 }
 
 /**
- * A message as stored: ciphertext and nonce, never a body. Decryption is a
- * client concern — nothing in core can decrypt this, and nothing on the
- * server can either.
- */
-/**
- * A quoted message, as far as anything outside the browser that holds the
- * thread key can describe it: which message, and its ciphertext. There is
- * no body here for the same reason `DmMessage` itself has none — the
- * server that produced this has never had one to give.
+ * A quoted message: which one, what it said, and who wrote it.
+ *
+ * Carried the quoted message's CIPHERTEXT until migration 0039, because the
+ * server had no plaintext to quote and the recipient's own client had to
+ * decrypt it. Now it quotes text, exactly as the room's `ChatReplyPreview`
+ * does — the two are deliberately the same shape again.
  */
 export interface DmReplyPreview {
   id: string;
-  ciphertext: string;
-  iv: string;
+  body: string;
   senderId: string;
 }
 
 /**
- * One side's reaction to a DM. Unlike `ChatMessageReaction`, there is no
- * `count` — a DM thread has exactly two possible reactors, ever, so
- * `mine` (this reaction) plus its absence (no reaction from the other
- * side) already says everything a count could. `ciphertext`/`iv` decrypt
- * to a single emoji with the thread's own key, the same key every other
- * field on `DmMessage` uses.
+ * A reaction on a DM, aggregated per emoji.
+ *
+ * Identical in shape to `ChatMessageReaction`, and that is the point: it
+ * used to be one opaque encrypted row per person, with no `count`, because
+ * the server could not group ciphertexts that were independently nonced
+ * (two people reacting with the same emoji produced different bytes). With
+ * an emoji the server can group them, so DMs and the room now describe
+ * reactions the same way and can share the components that render them.
  */
 export interface DmMessageReaction {
-  userId: string;
-  ciphertext: string;
-  iv: string;
+  emoji: string;
+  count: number;
+  /** True when the signed-in user is one of the people behind `count`. */
   mine: boolean;
 }
 
@@ -1079,8 +1073,7 @@ export interface DmMessage {
   id: string;
   threadId: string;
   senderId: string;
-  ciphertext: string;
-  iv: string;
+  body: string;
   createdAt: string;
   mine: boolean;
   /** Null once the quoted message is deleted (ON DELETE SET NULL), same as no reply at all. */
@@ -1092,12 +1085,11 @@ export interface WireDmMessage {
   id: string;
   thread_id: string;
   sender_id: string;
-  ciphertext: string;
-  iv: string;
+  body: string;
   created_at: string;
   mine: boolean;
-  reply_to?: { id: string; ciphertext: string; iv: string; sender_id: string } | null;
-  reactions?: { user_id: string; ciphertext: string; iv: string; mine: boolean }[] | null;
+  reply_to?: { id: string; body: string; sender_id: string } | null;
+  reactions?: { emoji: string; count: number | string; mine: boolean }[] | null;
 }
 
 export function decodeDmMessage(w: WireDmMessage): DmMessage {
@@ -1105,17 +1097,15 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
     id: w.id,
     threadId: w.thread_id,
     senderId: w.sender_id,
-    ciphertext: w.ciphertext,
-    iv: w.iv,
+    body: w.body,
     createdAt: w.created_at,
     mine: w.mine,
     replyTo: w.reply_to
-      ? { id: w.reply_to.id, ciphertext: w.reply_to.ciphertext, iv: w.reply_to.iv, senderId: w.reply_to.sender_id }
+      ? { id: w.reply_to.id, body: w.reply_to.body, senderId: w.reply_to.sender_id }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({
-      userId: r.user_id,
-      ciphertext: r.ciphertext,
-      iv: r.iv,
+      emoji: r.emoji,
+      count: Number(r.count) || 0,
       mine: r.mine,
     })),
   };

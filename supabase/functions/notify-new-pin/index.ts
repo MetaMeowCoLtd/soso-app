@@ -54,10 +54,10 @@
 //   3. Create a Database Webhook for INSERTs on public.posts which invokes
 //      this function and has "Add auth header with service key" enabled.
 //      Optional siblings, same function, same header, different table (see
-//      the README's Setup steps 4b-4d): post_votes, post_replies,
-//      dm_messages. handleDmMessage below is the one that also embeds a
-//      decryptable preview — see the README's "DM notification previews"
-//      for why that's safe under this app's end-to-end encryption.
+//      the README's Setup steps 4b-4f): post_votes, post_replies,
+//      dm_messages, follows, chat_messages. Each is a SEPARATE webhook that
+//      has to be created by hand; a missing one is silent, and is the usual
+//      reason a given notification never arrives.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3";
@@ -190,18 +190,15 @@ interface DmMessagePayload {
   message_id: string;
   thread_id: string;
   sender_id: string;
-  ciphertext: string;
-  iv: string;
+  body: string;
 }
 
 /**
- * `dm_messages` carries no plaintext, ever — see 20260907000026's own module
- * comment. What this function embeds in the push payload below (ciphertext,
- * iv, and the sender's PUBLIC key) is the same set of values `list_dm_messages`
- * and `dm_public_key_of` already hand back to the recipient's own client;
- * nothing here is new disclosure, only a copy of it routed through a push
- * message so the recipient's service worker can decrypt a preview locally
- * (see apps/web/public/sw.js) instead of on this server.
+ * `dm_messages.body` is readable here since migration 0039. This function
+ * used to forward the message's CIPHERTEXT plus the sender's public key, so
+ * the recipient's service worker could decrypt a preview on the device and
+ * this server never saw one; that is no longer meaningful, since the same
+ * server could simply read the row.
  */
 function parseDmMessagePayload(value: unknown): DmMessagePayload | null {
   if (!isRecord(value) || value.type !== "INSERT" || !isRecord(value.record)) return null;
@@ -210,8 +207,7 @@ function parseDmMessagePayload(value: unknown): DmMessagePayload | null {
     typeof r.id !== "string" ||
     typeof r.thread_id !== "string" ||
     typeof r.sender_id !== "string" ||
-    typeof r.ciphertext !== "string" ||
-    typeof r.iv !== "string"
+    typeof r.body !== "string"
   ) {
     return null;
   }
@@ -219,8 +215,7 @@ function parseDmMessagePayload(value: unknown): DmMessagePayload | null {
     message_id: r.id,
     thread_id: r.thread_id,
     sender_id: r.sender_id,
-    ciphertext: r.ciphertext,
-    iv: r.iv,
+    body: r.body,
   };
 }
 
@@ -351,18 +346,6 @@ async function handlePostReply(
   return new Response(JSON.stringify(result), { status: 200 });
 }
 
-/**
- * Max bytes of the JSON string handed to web-push's own encryption layer
- * for a DM notification. Web Push's practical ceiling on the final,
- * service-provider-encrypted payload is roughly 4KB, the library's own
- * encryption adds overhead on top of whatever is passed in here, and
- * `dm_messages.ciphertext` alone is allowed up to 6000 base64 characters
- * by that column's own check constraint (see 20260907000026). A message
- * near that ceiling simply cannot be embedded — this always degrades to
- * the generic body below rather than risking a push a provider silently
- * drops, which this function would have no way to learn about.
- */
-const DM_RICH_PAYLOAD_LIMIT = 3000;
 
 async function handleDmMessage(
   supabase: ReturnType<typeof createClient>,
@@ -422,9 +405,8 @@ async function handleDmMessage(
     return new Response(JSON.stringify({ sent: 0, reason: "blocked" }), { status: 200 });
   }
 
-  const [{ data: sender }, { data: senderKey }, { data: endpoints, error: endpointsError }] = await Promise.all([
+  const [{ data: sender }, { data: endpoints, error: endpointsError }] = await Promise.all([
     supabase.from("profiles").select("display_name").eq("id", payload.sender_id).maybeSingle(),
-    supabase.from("user_keys").select("public_key").eq("user_id", payload.sender_id).maybeSingle(),
     supabase.from("push_endpoints").select("endpoint, p256dh, auth").eq("user_id", recipientId),
   ]);
 
@@ -434,45 +416,29 @@ async function handleDmMessage(
   }
 
   const senderName = sender?.display_name ?? "Someone";
+  const text =
+    payload.body.length > DM_PREVIEW_LIMIT
+      ? `${payload.body.slice(0, DM_PREVIEW_LIMIT)}…`
+      : payload.body;
 
-  // Naming the sender here, unlike the anonymous "Someone liked your post"
-  // bodies above, discloses nothing new: DMs only exist between mutual
-  // follows, and the inbox already shows this exact name the instant it
-  // loads. This is also the fallback body when the rich payload below
-  // doesn't fit or there's no key to decrypt with — real messengers under
-  // E2EE (Signal included) fall back to exactly this, not to full anonymity.
-  const genericBody = JSON.stringify({
+  // Naming the sender discloses nothing new: DMs only exist between mutual
+  // follows, and the inbox shows this exact name the instant it loads.
+  //
+  // There used to be two bodies here — a generic "X sent you a message", and
+  // a "rich" one carrying ciphertext for the service worker to open locally,
+  // chosen between by whether the sender had a published key and whether the
+  // encrypted payload fitted under Web Push's ~4KB ceiling. Both of those
+  // conditions failed often, so the generic body was what most people
+  // actually saw. One body now, with the text in it.
+  const notificationBody = JSON.stringify({
     title: "SoSo",
-    body: `${senderName} sent you a message`,
+    body: `${senderName}: ${text}`,
     dmSenderId: payload.sender_id,
   });
-
-  // The rich payload additionally lets the recipient's own service worker
-  // decrypt an actual preview locally (see apps/web/public/sw.js) — this
-  // function and anyone who intercepted the request still only ever see
-  // ciphertext. senderPublicKey is not secret: it's the same value
-  // `dm_public_key_of` already hands to any mutual follow.
-  const richBody = JSON.stringify({
-    title: "SoSo",
-    body: `${senderName} sent you a message`,
-    dmSenderId: payload.sender_id,
-    dm: {
-      ciphertext: payload.ciphertext,
-      iv: payload.iv,
-      threadId: payload.thread_id,
-      senderId: payload.sender_id,
-      senderName,
-      senderPublicKey: senderKey?.public_key,
-    },
-  });
-
-  const canEmbed = Boolean(senderKey?.public_key) && richBody.length <= DM_RICH_PAYLOAD_LIMIT;
-  const notificationBody = canEmbed ? richBody : genericBody;
 
   const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
   console.log("[notify-new-pin] dm notification complete", {
     threadId: payload.thread_id,
-    rich: canEmbed,
     ...result,
   });
   return new Response(JSON.stringify(result), { status: 200 });
@@ -620,15 +586,16 @@ const CHAT_MAX_RECIPIENTS = 200;
 /** Long enough to be worth reading on a lock screen, short enough not to be truncated by the OS anyway. */
 const CHAT_PREVIEW_LIMIT = 140;
 
+/** The same, for a DM. Same reasoning, kept as its own name so either can move alone. */
+const DM_PREVIEW_LIMIT = 140;
+
 /**
  * A new message in the shared chat room.
  *
- * The preview here is built server-side and is plain text, unlike the DM
- * handler next door which forwards ciphertext for the service worker to open
- * on-device. That is not an inconsistency: this room is not encrypted.
- * `chat_messages.body` is stored readable and `list_recent_chat_messages`
- * already hands it to every signed-in client, so there is nothing to decrypt
- * and nothing withheld by including it here.
+ * The preview is built server-side and is plain text, the same as the DM
+ * handler next door — which used to be the exception, forwarding ciphertext
+ * for the service worker to open on-device, until migration 0039 removed DM
+ * encryption entirely.
  */
 async function handleChatMessage(
   supabase: ReturnType<typeof createClient>,

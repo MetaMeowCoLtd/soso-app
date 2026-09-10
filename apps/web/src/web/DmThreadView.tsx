@@ -2,83 +2,58 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ERROR_MESSAGES_EN, type DmThread, type SosoGateway } from "soso-core";
+import {
+  applyReactionToggle,
+  ERROR_MESSAGES_EN,
+  type DmMessage,
+  type DmThread,
+  type SosoGateway,
+} from "soso-core";
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
-import { ensurePublishedKey, openMessage, sealMessage, threadKeyFor } from "./dmCrypto";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
 
 /**
- * One end-to-end encrypted conversation.
+ * One conversation.
  *
- * Structurally this is ChatPanel's message list, and as of this pass it
- * shares real code with it, not just a resemblance: the long-press sheet
- * is the same `MessageActionSheet` component both render, and the swipe-
- * right-to-reply gesture is the same `useSwipeToReply` hook. Anything the
- * room gains from here on is meant to reach DMs the same way — see
- * `MessageActionSheet`'s own module comment.
+ * Structurally this is ChatPanel's message list, and it shares real code
+ * with it rather than merely resembling it: the long-press sheet is the
+ * same `MessageActionSheet`, the swipe-right-to-reply gesture the same
+ * `useSwipeToReply` hook, and — since migration 0039 — the reaction
+ * bookkeeping the same `applyReactionToggle` from core.
  *
- * What is NOT shared, and cannot be: everything about reading the data.
- * Nothing arriving from the server is readable until this component
- * decrypts it, and nothing leaves it unencrypted. `listDmMessages`/
- * `sendDm` never carry a plaintext body, a plaintext reply preview, or a
- * plaintext reaction — see `decryptAll` below, which is the one place all
- * three get opened, with the one key this thread has.
- *
- * THE UNREADABLE STATE IS A FIRST-CLASS ONE
- * ---------------------------------------------------------------------
- * `openMessage` returns null whenever something was encrypted to a key
- * this browser does not have — cleared storage, a different browser, the
- * other side rotating. That is not an error to swallow or to blow the
- * whole thread up over: an unreadable message, reply quote, or reaction
- * renders as an explicit placeholder, in place, and everything around it
- * keeps working.
+ * That last one is new, and it is the visible end of a much larger change.
+ * This component used to hold an entire decryption layer: a `decryptAll`
+ * that opened every message, every reply quote and every reaction with a
+ * key derived from both user ids; a `DecryptedMessage` shape where each of
+ * those three could be `null` for "encrypted to a key this browser does not
+ * have"; a bespoke `applyMyReaction` that existed because the room's tested
+ * version could not be reused on encrypted reactions; and a `keyless` state
+ * for a person who had never opened messages and so had no published key to
+ * encrypt to. All of it is gone. Messages arrive readable, and the
+ * "can't be read on this device" placeholder that came with the old design
+ * has nothing left to describe.
  */
 
 interface DmThreadViewProps {
   thread: DmThread;
   gateway: SosoGateway;
-  /** Needed to derive the conversation key — it is bound to both ids. */
+  /** Whose messages render as "mine" — and who a reply quote belongs to. */
   myId: string;
   onClose: () => void;
 }
 
-interface DecryptedReplyPreview {
-  id: string;
-  /** Whether the QUOTED message was sent by the signed-in user, not the message doing the quoting. */
-  mine: boolean;
-  /** Null when this device cannot decrypt the quoted message. */
-  text: string | null;
-}
-
-interface DecryptedReaction {
-  userId: string;
-  mine: boolean;
-  /** Null when this device cannot decrypt it. Rendered as a generic dot rather than hidden — see DmBubble. */
-  emoji: string | null;
-}
-
-interface DecryptedMessage {
-  id: string;
-  mine: boolean;
-  createdAt: string;
-  /** Null when this device cannot read it — a state, not a failure. */
-  text: string | null;
-  replyTo: DecryptedReplyPreview | null;
-  reactions: DecryptedReaction[];
-}
-
 /**
- * Characters, not bytes — and the gap between those is why this is 1000 and
- * not something rounder. `dm_messages.ciphertext` is capped at 6000 base64
- * characters, which is 4484 bytes of plaintext once the GCM tag and base64
- * expansion are accounted for. A character can be up to 4 bytes in UTF-8, so
- * 1000 characters is the largest limit that cannot overflow the column. At
- * the old 2000 it took only ~1500 Japanese characters to get a send rejected
- * by a constraint the UI had already told the user they were within — which
- * in a Tokyo-facing app is not an edge case.
+ * Characters, matching `dm_messages.body`'s own check constraint exactly.
+ *
+ * It used to be a derived number: the column stored base64 ciphertext capped
+ * at 6000 characters, which left 4484 bytes of plaintext after the GCM tag
+ * and base64 expansion, and since one character can be four bytes in UTF-8,
+ * 1000 was the largest limit that could not overflow the column. The column
+ * counts real characters now, so the two are the same number for the plain
+ * reason that they are the same limit.
  */
 const DM_MAX_LENGTH = 1000;
 
@@ -88,24 +63,8 @@ const REPORT_REASONS = [
   { label: "Something else", value: "other" },
 ] as const;
 
-/**
- * Replaces (or removes) the signed-in user's own reaction, leaving the
- * other side's untouched. There is no aggregation to get right here the
- * way `applyReactionToggle` (the room's own version of this) has to get
- * right for the room: a DM thread has exactly two possible reactors, ever,
- * so this is a two-branch function, not a tested module in `core`.
- */
-function applyMyReaction(
-  reactions: DecryptedReaction[],
-  myId: string,
-  emoji: string | null,
-): DecryptedReaction[] {
-  const others = reactions.filter((r) => !r.mine);
-  return emoji ? [...others, { userId: myId, mine: true, emoji }] : others;
-}
-
 export default function DmThreadView({ thread, gateway, myId, onClose }: DmThreadViewProps) {
-  const [messages, setMessages] = useState<DecryptedMessage[]>([]);
+  const [messages, setMessages] = useState<DmMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -113,89 +72,31 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
   // Separate from `error`: a completed report is good news, and rendering it
   // through the error slot painted it red.
   const [notice, setNotice] = useState<string | null>(null);
-  const [replyingTo, setReplyingTo] = useState<DecryptedMessage | null>(null);
-  const [menu, setMenu] = useState<{ message: DecryptedMessage; rect: DOMRect } | null>(null);
-  const [reportOpen, setReportOpen] = useState<DecryptedMessage | null>(null);
+  const [replyingTo, setReplyingTo] = useState<DmMessage | null>(null);
+  const [menu, setMenu] = useState<{ message: DmMessage; rect: DOMRect } | null>(null);
+  const [reportOpen, setReportOpen] = useState<DmMessage | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const keyless = thread.otherKey === null;
-
-  const decryptAll = useCallback(
-    async (
-      rows: {
-        id: string;
-        mine: boolean;
-        senderId: string;
-        createdAt: string;
-        ciphertext: string;
-        iv: string;
-        replyTo: { id: string; ciphertext: string; iv: string; senderId: string } | null;
-        reactions: { userId: string; ciphertext: string; iv: string; mine: boolean }[];
-      }[],
-    ): Promise<DecryptedMessage[]> => {
-      if (!thread.otherKey) {
-        return rows.map((r) => ({
-          id: r.id,
-          mine: r.mine,
-          createdAt: r.createdAt,
-          text: null,
-          replyTo: r.replyTo ? { id: r.replyTo.id, mine: r.replyTo.senderId === myId, text: null } : null,
-          reactions: r.reactions.map((rx) => ({ userId: rx.userId, mine: rx.mine, emoji: null })),
-        }));
-      }
-      const key = await threadKeyFor(thread.otherKey, myId, thread.otherId);
-      return Promise.all(
-        rows.map(async (r) => ({
-          id: r.id,
-          mine: r.mine,
-          createdAt: r.createdAt,
-          text: await openMessage(key, thread.id, { ciphertext: r.ciphertext, iv: r.iv }),
-          replyTo: r.replyTo
-            ? {
-                id: r.replyTo.id,
-                mine: r.replyTo.senderId === myId,
-                text: await openMessage(key, thread.id, { ciphertext: r.replyTo.ciphertext, iv: r.replyTo.iv }),
-              }
-            : null,
-          reactions: await Promise.all(
-            r.reactions.map(async (rx) => ({
-              userId: rx.userId,
-              mine: rx.mine,
-              emoji: await openMessage(key, thread.id, { ciphertext: rx.ciphertext, iv: rx.iv }),
-            })),
-          ),
-        })),
-      );
-    },
-    [thread.id, thread.otherKey, thread.otherId, myId],
-  );
-
   const reload = useCallback(async () => {
     try {
-      const rows = await gateway.listDmMessages(thread.id);
-      setMessages(await decryptAll(rows));
+      setMessages(await gateway.listDmMessages(thread.id));
     } catch {
       // Leaves whatever was already on screen rather than clearing it —
       // the same choice ChatPanel makes, for the same reason.
     } finally {
       setLoaded(true);
     }
-  }, [gateway, thread.id, decryptAll]);
+  }, [gateway, thread.id]);
 
   useEffect(() => {
-    // Both entry points into a conversation have to do this, not just the
-    // inbox: without our public key published, everything sent from here is
-    // undecryptable for the person receiving it.
-    void ensurePublishedKey(gateway, myId).catch(() => {});
     void reload();
     void gateway.markDmRead(thread.id).catch(() => {});
 
-    // Payload-free signal, like every other subscribe* in this app — and
-    // here it could not be anything else: the payload is ciphertext. Covers
-    // both dm_messages and dm_message_reactions (see subscribeDmMessagesChanged's
-    // own doc comment), so someone else's reaction lands here the same way
-    // their message does.
+    // Payload-free signal, like every other subscribe* in this app. Covers
+    // both dm_messages and dm_message_reactions (see
+    // subscribeDmMessagesChanged's own doc comment), so someone else's
+    // reaction lands here the same way their message does.
     let debounce: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = gateway.subscribeDmMessagesChanged(() => {
       if (debounce) return;
@@ -218,30 +119,18 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
 
   async function send() {
     const body = input.trim();
-    if (!body || sending || !thread.otherKey) return;
+    if (!body || sending) return;
     setSending(true);
     setError(null);
-    const replyTo = replyingTo;
     try {
-      const key = await threadKeyFor(thread.otherKey, myId, thread.otherId);
-      const sealed = await sealMessage(key, thread.id, body);
-      const sent = await gateway.sendDm(thread.id, sealed.ciphertext, sealed.iv, replyTo?.id ?? null);
+      const sent = await gateway.sendDm(thread.id, body, replyingTo?.id ?? null);
       setInput("");
       setReplyingTo(null);
-      // Appended from what we just encrypted rather than by decrypting the
-      // echo — we already hold the plaintext, and a round trip through the
-      // cipher to recover a string we never lost would be theatre.
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: sent.id,
-          mine: true,
-          createdAt: sent.createdAt,
-          text: body,
-          replyTo: replyTo ? { id: replyTo.id, mine: replyTo.mine, text: replyTo.text } : null,
-          reactions: [],
-        },
-      ]);
+      // The server's own echo, appended as-is. It used to be reassembled
+      // here from the plaintext we still held, because decrypting our own
+      // message back out of the cipher to recover a string we never lost
+      // would have been theatre — there is nothing to reassemble now.
+      setMessages((prev) => [...prev, sent]);
     } catch (err) {
       const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
       setError(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
@@ -267,53 +156,45 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
     }
   }
 
-  async function report(message: DecryptedMessage, reason: string) {
+  async function report(message: DmMessage, reason: string) {
     setReportOpen(null);
     try {
-      // The plaintext goes up because THIS client decrypted it and its
-      // owner chose to disclose it. The server cannot read the message and
-      // has no way to obtain it otherwise — see migration 0026 on why an
-      // E2EE report is a disclosure by a participant, not an inspection.
-      await gateway.reportDmMessage(message.id, reason, message.text);
+      // Still sent, even though the server can now read the row itself: this
+      // records what the reporter was looking at when they complained, which
+      // survives the message being deleted afterwards. See the column's own
+      // comment in migration 0039.
+      await gateway.reportDmMessage(message.id, reason, message.body);
       setNotice("Reported. Thanks — we'll look at it.");
     } catch {
       setError("Couldn't send that report. Try again.");
     }
   }
 
-  async function copy(message: DecryptedMessage) {
+  async function copy(message: DmMessage) {
     setMenu(null);
-    if (!message.text) return;
     try {
-      await navigator.clipboard?.writeText(message.text);
+      await navigator.clipboard?.writeText(message.body);
     } catch {
       // Refused in some browsers and contexts; the text is on screen anyway.
     }
   }
 
-  async function react(message: DecryptedMessage, emoji: string) {
+  async function react(message: DmMessage, emoji: string) {
     setMenu(null);
-    if (!thread.otherKey) return;
-    const mine = message.reactions.find((r) => r.mine);
-    const clearing = mine?.emoji === emoji;
 
-    // Optimistic, same as the room: applyMyReaction mirrors exactly what
-    // set_dm_reaction/clear_dm_reaction do server-side, so there is
-    // nothing for the realtime refetch to correct in the success case.
+    // `applyReactionToggle` is the room's own tested function, reused rather
+    // than reimplemented — it mirrors exactly what toggle_dm_reaction does
+    // server-side, so there is nothing for the realtime refetch to correct
+    // in the success case. DMs could not use it while reactions were
+    // encrypted; see this file's own module comment.
     setMessages((prev) =>
       prev.map((m) =>
-        m.id === message.id ? { ...m, reactions: applyMyReaction(m.reactions, myId, clearing ? null : emoji) } : m,
+        m.id === message.id ? { ...m, reactions: applyReactionToggle(m.reactions, emoji) } : m,
       ),
     );
 
     try {
-      if (clearing) {
-        await gateway.clearDmReaction(message.id);
-      } else {
-        const key = await threadKeyFor(thread.otherKey, myId, thread.otherId);
-        const sealed = await sealMessage(key, thread.id, emoji);
-        await gateway.setDmReaction(message.id, sealed.ciphertext, sealed.iv);
-      }
+      await gateway.toggleDmReaction(message.id, emoji);
     } catch {
       // Unlike a failed delete, this is worth undoing immediately — a
       // reaction that silently stuck locally but never reached the server
@@ -322,7 +203,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
     }
   }
 
-  function startReply(message: DecryptedMessage) {
+  function startReply(message: DmMessage) {
     setMenu(null);
     setReplyingTo(message);
     inputRef.current?.focus();
@@ -346,22 +227,18 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
         </div>
       </header>
 
-      {/* Stated once, at the top of every conversation, rather than buried
-          in a settings page nobody opens. It is also the honest place to
-          say what is NOT covered — see the README's own section. */}
-      <p className="dm-thread-notice">
-        <Icon src={ICONS.lock} size={12} />
-        Messages are end-to-end encrypted. Only you and {thread.otherName} can read them — this server
-        stores them as ciphertext it has no key for.
-      </p>
+      {/* This used to promise end-to-end encryption. It is deleted rather
+          than softened: migration 0039 made it untrue, and a privacy claim
+          that no longer holds is worse than none. Nothing replaces it,
+          because "your messages are stored on our server" is the unremarkable
+          default every chat app that isn't Signal already operates under,
+          and announcing it in a banner over every conversation would be
+          theatre in the opposite direction. What IS still true — only the two
+          of you can read a thread, and only mutual follows can start one —
+          is enforced in the RPCs and RLS, and said plainly in the README. */}
 
       <div className="chat-thread dm-thread-messages" ref={listRef}>
-        {keyless ? (
-          <p className="chat-empty">
-            {thread.otherName} hasn&rsquo;t opened messages yet, so there&rsquo;s no key to encrypt to.
-            Once they do, you can start the conversation.
-          </p>
-        ) : !loaded ? (
+        {!loaded ? (
           <p className="chat-empty">Loading…</p>
         ) : messages.length === 0 ? (
           <p className="chat-empty">No messages yet — say hello.</p>
@@ -374,6 +251,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
             <Fragment key={message.id}>
               <DmBubble
                 message={message}
+                myId={myId}
                 showAvatar={endsRun && !message.mine}
                 endsRun={endsRun}
                 otherName={thread.otherName}
@@ -399,7 +277,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
               Replying to {replyingTo.mine ? "yourself" : thread.otherName}
             </span>
             <span className="chat-reply-bar-text">
-              {replyingTo.text ?? "Can't be read on this device"}
+              {replyingTo.body}
             </span>
           </div>
           <button
@@ -426,15 +304,14 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={keyless ? "Waiting for their key…" : replyingTo ? "Reply…" : "Message…"}
+          placeholder={replyingTo ? "Reply…" : "Message…"}
           maxLength={DM_MAX_LENGTH}
           aria-label="Message"
-          disabled={keyless}
         />
         <button
           className="chat-send"
           type="submit"
-          disabled={sending || keyless || input.trim().length === 0}
+          disabled={sending || input.trim().length === 0}
           aria-label="Send"
         >
           <Icon src={ICONS.send} size={16} />
@@ -446,12 +323,12 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
           <MessageActionSheet
             rect={menu.rect}
             mine={menu.message.mine}
-            bodyText={menu.message.text ?? "Can't be read on this device"}
+            bodyText={menu.message.body}
             quotedText={
               menu.message.replyTo
                 ? {
-                    authorLabel: menu.message.replyTo.mine ? "You" : thread.otherName,
-                    text: menu.message.replyTo.text ?? "Can't be read on this device",
+                    authorLabel: menu.message.replyTo.senderId === myId ? "You" : thread.otherName,
+                    text: menu.message.replyTo.body,
                   }
                 : null
             }
@@ -507,6 +384,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
 
 function DmBubble({
   message,
+  myId,
   showAvatar,
   endsRun,
   otherName,
@@ -517,7 +395,9 @@ function DmBubble({
   onSwipeReply,
   onToggleReaction,
 }: {
-  message: DecryptedMessage;
+  message: DmMessage;
+  /** Only used to label a reply quote as yours or theirs. */
+  myId: string;
   showAvatar: boolean;
   endsRun: boolean;
   otherName: string;
@@ -610,43 +490,41 @@ function DmBubble({
             <div ref={swipeTrackRef} className="chat-bubble-swipe-track">
               <div
                 ref={bubbleRef}
-                className={`chat-bubble${message.text === null ? " unreadable" : ""}`}
+                className="chat-bubble"
                 {...bubbleHandlers}
               >
                 {message.replyTo && (
                   <div className="chat-bubble-quote">
-                    <span className="chat-quote-author">{message.replyTo.mine ? "You" : otherName}</span>
-                    <span className="chat-quote-body">
-                      {message.replyTo.text ?? "Can't be read on this device"}
+                    <span className="chat-quote-author">
+                      {message.replyTo.senderId === myId ? "You" : otherName}
                     </span>
+                    <span className="chat-quote-body">{message.replyTo.body}</span>
                   </div>
                 )}
-                <span className="chat-bubble-text">
-                  {message.text === null ? "Can't be read on this device" : message.text}
-                </span>
+                <span className="chat-bubble-text">{message.body}</span>
               </div>
 
               {message.reactions.length > 0 && (
                 <div className="chat-reactions">
+                  {/* Identical to the room's, down to the aggregation:
+                      tapping one adds, replaces or removes your own, and the
+                      other side's is untouched because toggle_dm_reaction
+                      only ever writes the caller's row. It used to be keyed
+                      on userId with the button disabled for anyone but you,
+                      because encrypted reactions could not be grouped by
+                      emoji and there was nothing a tap on theirs could
+                      have meant. */}
                   {message.reactions.map((reaction) => (
                     <button
-                      key={reaction.userId}
+                      key={reaction.emoji}
                       type="button"
                       className={`chat-reaction${reaction.mine ? " mine" : ""}`}
-                      // Only your own reaction is yours to tap away — the
-                      // other side's is theirs to change, the same
-                      // asymmetry the room enforces server-side
-                      // (toggle_chat_reaction only ever touches the
-                      // caller's own row) but which here is worth
-                      // enforcing in the UI too: there is no server call
-                      // this button could make on someone else's reaction
-                      // that would mean anything.
-                      disabled={!reaction.mine}
-                      onClick={() => reaction.emoji && onToggleReaction(reaction.emoji)}
+                      onClick={() => onToggleReaction(reaction.emoji)}
                       aria-pressed={reaction.mine}
-                      aria-label={reaction.emoji ?? "Reaction unavailable on this device"}
+                      aria-label={`${reaction.emoji} ${reaction.count}`}
                     >
-                      {reaction.emoji ?? "•"}
+                      <span aria-hidden="true">{reaction.emoji}</span>
+                      {reaction.count > 1 && <span className="chat-reaction-count">{reaction.count}</span>}
                     </button>
                   ))}
                 </div>

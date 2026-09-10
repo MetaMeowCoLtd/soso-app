@@ -4,22 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import { formatAgoShort, type DmThread, type SosoGateway } from "soso-core";
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
-import { ensurePublishedKey, openMessage, threadKeyFor } from "./dmCrypto";
 
 /**
  * The direct-message inbox.
  *
- * The one structural difference from every other list in this app: the
- * server cannot supply a preview, because it holds ciphertext. So each
- * row's preview is produced here, by decrypting that thread's newest
- * message locally. A thread whose newest message this device cannot read
- * shows that plainly rather than an empty line.
- *
- * This is also where a key gets published. Mounting the inbox is the first
- * unambiguous "I intend to use messaging" moment — which is what makes a
- * published key mean that, rather than meaning "this account exists".
- * Until someone reaches here, friends see "hasn't opened messages yet" and
- * cannot send to them, which is the intended, honest state.
+ * Previews come straight from `list_dm_threads` now. Until migration 0039
+ * they could not: the server held only ciphertext, so this component
+ * decrypted every thread's newest message itself before it could draw a
+ * single row, published this device's key on mount, and had a whole
+ * "this device can't read that one" state for rows encrypted to a key some
+ * other device had since replaced. All of that is gone — a row is a row.
  */
 
 interface DmInboxProps {
@@ -36,36 +30,15 @@ interface DmInboxProps {
   refreshToken: number;
 }
 
-interface InboxRow {
-  thread: DmThread;
-  /** Null when there is no message yet, or none this device can read. */
-  preview: string | null;
-  unreadable: boolean;
-}
-
 export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refreshToken }: DmInboxProps) {
-  const [rows, setRows] = useState<InboxRow[]>([]);
+  const [rows, setRows] = useState<DmThread[]>([]);
   const [loaded, setLoaded] = useState(false);
   const nowSeconds = Math.floor(Date.now() / 1000);
 
   const reload = useCallback(async () => {
     if (!myId) return;
     try {
-      const threads = await gateway.listDmThreads();
-      const decrypted = await Promise.all(
-        threads.map(async (thread): Promise<InboxRow> => {
-          if (!thread.lastCiphertext || !thread.lastIv || !thread.otherKey) {
-            return { thread, preview: null, unreadable: false };
-          }
-          const key = await threadKeyFor(thread.otherKey, myId, thread.otherId);
-          const text = await openMessage(key, thread.id, {
-            ciphertext: thread.lastCiphertext,
-            iv: thread.lastIv,
-          });
-          return { thread, preview: text, unreadable: text === null };
-        }),
-      );
-      setRows(decrypted);
+      setRows(await gateway.listDmThreads());
     } catch {
       // Keeps whatever was on screen; a failed inbox refresh should not
       // empty an inbox that was fine a moment ago.
@@ -83,11 +56,7 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refresh
     // flashing "No conversations yet" at someone who has plenty.
     if (!myId) return;
 
-    // Publish this device's public key before listing, so that by the time
-    // anyone looks at their friends list this account is messageable.
-    void ensurePublishedKey(gateway, myId)
-      .catch(() => {})
-      .then(() => reload());
+    void reload();
 
     let debounce: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = gateway.subscribeDmMessagesChanged(() => {
@@ -121,8 +90,8 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refresh
         <Icon src={ICONS.lock} size={26} />
         <strong>No conversations yet</strong>
         <p>
-          Open a friend&rsquo;s row in People and choose Message. Only people you follow each other
-          with can start one, and the messages are end-to-end encrypted.
+          Open a friend&rsquo;s row in Friends and choose Message. Only people you follow each other
+          with can start one.
         </p>
       </div>
     );
@@ -130,7 +99,7 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refresh
 
   return (
     <ul className="dm-list">
-      {rows.map(({ thread, preview, unreadable }) => (
+      {rows.map((thread) => (
         <li key={thread.id}>
           <button type="button" className="dm-row" onClick={() => onOpenThread(thread)}>
             <Avatar
@@ -149,12 +118,10 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refresh
                 )}
               </span>
               <span className={`dm-row-preview${thread.unread > 0 ? " unread" : ""}`}>
-                {unreadable ? (
-                  <em>Can&rsquo;t be read on this device</em>
-                ) : preview ? (
+                {thread.lastBody ? (
                   <>
                     {thread.lastSenderId === myId && <span className="dm-row-you">You: </span>}
-                    {preview}
+                    {thread.lastBody}
                   </>
                 ) : (
                   <em>No messages yet</em>

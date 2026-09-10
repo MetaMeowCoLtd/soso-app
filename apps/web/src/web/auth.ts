@@ -15,27 +15,13 @@
  * ---------------------------------------------------------------------
  * Supabase's phone provider generates it, stores only its hash, expires
  * it, and burns it on first use. Reimplementing that would mean
- * reimplementing it worse — the same reasoning that puts the DM cipher on
- * SubtleCrypto rather than hand-written primitives. What this file adds is
- * the part the platform cannot know: honest cooldown state for the UI, and
- * the account-switch cleanup below.
+ * reimplementing it worse. What this file adds is the part the platform
+ * cannot know: honest cooldown state for the UI.
  *
- * THE ACCOUNT-SWITCH BUG THIS FILE EXISTS TO PREVENT
- * ---------------------------------------------------------------------
- * Before this feature, one browser meant one permanent anonymous account,
- * so `dmCrypto`'s keystore could store the private key under a fixed
- * record id and never be wrong. The moment sign-out and sign-in exist that
- * stops being true, and the failure is severe rather than cosmetic: user A
- * signs out, user B signs in on the same browser, and `getSelfKeys()`
- * hands B the private key belonging to A — after which
- * `ensurePublishedKey` publishes A's PUBLIC key as B's, and everyone
- * messaging B encrypts to a key only A can open.
- *
- * `syncKeystoreToAccount` below is the fix, and it runs on every auth
- * state change rather than only on sign-out, because the sign-out half can
- * be skipped entirely — closing the tab, clearing a cookie, or a refresh
- * token expiring all end one session and start another with no sign-out
- * event in between.
+ * This module also used to carry the DM keystore's account-switch cleanup,
+ * because signing out A and signing in B on one browser would otherwise
+ * hand B the private key belonging to A. Migration 0039 removed DM
+ * encryption and with it that entire class of bug; see `onAuthChange`.
  */
 
 "use client";
@@ -46,7 +32,6 @@ import {
   resendCooldownSeconds,
   type PhoneProblem,
 } from "soso-core";
-import { forgetSelfKeys } from "./dmCrypto";
 import { currentUserId, getSupabase, startGuestSession } from "./supabase";
 
 /**
@@ -305,13 +290,12 @@ export async function verifyCode(rawPhone: string, code: string): Promise<Verify
   // ---------------------------------------------------------------------
   // It existed for number recycling: a carrier reissues a disconnected
   // number, the new holder verifies onto the account, and the previous
-  // owner's live sessions should not outlive that. That loss is real but
-  // narrow, and the part people actually care about — that the new holder
-  // cannot read the previous owner's message history — never depended on
-  // this call at all. It is guaranteed by something stronger: the DM
-  // private key never leaves the device that generated it (see
-  // dmCrypto.ts), so a new holder on a new device simply has no key that
-  // opens old ciphertext, whatever `user_keys` currently says.
+  // owner's live sessions should not outlive that. That loss is real, and
+  // it is now the whole of what this call protected — it also used to drop
+  // the published DM key, which was the half that stopped a new holder
+  // reading old messages, and migration 0039 removed both the key and the
+  // encryption it belonged to. A registration-lock PIN is what would
+  // actually address recycling; it is not built. See the README.
   //
   // The RPC itself is kept, unchanged, so the capability can be offered as
   // a deliberate "sign out of other devices" action — which is where a
@@ -387,35 +371,24 @@ export async function isHandleAvailable(handle: string): Promise<boolean | null>
 
 export async function signOut(): Promise<void> {
   await getSupabase().auth.signOut();
-  // Not conditional on the sign-out succeeding: if the network call failed
-  // the local session is still gone, and leaving a private key behind for
-  // whoever signs in next is the failure mode this whole module is here to
-  // prevent.
-  await forgetSelfKeys();
-}
-
-/**
- * Drops this browser's DM keystore whenever it belongs to a different
- * account than the one now signed in. See the module comment for the
- * cross-account key confusion this prevents.
- *
- * Deliberately compares against the id the keystore itself recorded rather
- * than tracking the previous session in memory — memory does not survive
- * the reload that a sign-in causes, and the stale key does.
- */
-export async function syncKeystoreToAccount(userId: string | null): Promise<void> {
-  await forgetSelfKeys(userId);
 }
 
 /**
  * Fires on sign-in, sign-out, token refresh and tab-to-tab session
  * changes. Returns its own unsubscribe.
+ *
+ * It used to also run `syncKeystoreToAccount` on every one of these events,
+ * which dropped this browser's DM private key whenever the keystore turned
+ * out to belong to a different account than the one now signed in. That
+ * existed to stop a specific and severe bug: the keystore was keyed on the
+ * fixed record id "self" rather than on a user id, so after A signed out and
+ * B signed in on the same browser, B would publish A's public key as their
+ * own and then be unable to read their own conversations while A could.
+ * There is no keystore now, so there is nothing to get confused.
  */
 export function onAuthChange(handler: (userId: string | null) => void): () => void {
   const { data } = getSupabase().auth.onAuthStateChange((_event, session) => {
-    const userId = session?.user?.id ?? null;
-    void syncKeystoreToAccount(userId);
-    handler(userId);
+    handler(session?.user?.id ?? null);
   });
   return () => data.subscription.unsubscribe();
 }

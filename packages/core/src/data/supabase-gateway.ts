@@ -690,24 +690,12 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
 
     // --- Direct messages -------------------------------------------------
     //
-    // Note what is absent: any method here that takes or returns a message
-    // body. `sendDm` takes bytes the caller already encrypted, and the list
-    // methods hand back bytes. That is not a stylistic choice — the server
-    // has no plaintext column to write one to (migration 0026).
-
-    async publishUserKey(publicKey: string, algorithm?: string): Promise<void> {
-      const { error } = await client.rpc('publish_user_key', {
-        p_public_key: publicKey,
-        p_algorithm: algorithm ?? null,
-      });
-      if (error) throw toSosoError(error);
-    },
-
-    async dmPublicKeyOf(userId: string): Promise<string | null> {
-      const { data, error } = await client.rpc('dm_public_key_of', { p_user_id: userId });
-      if (error) throw toSosoError(error);
-      return (data as string | null) ?? null;
-    },
+    // These moved ciphertext until migration 0039, which replaced the
+    // end-to-end encryption with server-side storage; `publishUserKey` and
+    // `dmPublicKeyOf` went with it, along with the table they read. What
+    // keeps a thread private between two people is now entirely the
+    // participant-scoped RLS and the mutual-follow and block checks inside
+    // each RPC — see that migration's header.
 
     async openDmThread(userId: string): Promise<DmThread> {
       const { data, error } = await client.rpc('open_dm_thread', { p_user_id: userId });
@@ -731,16 +719,10 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return ((data ?? []) as WireDmMessage[]).map(decodeDmMessage);
     },
 
-    async sendDm(
-      threadId: string,
-      ciphertext: string,
-      iv: string,
-      replyToId?: string | null,
-    ): Promise<DmMessage> {
+    async sendDm(threadId: string, body: string, replyToId?: string | null): Promise<DmMessage> {
       const { data, error } = await client.rpc('send_dm', {
         p_thread_id: threadId,
-        p_ciphertext: ciphertext,
-        p_iv: iv,
+        p_body: body,
         p_reply_to: replyToId ?? null,
       });
       if (error) throw toSosoError(error);
@@ -770,17 +752,11 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       if (error) throw toSosoError(error);
     },
 
-    async setDmReaction(messageId: string, ciphertext: string, iv: string): Promise<void> {
-      const { error } = await client.rpc('set_dm_reaction', {
+    async toggleDmReaction(messageId: string, emoji: string): Promise<void> {
+      const { error } = await client.rpc('toggle_dm_reaction', {
         p_message_id: messageId,
-        p_ciphertext: ciphertext,
-        p_iv: iv,
+        p_emoji: emoji,
       });
-      if (error) throw toSosoError(error);
-    },
-
-    async clearDmReaction(messageId: string): Promise<void> {
-      const { error } = await client.rpc('clear_dm_reaction', { p_message_id: messageId });
       if (error) throw toSosoError(error);
     },
 

@@ -1795,16 +1795,6 @@ export function createDemoGateway(): SosoGateway {
     // that appears to send and reaches nobody would be a worse lie here than
     // the chat room's local echo, because the whole point of a DM is that
     // somebody else receives it.
-    async publishUserKey(): Promise<void> {
-      // The exception: publishing a key is harmless and local-only in
-      // effect, so this succeeds silently rather than making the UI handle
-      // an error for a step that has no observable result in demo mode.
-    },
-
-    async dmPublicKeyOf(): Promise<string | null> {
-      return null;
-    },
-
     async openDmThread(): Promise<DmThread> {
       throw new SosoError("soso/not_friends");
     },
@@ -1824,8 +1814,7 @@ export function createDemoGateway(): SosoGateway {
     async markDmRead(): Promise<void> {},
     async deleteDmMessage(): Promise<void> {},
     async reportDmMessage(): Promise<void> {},
-    async setDmReaction(): Promise<void> {},
-    async clearDmReaction(): Promise<void> {},
+    async toggleDmReaction(): Promise<void> {},
 
     subscribeDmMessagesChanged(): () => void {
       return () => {};

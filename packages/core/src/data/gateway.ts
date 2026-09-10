@@ -433,71 +433,57 @@ export interface SosoGateway {
   subscribeChatMessagesChanged(onChange: () => void): () => void;
 
   // --- Direct messages -----------------------------------------------------
-  // Mutual follows only, and end-to-end encrypted: every method here moves
-  // ciphertext, and nothing in core (or on the server) can read a body. The
-  // encryption itself is a client concern — see apps/web/src/web/dmCrypto.ts,
-  // which is web-only because it depends on SubtleCrypto and IndexedDB, the
-  // same reason demo-gateway lives outside this package.
+  // Mutual follows only. Stored server-side and readable by the server since
+  // migration 0039, which removed the end-to-end encryption these methods
+  // used to move ciphertext for — see that migration's header for what was
+  // traded away and what still protects a thread.
   //
   // Every one of these re-checks the mutual follow server-side rather than
   // trusting that it held when the thread was opened; see migration 0026.
-
-  /** Publishes this device's ECDH public key so friends can encrypt to it. Idempotent. */
-  publishUserKey(publicKey: string, algorithm?: string): Promise<void>;
-
-  /** A friend's public key, or null if they have not opened messages yet. Throws soso/not_friends otherwise. */
-  dmPublicKeyOf(userId: string): Promise<string | null>;
+  // That check, the participant-scoped RLS, and the block predicate inside
+  // it are now the whole of what keeps a conversation between two people.
 
   /** Opens (or returns) the single thread with a friend. Throws soso/not_friends if you are not mutual follows. */
   openDmThread(userId: string): Promise<DmThread>;
 
-  /** Your inbox, newest first. Carries each thread's newest ciphertext so the caller can render its own preview. */
+  /** Your inbox, newest first, each thread carrying its newest message for the preview line. */
   listDmThreads(): Promise<DmThread[]>;
 
   /** One thread's messages, oldest first. Pass a prior page's oldest `createdAt` to page back. */
   listDmMessages(threadId: string, before?: string, limit?: number): Promise<DmMessage[]>;
 
   /**
-   * Sends pre-encrypted bytes. This interface never sees a plaintext body.
-   * Pass `replyToId` to quote another message in this same thread — the
-   * server resolves it into `replyTo`'s ciphertext, mirroring
-   * `sendChatMessage`'s own `replyToId` for the room, except there is no
-   * plaintext preview to resolve it into: the caller decrypts `replyTo`
-   * itself, with the same thread key it already used for the message body.
+   * Sends a message. Pass `replyToId` to quote another message in this same
+   * thread; the server resolves it into `replyTo`, exactly as
+   * `sendChatMessage` does for the room. The two are the same call shape
+   * again now that neither one is moving ciphertext.
    */
-  sendDm(threadId: string, ciphertext: string, iv: string, replyToId?: string | null): Promise<DmMessage>;
+  sendDm(threadId: string, body: string, replyToId?: string | null): Promise<DmMessage>;
 
   /** Moves your read cursor to now, clearing the thread's unread count. */
   markDmRead(threadId: string): Promise<void>;
 
-  /** Unsends your own message — for both sides, since there is only one copy of the ciphertext. */
+  /** Unsends your own message — for both sides, since there is only one copy. */
   deleteDmMessage(messageId: string): Promise<void>;
 
   /**
-   * Reports a message. `disclosedPlaintext` is what the reporter's own
-   * client decrypted: under end-to-end encryption the server cannot read the
-   * message, so a report is a participant disclosing it, never the platform
-   * inspecting it. Optional — a report without it still records the
-   * complaint.
+   * Reports a message. `disclosedPlaintext` records what the REPORTER saw at
+   * the moment they reported, which is still worth keeping now that the
+   * server could read the row itself: the message can be deleted afterwards,
+   * and a moderator needs what was actually complained about. Optional — a
+   * report without it still records the complaint.
    */
   reportDmMessage(messageId: string, reason: string, disclosedPlaintext?: string | null): Promise<void>;
 
   /**
-   * Sets the caller's own reaction on a DM to a pre-encrypted emoji — one
-   * per (message, caller), same shape as `toggleChatReaction` for the
-   * room. Genuinely a different operation from that one, not just an
-   * encrypted version of it: `toggleChatReaction` lets the SERVER decide
-   * add/replace/clear by comparing plaintext emoji, which is exactly what
-   * it cannot do here (two encryptions of the same emoji are two
-   * different ciphertexts). The caller — which already decrypted its own
-   * previous reaction, if any — makes that decision instead: call this to
-   * set a reaction, `clearDmReaction` to remove it. There is no single
-   * "toggle" entry point for DMs.
+   * Adds, replaces or removes the caller's reaction on a DM in one call —
+   * the same semantics as `toggleChatReaction`, which DMs could not have
+   * while reactions were encrypted (the server had no way to tell "the same
+   * emoji again" from "a different one" when two encryptions of one emoji
+   * are different bytes). Migration 0039 removed that obstacle along with
+   * the separate set/clear pair this replaces.
    */
-  setDmReaction(messageId: string, ciphertext: string, iv: string): Promise<void>;
-
-  /** Removes the caller's own reaction from a DM. A no-op, not an error, if there wasn't one. */
-  clearDmReaction(messageId: string): Promise<void>;
+  toggleDmReaction(messageId: string, emoji: string): Promise<void>;
 
   /** Fires when any dm_messages or dm_message_reactions row you can see changes. Payload-free, like every other subscribe*. */
   subscribeDmMessagesChanged(onChange: () => void): () => void;

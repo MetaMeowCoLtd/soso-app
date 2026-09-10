@@ -272,10 +272,10 @@ export function avatarObjectPath(userId: string, token: string): string {
 /**
  * The random second segment of an avatar path.
  *
- * The one impure function in this module, and it earns the exception the
- * same way `dm-crypto.ts` does: it needs a real CSPRNG, and both gateways
- * need to produce the same shape of name, so defining it in either one
- * would mean two definitions that could drift. `crypto.randomUUID` is
+ * The one impure function in this module, and it earns the exception: it
+ * needs a real CSPRNG, and both gateways need to produce the same shape of
+ * name, so defining it in either one would mean two definitions that could
+ * drift. `crypto.randomUUID` is
  * available in every runtime this package targets (browsers, Node 19+).
  *
  * Dashes stripped purely for a shorter, tidier object name — 32 hex
