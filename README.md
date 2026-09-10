@@ -1487,6 +1487,21 @@ picture has on every other social product. Writes are not public.
   photo. `currentUserId()` in `apps/web/src/web/supabase.ts` uses
   `getSession()` for related reasons; there is now no `getUser()` call
   anywhere in the codebase, and new code should not add one.
+- **Avatar `<img>`s are not lazy-loaded**, deliberately. `loading="lazy"`
+  hands the request to the browser's intersection machinery, which does not
+  reliably agree that a 22px disc inside a scrolling container is on screen;
+  the failure mode is an avatar that never loads *and* never errors, so the
+  `onError` fallback never runs either and a broken photo is
+  indistinguishable from someone who has none. At ~40 KB, sitting on top of
+  an already-painted fallback, deferring buys almost nothing.
+  `fetchPriority="low"` gets the bandwidth politeness without deferring the
+  request.
+
+  Worth knowing because **this is the one avatar behaviour demo mode cannot
+  test**: demo mode serves `data:` URLs, which bypass network loading
+  entirely, so a lazy-loading fault is invisible until a real bucket is in
+  play. The first release had `loading="lazy"` and looked perfect in demo
+  mode.
 - **A new random filename per upload**, rather than overwriting a
   per-user key. Changing your picture produces a URL nothing has cached, so
   the new one appears immediately instead of after whatever lifetime the CDN

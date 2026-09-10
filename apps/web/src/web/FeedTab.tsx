@@ -302,7 +302,7 @@ export function FeedCard({
       >
         {initialsOf(post.author.displayName)}
         {authorAvatarSrc && (
-          <img src={authorAvatarSrc} alt="" loading="lazy" decoding="async" />
+          <img src={authorAvatarSrc} alt="" fetchPriority="low" decoding="async" />
         )}
       </button>
       <div className="feed-card-body">

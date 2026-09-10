@@ -58,6 +58,10 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
   const [reportError, setReportError] = useState<string | null>(null);
 
   const authorAvatarSrc = gateway.avatarUrl(post.author.avatarPath);
+  // Resolved per reply rather than hoisted: replies arrive as a list and
+  // each has its own author. Cheap — `avatarUrl` is string construction,
+  // not I/O (see the port).
+  const replyAvatarSrc = (r: PostReply) => gateway.avatarUrl(r.authorAvatarPath);
 
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -201,7 +205,7 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
           <div className="feed-card-avatar" aria-hidden="true">
             {post.author.displayName.trim().charAt(0).toUpperCase() || "?"}
             {authorAvatarSrc && (
-              <img src={authorAvatarSrc} alt="" loading="lazy" decoding="async" />
+              <img src={authorAvatarSrc} alt="" fetchPriority="low" decoding="async" />
             )}
           </div>
           <div className="feed-card-body">
@@ -313,11 +317,11 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
                 {!r.mine && (
                   <div className="chat-row-avatar" aria-hidden="true">
                     {(r.authorName || r.authorHandle).trim().charAt(0).toUpperCase() || "?"}
-                    {gateway.avatarUrl(r.authorAvatarPath) && (
+                    {replyAvatarSrc(r) && (
                       <img
-                        src={gateway.avatarUrl(r.authorAvatarPath) as string}
+                        src={replyAvatarSrc(r) as string}
                         alt=""
-                        loading="lazy"
+                        fetchPriority="low"
                         decoding="async"
                       />
                     )}

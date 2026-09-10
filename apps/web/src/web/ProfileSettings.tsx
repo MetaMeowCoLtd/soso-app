@@ -178,7 +178,12 @@ export default function ProfileSettings({
       bio.trim() !== saved.bio.trim() ||
       pending !== null ||
       avatarPath !== saved.avatarPath);
-  const busy = saving || preparing;
+  // `cropping !== null` counts as busy so Save cannot fire while the cropper
+  // is open. The overlay covers the header, so a mouse cannot reach it — but
+  // there is no focus trap, so a keyboard still can, and saving mid-crop
+  // would commit the profile WITHOUT the photo being positioned and then
+  // unmount the cropper from under the person.
+  const busy = saving || preparing || rendering || cropping !== null;
   const canSave = loaded && dirty && nameCheck.ok && bioCheck.ok && !busy;
 
   function closeCropper() {

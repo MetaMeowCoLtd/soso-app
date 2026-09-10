@@ -110,7 +110,22 @@ export function Avatar({ name, seed, src, size = 44, online, className }: Avatar
           // the wrapper.
           aria-hidden="true"
           draggable={false}
-          loading="lazy"
+          // NOT `loading="lazy"`, deliberately. An avatar is a ~40 KB image
+          // sitting on top of a fallback that is already painted, so
+          // deferring it saves very little — and a deferred request is one
+          // that might not happen. Lazy loading hangs on the browser's
+          // intersection machinery, which does not always agree that a
+          // 22px disc inside a scrolling container is on screen; the
+          // failure mode is an avatar that silently never loads AND never
+          // errors, so `onError` below never runs either and there is
+          // nothing to distinguish it from someone who has no photo.
+          //
+          // This is also the one avatar behaviour demo mode cannot test:
+          // it serves `data:` URLs, which bypass network loading entirely,
+          // so anything wrong here is invisible until the real bucket is
+          // in play. `fetchPriority` gets the bandwidth politeness that
+          // was actually wanted, without deferring the request itself.
+          fetchPriority="low"
           decoding="async"
           onError={() => setFailed(true)}
         />

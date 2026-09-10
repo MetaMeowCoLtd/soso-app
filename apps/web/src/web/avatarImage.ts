@@ -32,7 +32,6 @@ import {
   AVATAR_OUTPUT_MIME,
   AVATAR_OUTPUT_QUALITY,
   avatarTargetSize,
-  squareCrop,
   validateAvatarFile,
   type AvatarFileProblem,
   type SquareCrop,
@@ -202,22 +201,6 @@ export async function renderAvatarCrop(decoded: DecodedAvatar, crop: SquareCrop)
   ctx.drawImage(decoded.source, crop.sx, crop.sy, crop.size, crop.size, 0, 0, size, size);
 
   return await toBlob(canvas);
-}
-
-/**
- * The whole pipeline with no cropper in the middle: validate, centre-crop,
- * downscale, encode, and release. Kept for callers that have no interface
- * to offer a crop on — nothing in the web app uses it today, since
- * ProfileSettings always opens the cropper, but it is the exact behaviour
- * this feature shipped with and the one a headless caller wants.
- */
-export async function prepareAvatarImage(file: File): Promise<Blob> {
-  const decoded = await decodeAvatarFile(file);
-  try {
-    return await renderAvatarCrop(decoded, squareCrop(decoded.width, decoded.height));
-  } finally {
-    decoded.release();
-  }
 }
 
 /** User-facing text for what went wrong, in the shape ERROR_MESSAGES_EN uses. */

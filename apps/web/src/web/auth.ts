@@ -293,16 +293,30 @@ export async function verifyCode(rawPhone: string, code: string): Promise<Verify
   // past the account that was just verified.
   setGuest(false);
 
-  // Best-effort: a failure here must not strand someone outside an account
-  // they have just proven they control. It is a hardening step, not part
-  // of authenticating, and it retries on the next sign-in. (try/catch
-  // rather than `.catch()` because a PostgREST builder is a thenable, not
-  // a Promise, and has no such method.)
-  try {
-    await supabase.rpc("revoke_other_sessions");
-  } catch {
-    // Retried on the next sign-in.
-  }
+  // NOT called here any more, deliberately: `revoke_other_sessions` used to
+  // run on every successful verify, and it does exactly what its name says —
+  // deletes every OTHER session on the account. With one device that is
+  // invisible. With two it means signing in on a laptop silently ends the
+  // session on the phone, and signing back in on the phone ends the
+  // laptop's, forever. "Log in on your other device and you are logged out
+  // of this one" is not a security posture, it is a broken app.
+  //
+  // WHAT THIS GIVES UP, AND WHY IT IS LESS THAN IT LOOKS
+  // ---------------------------------------------------------------------
+  // It existed for number recycling: a carrier reissues a disconnected
+  // number, the new holder verifies onto the account, and the previous
+  // owner's live sessions should not outlive that. That loss is real but
+  // narrow, and the part people actually care about — that the new holder
+  // cannot read the previous owner's message history — never depended on
+  // this call at all. It is guaranteed by something stronger: the DM
+  // private key never leaves the device that generated it (see
+  // dmCrypto.ts), so a new holder on a new device simply has no key that
+  // opens old ciphertext, whatever `user_keys` currently says.
+  //
+  // The RPC itself is kept, unchanged, so the capability can be offered as
+  // a deliberate "sign out of other devices" action — which is where a
+  // control like this belongs: pressed by someone who has a reason, not
+  // fired automatically at everyone who owns two devices.
 
   return { ok: true };
 }

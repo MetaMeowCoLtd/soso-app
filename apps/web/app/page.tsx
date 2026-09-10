@@ -198,6 +198,11 @@ function Map({
   const [myHandle, setMyHandle] = useState<string | null>(null);
   const [myName, setMyName] = useState<string>("You");
   const [myAvatarPath, setMyAvatarPath] = useState<string | null>(null);
+  // Bumped on every profile save. Editing your own profile does not change
+  // your handle, so the self ProfileView below — keyed on that handle —
+  // would otherwise keep rendering the name, bio and photo you just
+  // replaced, on the very screen you pressed Save from.
+  const [myProfileVersion, setMyProfileVersion] = useState(0);
 
   const refreshMyIdentity = useCallback(() => {
     void gateway
@@ -1341,6 +1346,7 @@ function Map({
             key={`self-${myHandle}`}
             gateway={gateway}
             handle={myHandle}
+            refreshToken={myProfileVersion}
             variant="tab"
             onEditProfile={() => setEditingProfile(true)}
             onOpenProfile={openProfile}
@@ -1421,11 +1427,15 @@ function Map({
           }}
           onClose={() => setEditingProfile(false)}
           onSaved={() => {
-            // The People card reads the name from presence; the Profile tab
-            // and its tab-bar avatar read it from myProfile. Refresh both so
-            // the new name and photo show everywhere the moment you're back.
+            // Three separate readers of the same profile, none of which
+            // shares state with the others: the People card reads it from
+            // presence, the tab-bar avatar from myProfile, and the Profile
+            // tab's own ProfileView from user_profile. All three have to be
+            // told, or the new name and photo appear in some places and not
+            // others the moment you're back.
             presence.refreshMe();
             refreshMyIdentity();
+            setMyProfileVersion((v) => v + 1);
           }}
         />
       )}

@@ -541,7 +541,7 @@ function ChatMessageRow({
               {/* Layered over the initials rather than replacing them, the
                   same way Avatar does it — the coloured disc is what shows
                   while this loads, and what stays if it never does. */}
-              {avatarSrc && <img src={avatarSrc} alt="" loading="lazy" decoding="async" />}
+              {avatarSrc && <img src={avatarSrc} alt="" fetchPriority="low" decoding="async" />}
             </>
           )}
         </div>

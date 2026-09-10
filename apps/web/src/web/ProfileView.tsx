@@ -37,6 +37,16 @@ interface ProfileViewProps {
   gateway: SosoGateway;
   /** The handle from the byline that was tapped. */
   handle: string;
+  /**
+   * Bump to force a refetch of a profile whose handle has not changed.
+   *
+   * Needed because the one profile you can EDIT is your own, and editing it
+   * does not change its handle — so neither the `handle` dep below nor the
+   * `key` page.tsx mounts this with would notice, and the header would go on
+   * showing the name, bio and picture you just replaced until you left the
+   * tab and came back. Same mechanism DmInbox uses for the same reason.
+   */
+  refreshToken?: number;
   /** Closes the overlay. Omitted in tab mode, which has no back button. */
   onClose?: () => void;
   /** Open one of their posts full-screen — reuses page.tsx's own post opener. */
@@ -96,6 +106,7 @@ function coverGradient(seed: string): { background: string } {
 export default function ProfileView({
   gateway,
   handle,
+  refreshToken = 0,
   onClose,
   onOpenPost,
   onOpenComments,
@@ -140,7 +151,7 @@ export default function ProfileView({
     return () => {
       alive = false;
     };
-  }, [gateway, handle]);
+  }, [gateway, handle, refreshToken]);
 
   async function toggleFollow() {
     if (!profile || profile.isSelf || followBusy) return;
