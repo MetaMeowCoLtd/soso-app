@@ -11,16 +11,28 @@
  * Those are the parts worth testing directly, and the parts a second client
  * (a native app, see the README) would otherwise re-derive by eye.
  *
- * WHY A CENTRE CROP AND NOT A CROPPER UI
+ * THE CROP MODEL
  * ---------------------------------------------------------------------
- * Every avatar in this app is a circle (see Avatar.tsx), and a circle shows
- * the middle of an image and discards the corners no matter what. A drag-
- * and-pinch cropper is a real piece of UI — gesture handling, a mask, a
- * zoom model — whose entire output for most photos is the same centre square
- * this computes for free. `squareCrop` is deliberately the whole cropper:
- * take the largest centred square that fits. If a photo needs recomposing,
- * the honest answer is to crop it in the photo app that already has those
- * gestures, not to reimplement them here.
+ * This shipped first with `squareCrop` as the entire cropper — take the
+ * largest centred square and be done — on the reasoning that a circular
+ * avatar discards the corners anyway, so most photos would land on the same
+ * result a drag-and-pinch UI would have produced. That reasoning was wrong
+ * in the one case that matters: a photo where the subject is not in the
+ * middle. Then a centre crop is not "near enough", it is the wrong part of
+ * the picture, and there was no way to say so.
+ *
+ * So there is now a real cropper (apps/web/src/web/AvatarCropper.tsx), and
+ * the geometry behind it lives here with everything else that is arithmetic
+ * rather than pixels. `squareCrop` remains as the DEFAULT the cropper opens
+ * on, not as the only option.
+ *
+ * The model is the standard one: a square viewport of `viewport` display
+ * pixels, an image scaled by `scale` and positioned by an `offset` giving
+ * its top-left corner relative to the viewport's. Zooming and panning move
+ * those two numbers; `avatarCropRect` turns them back into a source
+ * rectangle in the original image's own pixels. `clampAvatarOffset` is what
+ * enforces the one invariant the whole thing rests on — the image always
+ * covers the viewport, so the crop can never include blank space.
  *
  * WHY 512 AND WHY NEVER UPSCALE
  * ---------------------------------------------------------------------
@@ -116,6 +128,117 @@ export function squareCrop(width: number, height: number): SquareCrop {
     sy: Math.floor((height - size) / 2),
     size,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The cropper's geometry
+// ---------------------------------------------------------------------------
+
+/**
+ * How far past "just covers the viewport" the cropper may zoom in.
+ *
+ * 4x is enough to crop one face out of a group photo and stop well before
+ * the point where a 512px export is being upscaled from a handful of source
+ * pixels. There is no zoom-OUT past the cover scale, ever: that would put
+ * blank space inside a circle whose whole job is to be filled.
+ */
+export const AVATAR_MAX_ZOOM = 4;
+
+/** Where the scaled image's top-left corner sits, relative to the viewport's. Both are <= 0. */
+export interface AvatarOffset {
+  x: number;
+  y: number;
+}
+
+/**
+ * The smallest scale at which the image still covers the square viewport —
+ * the cropper's zoomed-all-the-way-out position, and its starting scale.
+ *
+ * Keyed off the SHORTER edge, which is what makes it "cover" rather than
+ * "contain": a wide photo scaled so its height fills the viewport overflows
+ * horizontally, and that overflow is exactly the room the person has to pan
+ * through.
+ */
+export function avatarCoverScale(width: number, height: number, viewport: number): number {
+  const shortest = Math.min(width, height);
+  if (shortest <= 0 || viewport <= 0) return 1;
+  return viewport / shortest;
+}
+
+/**
+ * Pulls an offset back inside the range where the image still covers the
+ * viewport, and centres it on whichever axis has no slack.
+ *
+ * This is the invariant everything else depends on: `avatarCropRect` does
+ * no bounds checking of its own, because a clamped offset cannot produce a
+ * rectangle that leaves the image. Call it after every pan, and again after
+ * every zoom — zooming out shrinks the displayed image, which can strand a
+ * previously-legal offset out of bounds.
+ */
+export function clampAvatarOffset(
+  offset: AvatarOffset,
+  width: number,
+  height: number,
+  scale: number,
+  viewport: number,
+): AvatarOffset {
+  const clampAxis = (value: number, displayed: number): number => {
+    // Slack is how far the image can travel before an edge shows. At the
+    // cover scale one axis has exactly zero slack, and rounding can even
+    // make it very slightly negative — hence `min(0, ...)` rather than
+    // trusting the subtraction to be non-positive.
+    const min = Math.min(0, viewport - displayed);
+    if (min === 0) return 0;
+    return Math.min(0, Math.max(min, value));
+  };
+  return {
+    x: clampAxis(offset.x, width * scale),
+    y: clampAxis(offset.y, height * scale),
+  };
+}
+
+/**
+ * The offset that centres the image in the viewport — the cropper's opening
+ * position, and the one that reproduces `squareCrop` exactly at the cover
+ * scale. Starting anywhere else would mean the cropper's default disagreed
+ * with the crop this feature has always produced.
+ */
+export function centredAvatarOffset(
+  width: number,
+  height: number,
+  scale: number,
+  viewport: number,
+): AvatarOffset {
+  return clampAvatarOffset(
+    { x: (viewport - width * scale) / 2, y: (viewport - height * scale) / 2 },
+    width,
+    height,
+    scale,
+    viewport,
+  );
+}
+
+/**
+ * Turns the cropper's on-screen state back into a rectangle in the source
+ * image's own pixels — the four numbers a canvas `drawImage` wants.
+ *
+ * Assumes `offset` came from `clampAvatarOffset`. The final clamps here are
+ * for floating-point dust only (a `sx` of -0.0000001 makes a canvas sample
+ * a transparent column), not a second line of defence against a genuinely
+ * out-of-range offset.
+ */
+export function avatarCropRect(
+  width: number,
+  height: number,
+  scale: number,
+  offset: AvatarOffset,
+  viewport: number,
+): SquareCrop {
+  if (scale <= 0 || viewport <= 0) return { sx: 0, sy: 0, size: 0 };
+  const size = Math.min(viewport / scale, width, height);
+  const sx = Math.min(Math.max(-offset.x / scale, 0), Math.max(0, width - size));
+  const sy = Math.min(Math.max(-offset.y / scale, 0), Math.max(0, height - size));
+  return { sx, sy, size };
 }
 
 /**

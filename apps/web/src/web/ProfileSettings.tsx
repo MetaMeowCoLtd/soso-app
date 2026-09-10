@@ -13,9 +13,17 @@ import {
   type AvatarPath,
   type MyProfile,
   type SosoGateway,
+  type SquareCrop,
 } from "soso-core";
 import { Avatar } from "./Avatar";
-import { AvatarImageError, avatarImageMessage, prepareAvatarImage } from "./avatarImage";
+import AvatarCropper from "./AvatarCropper";
+import {
+  AvatarImageError,
+  avatarImageMessage,
+  decodeAvatarFile,
+  renderAvatarCrop,
+  type DecodedAvatar,
+} from "./avatarImage";
 import { Icon, ICONS } from "./Icon";
 
 /**
@@ -43,14 +51,16 @@ import { Icon, ICONS } from "./Icon";
  * built. Migration 0038 and `SosoGateway.uploadAvatar` built it; the layout
  * here is unchanged, which was the point of shipping the tile early.
  *
- * NOTHING IS STORED UNTIL SAVE. Picking a photo decodes, centre-crops and
- * re-encodes it locally (see avatarImage.ts) and shows the result as a
- * preview; the bytes are uploaded, and the profile pointed at them, only
- * when Save runs. So Cancel leaves nothing behind — no orphaned object in
- * the bucket, no half-changed profile — and a failed name validation cannot
- * strand an uploaded file. The cost is a slightly slower Save on a slow
- * connection, which is the right side of that trade for an action taken
- * once in a while.
+ * Picking a photo opens `AvatarCropper` to position and zoom it (that
+ * screen, not this one, owns the crop); confirming it renders the chosen
+ * square locally and shows it as a preview here.
+ *
+ * NOTHING IS STORED UNTIL SAVE. The bytes are uploaded, and the profile
+ * pointed at them, only when Save runs. So Cancel leaves nothing behind —
+ * no orphaned object in the bucket, no half-changed profile — and a failed
+ * name validation cannot strand an uploaded file. The cost is a slightly
+ * slower Save on a slow connection, which is the right side of that trade
+ * for an action taken once in a while.
  *
  * The previous picture is deleted after the new one is saved, not before:
  * if the save fails, the profile still points at an object that still
@@ -101,6 +111,11 @@ export default function ProfileSettings({
   // Both null in the ordinary case where the photo was not touched.
   const [pending, setPending] = useState<{ blob: Blob; previewUrl: string } | null>(null);
   const [preparing, setPreparing] = useState(false);
+  // The decoded file currently being positioned. Non-null exactly while the
+  // cropper is open; it owns bitmap and object-URL handles, so it is always
+  // released through `closeCropper` rather than dropped.
+  const [cropping, setCropping] = useState<DecodedAvatar | null>(null);
+  const [rendering, setRendering] = useState(false);
   // The values as last saved, so "Save" can be disabled when nothing
   // actually changed — a save button that does nothing is a button that
   // makes you doubt whether it worked.
@@ -166,17 +181,29 @@ export default function ProfileSettings({
   const busy = saving || preparing;
   const canSave = loaded && dirty && nameCheck.ok && bioCheck.ok && !busy;
 
+  function closeCropper() {
+    setCropping(null);
+    setRendering(false);
+  }
+
+  // The ONLY place a decoded image is released, deliberately. It fires when
+  // `cropping` is replaced by another photo, when it is set back to null,
+  // and when the whole screen unmounts — which covers every exit including
+  // the header's Cancel. Releasing at the call sites as well would double
+  // up on all three. Same pattern as `pending` below, and safe under React
+  // Strict Mode's double-invoked mount because `cropping` is null then.
+  useEffect(() => {
+    return () => cropping?.release();
+  }, [cropping]);
+
   async function pickPhoto(file: File | null | undefined) {
     if (!file) return;
     setPreparing(true);
     setError(null);
     try {
-      const blob = await prepareAvatarImage(file);
-      // Supersedes both the stored path and any earlier pick — `pending`
-      // wins over `avatarPath` everywhere it is read, so choosing a photo
-      // after pressing Remove means "use this one" without needing to undo
-      // the removal first.
-      setPending({ blob, previewUrl: URL.createObjectURL(blob) });
+      // Decode only. What part of it becomes the avatar is the next screen's
+      // question, not something decided here on the person's behalf.
+      setCropping(await decodeAvatarFile(file));
     } catch (err) {
       setError(
         err instanceof AvatarImageError
@@ -185,6 +212,31 @@ export default function ProfileSettings({
       );
     } finally {
       setPreparing(false);
+    }
+  }
+
+  async function applyCrop(crop: SquareCrop) {
+    if (!cropping) return;
+    setRendering(true);
+    setError(null);
+    try {
+      const blob = await renderAvatarCrop(cropping, crop);
+      // Supersedes both the stored path and any earlier pick — `pending`
+      // wins over `avatarPath` everywhere it is read, so choosing a photo
+      // after pressing Remove means "use this one" without needing to undo
+      // the removal first.
+      setPending({ blob, previewUrl: URL.createObjectURL(blob) });
+      closeCropper();
+    } catch (err) {
+      setError(
+        err instanceof AvatarImageError
+          ? avatarImageMessage(err.problem)
+          : ERROR_MESSAGES_EN["soso/unknown"],
+      );
+      // Deliberately leaves the cropper open on failure: the person's
+      // framing is still on screen and still valid, so a retry costs a tap
+      // rather than repositioning the photo from scratch.
+      setRendering(false);
     }
   }
 
@@ -316,6 +368,19 @@ export default function ProfileSettings({
               )}
             </div>
           </section>
+
+          {/* Rendered inside the settings screen rather than as a sibling
+              of it, so the surface it covers is the one it belongs to.
+              Cancelling here returns to the form with the profile
+              untouched — the file was decoded, never uploaded. */}
+          {cropping && (
+            <AvatarCropper
+              image={cropping}
+              busy={rendering}
+              onConfirm={(crop) => void applyCrop(crop)}
+              onCancel={closeCropper}
+            />
+          )}
 
           <section className="settings-group" aria-label="Profile">
             <label className="settings-field">

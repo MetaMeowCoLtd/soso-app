@@ -4,9 +4,14 @@ import { describe, it } from 'node:test';
 import {
   AVATAR_MAX_DIMENSION,
   AVATAR_MAX_INPUT_BYTES,
+  AVATAR_MAX_ZOOM,
   AVATAR_OUTPUT_EXTENSION,
+  avatarCoverScale,
+  avatarCropRect,
   avatarObjectPath,
   avatarTargetSize,
+  centredAvatarOffset,
+  clampAvatarOffset,
   isOwnAvatarPath,
   squareCrop,
   validateAvatarFile,
@@ -147,5 +152,131 @@ describe('isOwnAvatarPath', () => {
     assert.equal(isOwnAvatarPath(undefined, 'user-1'), false);
     assert.equal(isOwnAvatarPath('', 'user-1'), false);
     assert.equal(isOwnAvatarPath('user-1/abc.jpg', ''), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The cropper's geometry
+// ---------------------------------------------------------------------------
+
+const VIEWPORT = 300;
+
+describe('avatarCoverScale', () => {
+  it('keys off the shorter edge, so the image covers rather than fits', () => {
+    // 1200x400 landscape: the 400 edge is what has to reach 300.
+    assert.equal(avatarCoverScale(1200, 400, VIEWPORT), 0.75);
+    // 400x1200 portrait: same, by the width this time.
+    assert.equal(avatarCoverScale(400, 1200, VIEWPORT), 0.75);
+  });
+
+  it('scales a small image up to cover — the one place upscaling is allowed', () => {
+    // Display-only. What gets EXPORTED is still capped by avatarTargetSize,
+    // which never upscales; this just stops a 150px image leaving a gap.
+    assert.equal(avatarCoverScale(150, 150, VIEWPORT), 2);
+  });
+
+  it('degrades to 1 rather than dividing by zero', () => {
+    assert.equal(avatarCoverScale(0, 500, VIEWPORT), 1);
+    assert.equal(avatarCoverScale(500, 500, 0), 1);
+  });
+});
+
+describe('clampAvatarOffset', () => {
+  it('pins the axis with no slack to zero', () => {
+    // At the cover scale a 1200x400 image has zero vertical slack.
+    const scale = avatarCoverScale(1200, 400, VIEWPORT);
+    const clamped = clampAvatarOffset({ x: -100, y: -50 }, 1200, 400, scale, VIEWPORT);
+    assert.equal(clamped.y, 0);
+    assert.equal(clamped.x, -100);
+  });
+
+  it('refuses to pan the image off its own edges', () => {
+    const scale = avatarCoverScale(1200, 400, VIEWPORT);
+    const displayedWidth = 1200 * scale; // 900
+    // Dragging far past the right edge stops at the edge, not beyond it.
+    assert.equal(clampAvatarOffset({ x: -5000, y: 0 }, 1200, 400, scale, VIEWPORT).x,
+      VIEWPORT - displayedWidth);
+    // And past the left edge stops at zero.
+    assert.equal(clampAvatarOffset({ x: 900, y: 0 }, 1200, 400, scale, VIEWPORT).x, 0);
+  });
+
+  it('keeps the image covering the viewport across a sweep of zooms and drags', () => {
+    for (const [w, h] of [[1200, 400], [400, 1200], [800, 800], [1000, 999]] as const) {
+      const cover = avatarCoverScale(w, h, VIEWPORT);
+      for (const zoom of [1, 1.3, 2, AVATAR_MAX_ZOOM]) {
+        const scale = cover * zoom;
+        for (const raw of [-9999, -137, -1, 0, 1, 456, 9999]) {
+          const c = clampAvatarOffset({ x: raw, y: raw }, w, h, scale, VIEWPORT);
+          const label = `${w}x${h} zoom ${zoom} raw ${raw}`;
+          // The invariant: the viewport is never allowed past either edge.
+          assert.ok(c.x <= 1e-9, label);
+          assert.ok(c.y <= 1e-9, label);
+          assert.ok(c.x + w * scale >= VIEWPORT - 1e-9, label);
+          assert.ok(c.y + h * scale >= VIEWPORT - 1e-9, label);
+        }
+      }
+    }
+  });
+});
+
+describe('avatarCropRect', () => {
+  it('reproduces squareCrop exactly at the opening position', () => {
+    // The cropper must open on the crop this feature produced before it
+    // existed, or every unedited photo would shift the day it shipped.
+    for (const [w, h] of [[1200, 400], [400, 1200], [800, 800], [1001, 733]] as const) {
+      const scale = avatarCoverScale(w, h, VIEWPORT);
+      const rect = avatarCropRect(w, h, scale, centredAvatarOffset(w, h, scale, VIEWPORT), VIEWPORT);
+      const plain = squareCrop(w, h);
+      assert.equal(Math.round(rect.size), plain.size, `${w}x${h} size`);
+      // Within a pixel: squareCrop floors, this one does not.
+      assert.ok(Math.abs(rect.sx - plain.sx) <= 1, `${w}x${h} sx ${rect.sx} vs ${plain.sx}`);
+      assert.ok(Math.abs(rect.sy - plain.sy) <= 1, `${w}x${h} sy ${rect.sy} vs ${plain.sy}`);
+    }
+  });
+
+  it('takes a smaller source square the further in you zoom', () => {
+    const cover = avatarCoverScale(1200, 400, VIEWPORT);
+    const at = (zoom: number) => {
+      const scale = cover * zoom;
+      return avatarCropRect(1200, 400, scale, centredAvatarOffset(1200, 400, scale, VIEWPORT), VIEWPORT).size;
+    };
+    assert.equal(at(1), 400);
+    assert.equal(at(2), 200);
+    assert.equal(at(AVATAR_MAX_ZOOM), 100);
+  });
+
+  it('selects the left band when panned fully right, and vice versa', () => {
+    // This is the whole point of the cropper: a subject that is not in the
+    // middle can be chosen. Panning the image right reveals its left edge.
+    const scale = avatarCoverScale(1200, 400, VIEWPORT);
+    const left = avatarCropRect(1200, 400, scale, clampAvatarOffset({ x: 9999, y: 0 }, 1200, 400, scale, VIEWPORT), VIEWPORT);
+    assert.equal(left.sx, 0);
+
+    const right = avatarCropRect(1200, 400, scale, clampAvatarOffset({ x: -9999, y: 0 }, 1200, 400, scale, VIEWPORT), VIEWPORT);
+    assert.equal(right.sx + right.size, 1200);
+  });
+
+  it('never leaves the source image, across a sweep of zooms and drags', () => {
+    for (const [w, h] of [[1200, 400], [400, 1200], [800, 800], [1000, 999], [37, 41]] as const) {
+      const cover = avatarCoverScale(w, h, VIEWPORT);
+      for (const zoom of [1, 1.7, 2.5, AVATAR_MAX_ZOOM]) {
+        const scale = cover * zoom;
+        for (const raw of [-9999, -137, 0, 456, 9999]) {
+          const offset = clampAvatarOffset({ x: raw, y: raw * -1 }, w, h, scale, VIEWPORT);
+          const r = avatarCropRect(w, h, scale, offset, VIEWPORT);
+          const label = `${w}x${h} zoom ${zoom} raw ${raw}`;
+          assert.ok(r.sx >= 0, label);
+          assert.ok(r.sy >= 0, label);
+          assert.ok(r.size > 0, label);
+          assert.ok(r.sx + r.size <= w + 1e-9, `${label} right edge`);
+          assert.ok(r.sy + r.size <= h + 1e-9, `${label} bottom edge`);
+        }
+      }
+    }
+  });
+
+  it('degrades to an empty rect rather than dividing by zero', () => {
+    assert.deepEqual(avatarCropRect(800, 800, 0, { x: 0, y: 0 }, VIEWPORT), { sx: 0, sy: 0, size: 0 });
+    assert.deepEqual(avatarCropRect(800, 800, 1, { x: 0, y: 0 }, 0), { sx: 0, sy: 0, size: 0 });
   });
 });

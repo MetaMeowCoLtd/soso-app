@@ -326,15 +326,36 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
 
     async uploadAvatar(image: Blob): Promise<string> {
       // The path's first segment is the storage policy's authorization
-      // check, so this needs the caller's own id and cannot be built from
-      // anything the caller passed in. `getUser()` rather than
-      // `getSession()`: the id is about to be baked into a path the bucket
-      // will verify against the JWT it sees, so it should come from the same
-      // place that JWT does.
-      const { data: userData, error: userError } = await client.auth.getUser();
-      if (userError || !userData?.user) throw new SosoError('soso/unauthenticated');
+      // check, so this needs the caller's own id.
+      //
+      // `getSession()`, NEVER `getUser()`. That is not a style preference,
+      // it is the fix for a bug that signed people out for saving their
+      // profile, and it is why `currentUserId()` in
+      // apps/web/src/web/supabase.ts uses the same call:
+      //
+      //   * `getSession()` reads the session this browser already holds —
+      //     no network call, no server-side validation.
+      //   * `getUser()` performs a GET against GoTrue's `/user`, which
+      //     checks that the token's `session_id` still names a live row in
+      //     `auth.sessions`. When it does not, auth-js raises
+      //     `AuthSessionMissingError` and calls `_removeSession()`, wiping
+      //     the stored session and emitting `SIGNED_OUT`. page.tsx listens
+      //     for exactly that (`onAuthChange` -> `refreshAccount`) and
+      //     re-renders the sign-in wall.
+      //
+      // The two disagree far more often than it looks, because PostgREST
+      // and Edge Functions validate only the JWT's signature and expiry —
+      // they never consult `auth.sessions`. An account whose session row
+      // was deleted (precisely what `revoke_other_sessions` did to its own
+      // caller before migration 0037 fixed it) therefore keeps working
+      // everywhere in this app, while `getUser()` alone reports it signed
+      // out. Uploading an avatar must not be the one call that goes looking
+      // for that.
+      const { data: sessionData } = await client.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) throw new SosoError('soso/unauthenticated');
 
-      const path = avatarObjectPath(userData.user.id, randomAvatarToken());
+      const path = avatarObjectPath(userId, randomAvatarToken());
 
       const { error } = await client.storage.from(AVATAR_BUCKET).upload(path, image, {
         contentType: AVATAR_OUTPUT_MIME,

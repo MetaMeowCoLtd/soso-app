@@ -1011,6 +1011,36 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .settings-avatar-remove:disabled { opacity:.5; cursor:default; }
 .settings-avatar-actions { display:flex; align-items:center; gap:10px; }
 
+/* ------------------------------------------------ avatar cropper --- */
+/* Above .settings-screen's own z-index:20 — it covers the form it was
+   opened from, the same way the settings screen covers the map. */
+.cropper { position:fixed; z-index:30; inset:0; display:grid; place-items:center; padding:20px; background:rgba(16,28,24,.62); backdrop-filter:blur(3px); }
+.cropper-panel { display:flex; flex-direction:column; align-items:center; gap:12px; width:100%; max-width:380px; padding:20px 18px 18px; border-radius:22px; background:#fff; box-shadow:0 20px 60px rgba(0,0,0,.32); }
+.cropper-title { margin:0; font-size:1rem; font-weight:800; }
+.cropper-hint { margin:-6px 0 0; color:var(--muted); font-size:.76rem; text-align:center; }
+/* Square by construction. The viewport's measured width is the unit every
+   crop calculation is expressed in, so it must not depend on its contents. */
+.cropper-viewport { position:relative; width:min(76vw,320px); aspect-ratio:1; overflow:hidden; border-radius:14px; background:#101c18; touch-action:none; cursor:grab; user-select:none; }
+.cropper-viewport:active { cursor:grabbing; }
+/* transform-origin matters: the offset is the image's top-left corner
+   relative to the viewport's, which is only true if it scales from there.
+   image-orientation is stated rather than left to the default because the
+   export path asks createImageBitmap for EXIF orientation explicitly, and
+   the two must agree or the crop lands somewhere other than it looked. */
+.cropper-image { position:absolute; top:0; left:0; transform-origin:0 0; image-orientation:from-image; max-width:none; -webkit-user-drag:none; }
+/* The circle, as a ring of shadow rather than a real hole — no clip-path
+   support needed, and it dims the discarded corners instead of hiding
+   them, so you can still see what you are cutting off. */
+.cropper-mask { position:absolute; inset:0; border-radius:50%; box-shadow:0 0 0 9999px rgba(16,28,24,.55); pointer-events:none; }
+.cropper-zoom { display:flex; align-items:center; gap:10px; width:min(76vw,320px); }
+.cropper-zoom-label { color:var(--muted); font-size:.72rem; font-weight:750; }
+.cropper-zoom input { flex:1; accent-color:var(--teal); }
+.cropper-actions { display:flex; gap:10px; width:min(76vw,320px); }
+.cropper-actions button { flex:1; border:0; border-radius:999px; padding:11px 14px; font-size:.86rem; font-weight:800; cursor:pointer; }
+.cropper-cancel { background:#eef2f0; color:var(--deep); }
+.cropper-confirm { background:var(--teal); color:#fff; }
+.cropper-actions button:disabled { opacity:.6; cursor:default; }
+
 .settings-group { display:flex; flex-direction:column; gap:2px; padding:6px; border-radius:18px; background:#fff; box-shadow:var(--e1); }
 .settings-field { display:flex; flex-direction:column; gap:6px; padding:12px 12px 13px; }
 .settings-field + .settings-field { border-top:1px solid var(--hairline); }

@@ -1361,12 +1361,13 @@ stay in sync, as with `CELL_ZOOM`.
 
 ## Profile pictures
 
-Anyone can set a profile picture from **Edit profile**. It appears wherever
-that person does — the friends list, the DM inbox, chat bubbles, feed
-bylines, follower lists, their profile header, and the Profile tab's own
-icon in the tab bar. Most people have no picture, and that stays a
-first-class state: `Avatar` falls back to the hash-coloured initial it has
-always drawn, which is why a list with no photos in it is still scannable.
+Anyone can set a profile picture from **Edit profile**: pick a photo,
+position and zoom it in the cropper, save. It appears wherever that person
+does — the friends list, the DM inbox, chat bubbles, feed bylines, follower
+lists, their profile header, and the Profile tab's own icon in the tab bar.
+Most people have no picture, and that stays a first-class state: `Avatar`
+falls back to the hash-coloured initial it has always drawn, which is why a
+list with no photos in it is still scannable.
 
 **Status: implemented, storage layer not verified against a real bucket.**
 Everything that can be exercised locally has been — the crop and resize
@@ -1430,13 +1431,32 @@ picture has on every other social product. Writes are not public.
   whole, with one key added and nothing else changed, the same mechanic
   migration 0033 used to add `bio`. `soso.pin` deliberately gains nothing: a
   map marker renders as a category glyph, never as a face.
-- **The client re-encodes before uploading.** `prepareAvatarImage`
-  (`apps/web/src/web/avatarImage.ts`) centre-crops to a square, downscales
-  to at most 512px, and re-encodes as JPEG at quality 0.82 — a 4032px phone
-  photo becomes roughly 40 KB. The rules themselves (allowed types, the size
-  ceiling, the crop rectangle, the target size, the path shape) live in
-  `packages/core/src/domain/avatar.ts` and are unit-tested there; only the
-  canvas work is in the web app.
+- **The person chooses the crop.** Picking a photo opens `AvatarCropper`
+  (`apps/web/src/web/AvatarCropper.tsx`): drag to pan, pinch, scroll or drag
+  the slider to zoom, inside a circular mask that dims the corners rather
+  than hiding them, so you can see what is being cut off. Wheel and pinch
+  zoom about the pointer, not the centre, so detail stays under your
+  fingers.
+
+  This did not ship first time round. The original argued that a circular
+  avatar discards the corners anyway, so a centre crop would land where a
+  cropper would have — true until the subject is not in the middle of the
+  frame, at which point a centre crop is not an approximation of the right
+  answer but the wrong part of the photo, with no recourse. The cropper now
+  *opens* on the centre crop (`squareCrop`), so a photo nobody adjusts is
+  cropped exactly as it always was; there is a test asserting that
+  equivalence.
+
+  The geometry — cover scale, offset clamping, the source rectangle — lives
+  in `packages/core/src/domain/avatar.ts` with the rest of the arithmetic
+  and is unit-tested there, including a sweep asserting the image always
+  covers the viewport and the crop never leaves the source. Only pointer
+  handling and the canvas are in the web app.
+- **The client re-encodes before uploading.** `renderAvatarCrop` samples the
+  chosen rectangle, downscales to at most 512px, and re-encodes as JPEG at
+  quality 0.82 — a 4032px phone photo becomes roughly 40 KB. It never
+  upscales, so zooming deep into a small source honestly yields a smaller
+  square rather than a blurry 512px one.
 - **A side effect worth knowing about:** re-encoding through a canvas drops
   every EXIF tag, including the GPS coordinates a phone writes into a photo.
   On an app about location, publishing where someone took their profile
@@ -1449,6 +1469,24 @@ picture has on every other social product. Writes are not public.
   uploaded file. The previous object is deleted after the new one is saved,
   never before, so a failed save leaves the profile pointing at something
   that still exists.
+- **The upload reads the caller's id with `getSession()`, never
+  `getUser()`** — and this is load-bearing, not stylistic. `getUser()` makes
+  a network call to GoTrue's `/user`, which checks that the token's
+  `session_id` still names a live row in `auth.sessions`; when it does not,
+  auth-js treats that as `AuthSessionMissingError` and *clears the stored
+  session*, emitting `SIGNED_OUT`. `page.tsx` listens for that and
+  re-renders the sign-in wall.
+
+  The trap is that PostgREST and Edge Functions validate only the JWT's
+  signature and expiry — they never consult `auth.sessions` — so an account
+  whose session row is gone (exactly what `revoke_other_sessions` did to its
+  own caller before [migration 0037](#phone-authentication) fixed it) works
+  perfectly everywhere in this app while `getUser()` alone calls it signed
+  out. The first release of this feature used `getUser()` here, and the
+  symptom was that saving your profile logged you out and discarded the
+  photo. `currentUserId()` in `apps/web/src/web/supabase.ts` uses
+  `getSession()` for related reasons; there is now no `getUser()` call
+  anywhere in the codebase, and new code should not add one.
 - **A new random filename per upload**, rather than overwriting a
   per-user key. Changing your picture produces a URL nothing has cached, so
   the new one appears immediately instead of after whatever lifetime the CDN
@@ -1502,8 +1540,9 @@ real project. Specifically unverified:
   its source and differing only by the added key, but not executed, the same
   as every migration since 0025.
 
-Verified locally: the domain rules under `node --test`, and the complete
-pick → crop → preview → save → reload → remove cycle in demo mode,
+Verified locally: the domain rules under `node --test` (including the
+cropper geometry), and the complete pick → position → crop → preview →
+save → reload → remove cycle in demo mode,
 including that a rejected file (SVG, PDF, over 12 MB) reports the right
 message, that Cancel stores nothing, and that removing a picture deletes the
 now-unreferenced object.
