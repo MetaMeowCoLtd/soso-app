@@ -112,6 +112,15 @@ interface WireCategoryRow {
  */
 async function toEdgeFunctionError(error: unknown): Promise<SosoError> {
   if (error instanceof FunctionsHttpError) {
+    // A function that was never deployed answers 404 from Supabase's own
+    // router, with a body this app did not write and no `error` field to
+    // read — so it used to fall all the way through to `soso/unknown`,
+    // i.e. "Something went wrong. Try again," which is the least useful
+    // thing to say about a feature that is simply not installed. Every
+    // Edge Function here needs a manual `supabase functions deploy`, so
+    // this is the FIRST failure any of them will produce, and it deserves
+    // to name itself.
+    if (error.context?.status === 404) return new SosoError('soso/function_missing', error);
     try {
       const body = (await error.context.json()) as { error?: unknown };
       if (typeof body.error === 'string') return toSosoError({ message: body.error });
