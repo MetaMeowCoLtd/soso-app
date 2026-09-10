@@ -431,6 +431,27 @@ export interface FollowResult {
  * forward-compatible: when `user_profile` starts emitting a `badges` array,
  * this decodes it with no further client change. Until then the array is
  * empty for real accounts.
+ *
+ * BADGES ARE OWNER-ONLY. A badge names a DISTRICT, and a profile is
+ * readable by anyone — including `anon`. "50 pins in Shibuya" on a public
+ * profile says roughly where someone spends their time, which is exactly
+ * the leak migration 0039 closed by taking pinned posts out of the
+ * profile's post list. Showing badges to other people would reopen it
+ * through a different door — at coarser resolution, but with a permanence a
+ * post list never had, since a badge does not expire.
+ *
+ * So they are yours to see, nobody else's. That is enforced in two places
+ * today and must be enforced in a third:
+ *
+ *   1. `decodeUserProfile` returns [] for any profile where `isSelf` is
+ *      false, whatever the server sent.
+ *   2. `ProfileView` renders the badges section only on your own profile.
+ *   3. NOT YET, BECAUSE THERE IS NOTHING TO GATE: `user_profile` currently
+ *      returns no `badges` key at all, so there is no server-side rule to
+ *      write. WHOEVER BUILDS THE AWARD ENGINE MUST ADD ONE — badges belong
+ *      inside the same `is_self` test the RPC already computes, never
+ *      alongside the public fields. Points 1 and 2 protect this client;
+ *      they do nothing about a direct call to the RPC.
  */
 export interface Badge {
   id: string;
@@ -461,6 +482,10 @@ export interface UserProfile {
   isFollowing: boolean;
   /** Both follow each other — unlocks Message and presence. */
   isMutual: boolean;
+  /**
+   * Owner-only: always empty unless `isSelf`. See `Badge` for why, and
+   * `decodeUserProfile` for where that is enforced.
+   */
   badges: Badge[];
 }
 
@@ -487,6 +512,15 @@ export interface WireUserProfile {
 }
 
 export function decodeUserProfile(w: WireUserProfile): UserProfile {
+  // `=== true`, not `Boolean(...)`, and this one genuinely matters: it gates
+  // the owner-only badge list below, and `Boolean("false")` is TRUE — a
+  // non-empty string is truthy — so a payload that had been stringified
+  // anywhere along the way would hand someone else's badges straight to the
+  // renderer. A strict check also fails in the safe direction for every
+  // other consumer: a malformed `is_self` makes the screen treat the
+  // profile as somebody else's (Follow instead of Edit profile), which is
+  // wrong but harmless, where the opposite is neither.
+  const isSelf = w.is_self === true;
   return {
     id: w.id,
     handle: w.handle,
@@ -496,16 +530,31 @@ export function decodeUserProfile(w: WireUserProfile): UserProfile {
     pins: Number(w.pins) || 0,
     followers: Number(w.followers) || 0,
     following: Number(w.following) || 0,
-    isSelf: Boolean(w.is_self),
+    isSelf,
     isFollowing: Boolean(w.is_following),
     isMutual: Boolean(w.is_mutual),
-    badges: (w.badges ?? []).map((b) => ({
-      id: b.id,
-      district: b.district,
-      tier: b.tier,
-      label: b.label,
-      earnedAt: b.earned_at,
-    })),
+    // Owner-only, enforced HERE rather than only where it is rendered.
+    //
+    // A badge names a district, so a list of them says roughly where
+    // someone spends their time — the same thing migration 0039 took out of
+    // the profile's post list. Dropping them at the decode boundary means a
+    // server that ever starts emitting them for everyone (the award engine
+    // does not exist yet, so `w.badges` is absent today) cannot leak them
+    // through this client, no matter which screen does the rendering or
+    // which screen someone adds next.
+    //
+    // This is a second line, not the only one: it protects THIS client, not
+    // the RPC. `user_profile` must apply the same rule server-side before it
+    // ever returns a non-empty array — see the note on `Badge`.
+    badges: isSelf
+      ? (w.badges ?? []).map((b) => ({
+          id: b.id,
+          district: b.district,
+          tier: b.tier,
+          label: b.label,
+          earnedAt: b.earned_at,
+        }))
+      : [],
   };
 }
 

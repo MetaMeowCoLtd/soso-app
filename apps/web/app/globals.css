@@ -1184,6 +1184,10 @@ button.profile-view-stat:active { transform:scale(.97); filter:brightness(.97); 
    continuous stream here too, not as inset strips floating on grey. */
 .profile-view-posts { margin-top:16px; padding:0; background:#fff; border-top:1px solid var(--hairline); }
 .profile-view-posts .profile-view-section-title { padding:18px 16px 4px; }
+/* Sits directly under the Posts heading, which already carries the section's
+   own padding — hence the matching inline padding and the negative top pull
+   against that heading's 13px bottom margin. */
+.profile-view-section-note { margin:-11px 0 12px; padding:0 16px; color:var(--muted); font-size:.76rem; line-height:1.4; }
 /* Sentence-case with an accent, not an all-caps ledger label. */
 .profile-view-section-title { display:flex; align-items:center; gap:7px; margin:0 0 13px; color:var(--deep); font-size:1rem; font-weight:900; letter-spacing:-.02em; }
 .profile-view-section-title .icon { color:var(--hot); }

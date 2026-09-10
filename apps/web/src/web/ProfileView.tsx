@@ -315,7 +315,21 @@ export default function ProfileView({
             )}
           </section>
 
-          {/* Badges — the reserved place for district-contribution awards. */}
+          {/* Badges — the reserved place for district-contribution awards,
+              and YOURS ALONE. A badge names a district, so a list of them
+              says roughly where someone spends their time; showing them on
+              other people's profiles would reopen exactly what migration
+              0039 closed by taking pinned posts out of the list below.
+
+              The section is omitted entirely for other people rather than
+              rendered empty: an empty "District badges" heading on someone
+              else's profile invites the reading "they have none", which is
+              a claim about them this screen has no business making.
+
+              `decodeUserProfile` already empties the array for a profile
+              that is not yours, so this is the second of the two client-side
+              guards, not the only one. See `Badge` in soso-core. */}
+          {profile.isSelf && (
           <section className="profile-view-badges" aria-label="Badges">
             <h2 className="profile-view-section-title">
               <Icon src={ICONS.star} size={15} /> District badges
@@ -340,9 +354,19 @@ export default function ProfileView({
               </p>
             )}
           </section>
+          )}
 
           <section className="profile-view-posts" aria-label="Posts">
             <h2 className="profile-view-section-title">Posts</h2>
+            {/* Stated rather than left to be inferred. Since migration 0039
+                this list is location-less posts only, so someone with forty
+                pins and no thoughts sees an empty section under a stat that
+                says "40 pins" — which reads as a broken page unless the rule
+                is written down. Saying it leaks nothing the pin count above
+                does not already say: that they post, never where. */}
+            <p className="profile-view-section-note">
+              Posts pinned to a place aren&rsquo;t listed on profiles.
+            </p>
             {posts.length === 0 ? (
               <p className="profile-view-badge-empty">No posts you can see yet.</p>
             ) : (

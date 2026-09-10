@@ -1502,7 +1502,20 @@ export function createDemoGateway(): SosoGateway {
           isSelf: true,
           isFollowing: false,
           isMutual: false,
-          badges: [],
+          // On the SELF profile, because badges are owner-only (see `Badge`
+          // in soso-core) and this is now the only profile that can render
+          // them — a sample on the neighbour's, where it used to live, would
+          // demonstrate a screen that no longer exists. Real accounts get []
+          // until the award engine exists.
+          badges: [
+            {
+              id: "demo-badge-1",
+              district: "Shibuya",
+              tier: "silver" as const,
+              label: "25 pins in Shibuya",
+              earnedAt: new Date().toISOString(),
+            },
+          ],
         };
       }
       return {
@@ -1519,17 +1532,13 @@ export function createDemoGateway(): SosoGateway {
         isSelf: false,
         isFollowing: false,
         isMutual: false,
-        // One sample badge so the section renders with content in demo. Real
-        // accounts get [] until the award engine exists (see migration 0034).
-        badges: [
-          {
-            id: "demo-badge-1",
-            district: "Shibuya",
-            tier: "silver" as const,
-            label: "25 pins in Shibuya",
-            earnedAt: new Date().toISOString(),
-          },
-        ],
+        // Empty, and it would be emptied anyway: `decodeUserProfile` drops
+        // badges for any profile that is not yours. Demo mode goes through
+        // its own path rather than that decoder, so it has to hold the same
+        // rule by hand — the point of demo mode is to behave like the real
+        // thing, and a badge here would misrepresent what the real thing
+        // does.
+        badges: [],
       };
     },
 
@@ -1541,6 +1550,12 @@ export function createDemoGateway(): SosoGateway {
         .filter(
           (p) =>
             p.authorId === userId &&
+            // Location-less only, matching list_user_posts since migration
+            // 0039: a profile that listed someone's pins would be a map of
+            // where they have been. Same `cellId === null` predicate
+            // listFeedPosts uses above, for the same reason — absence of a
+            // cell is what makes a post location-less, not its category.
+            p.cellId === null &&
             p.status === "live" &&
             p.expiresAt > now &&
             (cursor === null || p.createdAt < cursor),

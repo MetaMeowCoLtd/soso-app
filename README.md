@@ -1055,6 +1055,70 @@ decoupled entirely from the map into its own Feed tab. The category is
 check, no zone-based audience inheritance, reachable only through the Feed
 tab's own "+" composer.
 
+### Profiles list only these
+
+A profile page shows a person's location-less posts and nothing else
+(migration 0039). It used to list every live post they had written,
+including pinned ones, which was never a decision anyone made:
+`list_user_posts` (migration 0034) reused `list_feed_posts`' body minus the
+one predicate that makes the global feed location-less. The effect was that
+forty pins in one scrollable column turned a profile into a travel diary —
+which shops, which station, roughly which neighbourhood — visible to anyone
+who could open the profile.
+
+The filter is `cell_id is null`, the same predicate the global feed uses
+and for the reason migration 0023 gives: absence of a cell is what makes a
+post location-less, so a future location-less category is covered with no
+code change, and the two listings can never disagree about what the word
+means.
+
+Two things this deliberately does **not** change:
+
+- **It is not an access-control fix.** Nothing about who can see a post
+  moved; `soso.can_see_post` still gates every row. A pin is still visible
+  on the map, in its own audience, to whoever could already see it. This
+  narrows one listing surface, and someone determined to correlate a
+  person's pins can still do it from the map.
+- **The pin count on the profile still counts pinned posts.** A count says
+  how much someone has contributed, not where they were, and contribution
+  is the number this app's profile is built around. The location was never
+  in the number.
+
+The profile states the rule in a line under the Posts heading, because
+otherwise someone with forty pins and no thoughts sees an empty section
+beneath a stat reading "40 pins" and reasonably concludes the page is
+broken.
+
+### District badges are owner-only
+
+Same concern, different door. A badge names a district — "25 pins in
+Shibuya" — so a list of them says roughly where someone spends their time,
+with a permanence a post list never had, because a badge does not expire.
+They are therefore visible only on your own profile.
+
+The award engine does not exist yet (`user_profile` returns no `badges` key
+at all, so real accounts decode to an empty array), which means there is
+nothing leaking today — this is the rule being fixed in place *before* there
+is something to leak. It is enforced in two places, and needs a third:
+
+1. `decodeUserProfile` returns `[]` for any profile where `isSelf` is false,
+   whatever the server sent. Covered by `packages/core/test/user-profile.test.ts`,
+   including the failing-closed cases where `is_self` is absent or arrives
+   as a truthy-looking non-`true` value.
+2. `ProfileView` renders the badges section only on your own profile —
+   omitted entirely for other people, not rendered empty, since an empty
+   "District badges" heading on someone else's page invites the reading
+   "they have none", which is a claim about them the screen has no business
+   making.
+3. **Not yet, because there is nothing to gate.** Whoever builds the award
+   engine must put badges inside the `is_self` test `user_profile` already
+   computes. Points 1 and 2 protect this client; neither does anything about
+   a direct call to the RPC.
+
+Demo mode seeds its one sample badge on the *self* profile for this reason.
+It used to sit on the neighbour's, which under this rule would demonstrate a
+screen that no longer exists.
+
 **This category didn't always have this name.** "update" played this exact
 role first (migration 0023), until migration 0027 gave "update" a real map
 pin instead — someone choosing "Update" in the MAP composer had been
