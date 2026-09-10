@@ -1378,6 +1378,25 @@ its policies, and performing an actual upload. That carries the same
 caveat as `board-tile-urls` and `notify-new-pin`; the full list is under
 "Not verified end-to-end" at the end of this section.
 
+### Viewing one full size
+
+Tapping the avatar on a profile opens it full screen, with the person's name
+and handle underneath; the backdrop, a close button and Escape all dismiss
+it, and focus returns to the avatar it was opened from.
+
+Two deliberate limits. It is offered **only when there is a photo** — a
+hash-coloured initial has no larger version, so the ring is not rendered as
+a button at all rather than rendered and inert. And it is offered **only on
+the profile header**, not on every avatar in the app: everywhere else the
+avatar is a label for a person, and tapping it already opens their profile,
+which is the more useful destination and the route to the photo anyway. An
+avatar in a chat bubble or a follower row that swallowed the tap to show a
+picture instead would be trading navigation for a lightbox.
+
+The viewer shows the stored **square**, not the circle. The circle is a crop
+applied at display time; the square is what the person actually framed in
+the cropper, so this is the one place its corners are visible.
+
 ### Why Supabase Storage and not an `avatar-url` Edge Function
 
 The app already has a presigned-URL pattern for binary data:

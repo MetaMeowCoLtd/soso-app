@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { type PostDetail, type SosoGateway, type UserProfile } from "soso-core";
 import { Avatar } from "./Avatar";
+import AvatarViewer from "./AvatarViewer";
 import { FeedCard } from "./FeedTab";
 import { Icon, ICONS } from "./Icon";
 
@@ -122,8 +123,12 @@ export default function ProfileView({
   const [posts, setPosts] = useState<PostDetail[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const [viewingPhoto, setViewingPhoto] = useState(false);
   const nowSeconds = Math.floor(Date.now() / 1000);
   const coverStyle = profile ? coverGradient(profile.handle) : undefined;
+  // Resolved once: it decides both whether the header avatar is tappable
+  // and what the viewer shows, so the two cannot disagree.
+  const avatarSrc = profile ? gateway.avatarUrl(profile.avatarPath) : null;
 
   useEffect(() => {
     let alive = true;
@@ -218,14 +223,32 @@ export default function ProfileView({
           <div className="profile-view-cover" style={coverStyle} aria-hidden="true" />
 
           <section className="profile-view-head">
-            <div className="profile-view-avatar-ring">
-              <Avatar
-                name={profile.displayName}
-                seed={profile.handle}
-                src={gateway.avatarUrl(profile.avatarPath)}
-                size={96}
-              />
-            </div>
+            {/* Tappable ONLY when there is a photo to enlarge. A
+                hash-coloured initial has no larger version — making it look
+                pressable would promise a screen that turns out to be the
+                same disc, bigger. So the button is not rendered at all in
+                that case, rather than rendered and disabled: there is
+                nothing here to be unavailable, the person simply has no
+                picture. */}
+            {avatarSrc ? (
+              <button
+                type="button"
+                className="profile-view-avatar-ring profile-view-avatar-button"
+                onClick={() => setViewingPhoto(true)}
+                aria-label={`View ${profile.displayName}'s profile photo`}
+              >
+                <Avatar
+                  name={profile.displayName}
+                  seed={profile.handle}
+                  src={avatarSrc}
+                  size={96}
+                />
+              </button>
+            ) : (
+              <div className="profile-view-avatar-ring">
+                <Avatar name={profile.displayName} seed={profile.handle} src={null} size={96} />
+              </div>
+            )}
             <h1 className="profile-view-name">{profile.displayName}</h1>
             <span className="profile-view-handle">@{profile.handle}</span>
             {profile.bio && <p className="profile-view-bio">{profile.bio}</p>}
@@ -346,6 +369,19 @@ export default function ProfileView({
             )}
           </section>
         </div>
+      )}
+
+      {/* Rendered last so it sits above the header it was opened from, and
+          only while there is a photo — `avatarSrc` going null underneath it
+          (the profile refetching after an edit that removed the picture)
+          closes it rather than leaving an empty frame. */}
+      {viewingPhoto && avatarSrc && profile && (
+        <AvatarViewer
+          src={avatarSrc}
+          name={profile.displayName}
+          handle={profile.handle}
+          onClose={() => setViewingPhoto(false)}
+        />
       )}
     </div>
   );
