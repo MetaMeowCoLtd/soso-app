@@ -146,7 +146,7 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/forbidden': "You don't have access to that board.",
   'soso/bad_request': 'That request was malformed. Try again.',
   'soso/internal_error': 'Something went wrong on the server. Try again.',
-  'soso/r2_not_configured': 'Drawing boards are not fully set up on this server yet.',
+  'soso/r2_not_configured': 'Image storage is not set up on this server yet.',
   'soso/reply_too_long': "That reply is too long — keep it under 500 characters.",
   'soso/message_not_found': "That message isn't there any more.",
   'soso/invalid_reaction': "That reaction didn't go through — try again.",

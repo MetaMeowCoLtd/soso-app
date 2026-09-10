@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MessageImage, SosoGateway } from "soso-core";
+import { ERROR_MESSAGES_EN, type MessageImage, type SosoGateway } from "soso-core";
 import { MessageImageError, messageImageMessage, prepareMessageImage } from "./messageImage";
 
 /**
@@ -114,10 +114,33 @@ export function useImageAttachment(
           setImage({ path, width: prepared.width, height: prepared.height });
         } catch (err) {
           if (seq !== pickSeq.current) return;
+          // The user-facing copy stays short, but the DEVELOPER needs the
+          // real cause: this branch is reached by anything that is not one
+          // of `messageImage.ts`'s own validation errors — a canvas
+          // `drawImage` refusing an image the browser decoded but cannot
+          // draw, a failed presign, a rejected PUT — and they are not
+          // distinguishable on screen. iOS in particular hands over files
+          // this code cannot reproduce on a desktop, so the file's own
+          // reported type and size go in the log too; they are the first
+          // thing worth knowing and the app never otherwise reveals them.
+          console.warn("[soso] image attach failed:", {
+            name: file.name,
+            type: file.type || "(empty)",
+            size: file.size,
+            error: err,
+          });
+          // A SosoError carries a code the app already has honest wording
+          // for, and collapsing it into "try again" was actively harmful:
+          // `soso/r2_not_configured` means the bucket or the Edge Function
+          // is not set up, which no amount of trying again will fix, and
+          // the one message that could have said so was being discarded.
+          const code = (err as { code?: string }).code;
           setError(
             err instanceof MessageImageError
               ? messageImageMessage(err.problem)
-              : "Couldn't attach that image. Try again.",
+              : code && code in ERROR_MESSAGES_EN
+                ? ERROR_MESSAGES_EN[code as keyof typeof ERROR_MESSAGES_EN]
+                : "Couldn't attach that image. Try again.",
           );
           releasePreview();
           setPreviewUrl(null);
