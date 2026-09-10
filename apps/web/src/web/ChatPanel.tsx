@@ -6,13 +6,14 @@ import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
+  type MessageImage,
   type ChatMessage,
   type DmThread,
   type SosoGateway,
 } from "soso-core";
 import DmInbox from "./DmInbox";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
-import { MessageImageLightbox, MessageImageView } from "./MessageImageView";
+import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./MessageImageView";
 import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
@@ -147,7 +148,7 @@ export default function ChatPanel({
   // The URL of the image currently open full-screen, or null. Holds the URL
   // rather than the path because the thumbnail that opened it already had
   // one minted — see MessageImageLightbox.
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; image: MessageImage } | null>(null);
 
   async function reload() {
     try {
@@ -372,7 +373,7 @@ export default function ChatPanel({
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onSwipeReply={() => startReply(message)}
-                onOpenImage={setLightbox}
+                onOpenImage={(url, image) => setLightbox({ url, image })}
               />
             </Fragment>
           );
@@ -483,7 +484,13 @@ export default function ChatPanel({
         </button>
       </form>
 
-      {lightbox && <MessageImageLightbox url={lightbox} onClose={() => setLightbox(null)} />}
+      {lightbox && (
+        <MessageImageLightbox
+          url={lightbox.url}
+          onSave={() => saveMessageImage(gateway, lightbox.image)}
+          onClose={() => setLightbox(null)}
+        />
+      )}
 
       {/*
         Portalled to <body> rather than rendered here. .chat-tab is
@@ -511,6 +518,15 @@ export default function ChatPanel({
             onReact={(emoji) => void react(menu.message, emoji)}
             onReply={() => startReply(menu.message)}
             onCopy={() => void copy(menu.message)}
+            onSave={
+              menu.message.image
+                ? () => {
+                    const image = menu.message.image!;
+                    setMenu(null);
+                    void saveMessageImage(gateway, image);
+                  }
+                : undefined
+            }
             primaryAction={
               menu.message.mine
                 ? { label: "Delete", icon: ICONS.trash, onClick: () => void remove(menu.message.id) }
@@ -547,7 +563,7 @@ function ChatMessageRow({
   onOpenMenu: (rect: DOMRect) => void;
   onToggleReaction: (emoji: string) => void;
   onSwipeReply: () => void;
-  onOpenImage: (url: string) => void;
+  onOpenImage: (url: string, image: MessageImage) => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // What actually moves during a drag — see the JSX below for why this is

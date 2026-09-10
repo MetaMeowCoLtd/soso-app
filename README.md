@@ -1353,6 +1353,23 @@ per-component fetching would mean a round trip every time one scrolled back
 into view. Stored dimensions size the box before the bytes arrive, so a
 decoding image never shoves the conversation around.
 
+**Saving an image** is offered in two places — a button in the full-screen
+viewer, and "Save photo" in the long-press sheet (absent on a message with
+no image). Both go through `saveMessageImage`, which fetches the bytes into
+a blob first rather than pointing an `<a download>` at the presigned URL:
+the `download` attribute is **ignored for cross-origin URLs**, and every one
+of these is on a different origin, so an anchor aimed straight at it would
+navigate to the image instead of saving it — on a phone, that means leaving
+the conversation. A blob URL is same-origin, so `download` is honoured. The
+cross-origin read needs no new bucket configuration: board tiles already
+load through `img.crossOrigin = "anonymous"`, which only works against a
+CORS-enabled response.
+
+On **iOS** this saves to Files, not Photos, and Safari's support for
+programmatic downloads is uneven — so a failure says "press and hold the
+image instead", which is the platform's own reliable route to the camera
+roll, rather than "try again".
+
 **Not built, and named rather than implied:** one image per message (no
 galleries); no thumbnails or server-side transcoding; and **no orphan
 cleanup** — an image picked and then abandoned stays in the bucket, and

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { messageImageDisplaySize, type MessageImage, type SosoGateway } from "soso-core";
+import { Icon, ICONS } from "./Icon";
 
 /**
  * Rendering an image that lives in a private bucket.
@@ -127,6 +128,83 @@ export function useMessageImageUrl(gateway: SosoGateway, path: string | null): {
 }
 
 /**
+ * The current URL for a path, minting one if the cache has none.
+ *
+ * Exists for callers that need a URL *now*, outside React's render cycle —
+ * `saveMessageImage` below is the only one. `useMessageImageUrl` cannot
+ * serve them: it returns null on first call and re-renders later, which is
+ * right for an <img> and useless for "the person just pressed Save".
+ */
+async function messageImageUrlNow(gateway: SosoGateway, path: string): Promise<string | null> {
+  const hit = cached(path);
+  if (hit) return hit.url;
+  await scheduleFetch(gateway, path);
+  return cached(path)?.url ?? null;
+}
+
+/**
+ * What a saved file is called.
+ *
+ * Not the object key: that is `dm/<uuid>/<uuid>/<uuid>.jpg`, which is a
+ * location rather than a name, and would land in someone's downloads folder
+ * as an unreadable string. The extension is taken from the key rather than
+ * hard-coded so this keeps telling the truth if the pipeline ever stores
+ * something other than JPEG.
+ */
+function downloadName(image: MessageImage): string {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const ext = image.path.split(".").pop();
+  return `soso-${stamp}.${ext && ext.length <= 5 ? ext : "jpg"}`;
+}
+
+export class MessageImageSaveError extends Error {}
+
+/**
+ * Saves an image to the device.
+ *
+ * FETCHED INTO A BLOB FIRST, rather than pointed at with `<a download>`.
+ * That is not belt-and-braces: the `download` attribute is IGNORED for
+ * cross-origin URLs, and every one of these is a presigned R2 URL on a
+ * different origin — so an anchor pointing straight at it would navigate to
+ * the image instead of saving it, which on a phone means leaving the
+ * conversation. A blob URL is same-origin, so `download` is honoured.
+ *
+ * The cross-origin fetch works because the bucket already allows it: board
+ * tiles load through `img.crossOrigin = "anonymous"`, which only succeeds
+ * against a CORS-enabled response. No new bucket configuration is needed
+ * for this — if boards render, this can read.
+ *
+ * A fresh URL is minted rather than reusing whatever the on-screen <img>
+ * has, since that one may be minutes old and close to expiry.
+ */
+export async function saveMessageImage(gateway: SosoGateway, image: MessageImage): Promise<void> {
+  const url = await messageImageUrlNow(gateway, image.path);
+  if (!url) throw new MessageImageSaveError("no url");
+
+  const res = await fetch(url);
+  if (!res.ok) throw new MessageImageSaveError(`fetch ${res.status}`);
+  const blob = await res.blob();
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = downloadName(image);
+    // Appended before clicking: a detached anchor's click is ignored in
+    // Firefox, and this is the one line that makes the difference there.
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    // Not revoked synchronously — the browser is still reading it to
+    // perform the save. A tick is enough to let the download start, and
+    // leaking it instead would pin the whole decoded image for the life of
+    // the page.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+  }
+}
+
+/**
  * One image in a message bubble.
  *
  * The box is sized from the stored dimensions BEFORE the bytes arrive, which
@@ -145,8 +223,12 @@ export function MessageImageView({
   image: MessageImage;
   availableWidth?: number;
   maxHeight?: number;
-  /** Opens the full-size viewer. Omitted where a thumbnail is not tappable (a reply quote). */
-  onOpen?: (url: string) => void;
+  /**
+   * Opens the full-size viewer. Omitted where a thumbnail is not tappable
+   * (a reply quote). Hands back the image as well as the URL, because the
+   * viewer needs the object path to save it and only this component has it.
+   */
+  onOpen?: (url: string, image: MessageImage) => void;
 }) {
   const { url, loading } = useMessageImageUrl(gateway, image.path);
   const size = messageImageDisplaySize(image, availableWidth, maxHeight);
@@ -176,7 +258,7 @@ export function MessageImageView({
       type="button"
       className="message-image message-image-button"
       style={style}
-      onClick={onOpen ? () => onOpen(url) : undefined}
+      onClick={onOpen ? () => onOpen(url, image) : undefined}
       // A quote's thumbnail is not independently tappable — the whole quote
       // is — so it is not offered as a control either.
       disabled={!onOpen}
@@ -194,8 +276,39 @@ export function MessageImageView({
  * opened it necessarily had one, and re-minting would mean a spinner over a
  * picture the person can already see behind the overlay.
  */
-export function MessageImageLightbox({ url, onClose }: { url: string; onClose: () => void }) {
+export function MessageImageLightbox({
+  url,
+  onSave,
+  onClose,
+}: {
+  url: string;
+  /** Omitted where saving is not offered; the button disappears rather than failing. */
+  onSave?: () => Promise<void>;
+  onClose: () => void;
+}) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The busy and failure states live here rather than in each caller,
+  // because both callers would otherwise write the same three lines and the
+  // button that needs to disable is this one.
+  async function save() {
+    if (!onSave || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave();
+    } catch {
+      // Deliberately not "try again": the common causes are a URL that has
+      // expired and a browser that refuses programmatic downloads, and
+      // neither is fixed by pressing the same button harder. On a phone the
+      // reliable route is the platform's own, which is why it is named.
+      setError("Couldn't save that. Press and hold the image instead.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -218,10 +331,25 @@ export function MessageImageLightbox({ url, onClose }: { url: string; onClose: (
         if (e.target === overlayRef.current) onClose();
       }}
     >
-      <button type="button" className="message-lightbox-close" onClick={onClose} aria-label="Close">
-        ×
-      </button>
+      <div className="message-lightbox-actions">
+        {onSave && (
+          <button
+            type="button"
+            className="message-lightbox-action"
+            onClick={() => void save()}
+            disabled={saving}
+            aria-label="Save image"
+            title="Save image"
+          >
+            <Icon src={ICONS.download} size={18} />
+          </button>
+        )}
+        <button type="button" className="message-lightbox-action" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+      </div>
       <img src={url} alt="" />
+      {error && <p className="message-lightbox-error">{error}</p>}
     </div>
   );
 }

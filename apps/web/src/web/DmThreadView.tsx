@@ -6,6 +6,7 @@ import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
+  type MessageImage,
   type DmMessage,
   type DmThread,
   type SosoGateway,
@@ -13,7 +14,7 @@ import {
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
-import { MessageImageLightbox, MessageImageView } from "./MessageImageView";
+import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./MessageImageView";
 import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
@@ -82,7 +83,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachment = useImageAttachment(gateway, { kind: "dm", threadId: thread.id });
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; image: MessageImage } | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -271,7 +272,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onSwipeReply={() => startReply(message)}
                 onToggleReaction={(emoji) => void react(message, emoji)}
-                onOpenImage={setLightbox}
+                onOpenImage={(url, image) => setLightbox({ url, image })}
               />
             </Fragment>
           );
@@ -393,6 +394,15 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
             onReact={(emoji) => void react(menu.message, emoji)}
             onReply={() => startReply(menu.message)}
             onCopy={() => void copy(menu.message)}
+            onSave={
+              menu.message.image
+                ? () => {
+                    const image = menu.message.image!;
+                    setMenu(null);
+                    void saveMessageImage(gateway, image);
+                  }
+                : undefined
+            }
             primaryAction={
               menu.message.mine
                 ? { label: "Unsend for everyone", icon: ICONS.trash, onClick: () => void remove(menu.message.id) }
@@ -473,7 +483,7 @@ function DmBubble({
   onOpenMenu: (rect: DOMRect) => void;
   onSwipeReply: () => void;
   onToggleReaction: (emoji: string) => void;
-  onOpenImage: (url: string) => void;
+  onOpenImage: (url: string, image: MessageImage) => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // The node useSwipeToReply actually moves — see ChatPanel's own

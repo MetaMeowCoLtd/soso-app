@@ -109,6 +109,13 @@ export interface MessageActionSheetProps {
   onReact: (emoji: string) => void;
   onReply: () => void;
   onCopy: () => void;
+  /**
+   * Offered only for a message that actually carries an image, so the row
+   * is absent rather than present-and-failing on a text message. Saving from
+   * here means not having to open the viewer first, which is the whole
+   * reason it is duplicated out of the lightbox.
+   */
+  onSave?: () => void;
   /** The row below Copy — "Delete" for your own message, "Report" for someone else's, or omitted entirely (the room has no report-from-sheet action). */
   primaryAction?: MessageActionSheetPrimaryAction;
   onClose: () => void;
@@ -123,6 +130,7 @@ export function MessageActionSheet({
   onReact,
   onReply,
   onCopy,
+  onSave,
   primaryAction,
   onClose,
 }: MessageActionSheetProps) {
@@ -202,6 +210,12 @@ export function MessageActionSheet({
             Copy
             <Icon src={ICONS.copy} size={17} />
           </button>
+          {onSave && (
+            <button type="button" className="chat-sheet-row" onClick={onSave}>
+              Save photo
+              <Icon src={ICONS.download} size={17} />
+            </button>
+          )}
           {primaryAction && (
             <button type="button" className="chat-sheet-row destructive" onClick={primaryAction.onClick}>
               {primaryAction.label}

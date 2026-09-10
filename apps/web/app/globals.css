@@ -510,8 +510,16 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    controls competing with the picture. */
 .message-lightbox { position:fixed; z-index:40; inset:0; display:grid; place-items:center; padding:24px; background:rgba(8,20,17,.92); }
 .message-lightbox img { max-width:100%; max-height:100%; border-radius:10px; }
-.message-lightbox-close { position:absolute; top:max(14px, env(safe-area-inset-top)); right:16px; width:36px; height:36px; display:grid; place-items:center; border:0; border-radius:50%; background:rgba(255,255,255,.16); color:#fff; font-size:1.5rem; line-height:1; }
-.message-lightbox-close:hover { background:rgba(255,255,255,.26); }
+/* Save and close together, top-right, rather than close alone — a viewer
+   with one control in the corner and another somewhere else is two places
+   to look for the same kind of thing. */
+.message-lightbox-actions { position:absolute; top:max(14px, env(safe-area-inset-top)); right:16px; display:flex; gap:8px; }
+.message-lightbox-action { width:36px; height:36px; display:grid; place-items:center; border:0; border-radius:50%; background:rgba(255,255,255,.16); color:#fff; font-size:1.5rem; line-height:1; transition:background .16s; }
+.message-lightbox-action:hover:not(:disabled) { background:rgba(255,255,255,.26); }
+.message-lightbox-action:disabled { opacity:.5; }
+/* Sits over the image rather than beside the buttons: it is about the save
+   that just failed, and the buttons are 36px of corner. */
+.message-lightbox-error { position:absolute; left:50%; bottom:max(20px, env(safe-area-inset-bottom)); transform:translateX(-50%); max-width:calc(100% - 40px); margin:0; padding:9px 14px; border-radius:999px; background:rgba(0,0,0,.7); color:#fff; font-size:.78rem; font-weight:650; text-align:center; }
 
 /* The pending-attachment strip, above the composer like the reply bar. */
 .chat-attachment { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:8px 12px; background:#f6f8f7; border-top:1px solid var(--hairline); }
