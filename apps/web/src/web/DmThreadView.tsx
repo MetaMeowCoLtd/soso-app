@@ -375,6 +375,14 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
         </button>
       </form>
 
+      {lightbox && (
+        <MessageImageLightbox
+          url={lightbox.url}
+          onSave={() => saveMessageImage(gateway, lightbox.image)}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+
       {menu &&
         createPortal(
           <MessageActionSheet
@@ -399,7 +407,16 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
                 ? () => {
                     const image = menu.message.image!;
                     setMenu(null);
-                    void saveMessageImage(gateway, image);
+                    // NOT `void saveMessageImage(...)`. That swallowed every
+                    // failure, so a save that could not happen — an
+                    // undeployed function, an expired URL, a refused
+                    // download — was indistinguishable from the button
+                    // doing nothing at all. The sheet closes on tap, so
+                    // there is no sheet left to report into; the composer's
+                    // own error line is where the person is already looking.
+                    void saveMessageImage(gateway, image).catch(() => {
+                      setError("Couldn't save that image.");
+                    });
                   }
                 : undefined
             }
