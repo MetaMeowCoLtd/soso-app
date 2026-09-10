@@ -175,7 +175,7 @@ export interface PostDetail extends Pin {
   address: string | null;
   /** True when the signed-in user wrote it. Drives the edit/delete affordances. */
   mine: boolean;
-  author: { id: string; handle: string; displayName: string };
+  author: { id: string; handle: string; displayName: string; avatarPath: AvatarPath };
   media: { objectKey: string; width: number; height: number }[];
   replyCount: number;
   /**
@@ -196,7 +196,7 @@ export interface WirePostDetail extends WirePin {
   down: number;
   address: string | null;
   mine: boolean;
-  author: { id: string; handle: string; name: string };
+  author: { id: string; handle: string; name: string; avatar?: string | null };
   media: { key: string; w: number; h: number }[];
   replies: number;
   liked: boolean;
@@ -210,7 +210,12 @@ export function decodePostDetail(w: WirePostDetail): PostDetail {
     disputeCount: w.down,
     address: w.address,
     mine: w.mine,
-    author: { id: w.author.id, handle: w.author.handle, displayName: w.author.name },
+    author: {
+      id: w.author.id,
+      handle: w.author.handle,
+      displayName: w.author.name,
+      avatarPath: w.author.avatar ?? null,
+    },
     media: (w.media ?? []).map((m) => ({ objectKey: m.key, width: m.w, height: m.h })),
     replyCount: w.replies,
     liked: w.liked,
@@ -250,6 +255,22 @@ export interface NewPost {
 // Social graph and presence
 // ---------------------------------------------------------------------------
 
+/**
+ * A stored avatar object path (`<user id>/<token>.jpg`, migration 0038), or
+ * null for someone with no picture — which is the common case, and the one
+ * `Avatar` renders as hash-coloured initials.
+ *
+ * DELIBERATELY NOT A URL, and every field of this type below says so by
+ * being named `...Path`. Turning it into something an `<img>` can load
+ * depends on which backend answered (`SosoGateway.avatarUrl` — a public
+ * bucket URL against Supabase, a `data:` URL out of localStorage in demo
+ * mode), so nothing in this file, which knows about neither, is in a
+ * position to do it. A component that receives one of these and puts it
+ * straight into a `src` is a bug that would only show up in one of the two
+ * modes.
+ */
+export type AvatarPath = string | null;
+
 /** Your own identity, mainly so you can share your handle with someone. */
 export interface MyProfile {
   id: string;
@@ -257,6 +278,8 @@ export interface MyProfile {
   displayName: string;
   /** Free text the owner wrote about themselves. Empty string, never null, when unset. */
   bio: string;
+  /** See `AvatarPath` — a path, not a URL. */
+  avatarPath: AvatarPath;
   /** Spendable balance. Earned by walking, spent posting a pin. */
   coinBalance: number;
 }
@@ -267,6 +290,7 @@ export interface WireMyProfile {
   handle: string;
   name: string;
   bio: string;
+  avatar?: string | null;
   coins: number;
 }
 
@@ -279,6 +303,10 @@ export function decodeMyProfile(w: WireMyProfile): MyProfile {
     // the column has no bio at all; "" is the same "no bio" the empty-string
     // default produces, so both paths render identically.
     bio: w.bio ?? '',
+    // Optional on the wire for the same reason, one migration later: a
+    // response from a database that has not run 0038 omits the key entirely,
+    // which is the same "no picture" as an explicit null.
+    avatarPath: w.avatar ?? null,
     coinBalance: Number(w.coins) || 0,
   };
 }
@@ -317,6 +345,7 @@ export interface Friend {
   id: string;
   handle: string;
   displayName: string;
+  avatarPath: AvatarPath;
   isOnline: boolean;
   /** How YOU classify them. Private to you; never shown to the friend. */
   tier: FriendTier;
@@ -329,6 +358,7 @@ export interface WireFriend {
   user_id: string;
   handle: string;
   display_name: string;
+  avatar_path?: string | null;
   is_online: boolean;
   last_seen_at: string | null;
   same_area: boolean;
@@ -340,6 +370,7 @@ export function decodeFriend(w: WireFriend): Friend {
     id: w.user_id,
     handle: w.handle,
     displayName: w.display_name,
+    avatarPath: w.avatar_path ?? null,
     isOnline: w.is_online,
     lastSeenAt: w.last_seen_at,
     sameArea: w.same_area,
@@ -357,6 +388,7 @@ export interface IncomingFollow {
   handle: string;
   displayName: string;
   bio: string;
+  avatarPath: AvatarPath;
   /** ISO timestamp of when they followed you — newest first in the list. */
   followedAt: string;
 }
@@ -366,6 +398,7 @@ export interface WireIncomingFollow {
   handle: string;
   name: string;
   bio: string;
+  avatar?: string | null;
   followed_at: string;
 }
 
@@ -375,6 +408,7 @@ export function decodeIncomingFollow(w: WireIncomingFollow): IncomingFollow {
     handle: w.handle,
     displayName: w.name,
     bio: w.bio ?? "",
+    avatarPath: w.avatar ?? null,
     followedAt: w.followed_at,
   };
 }
@@ -418,6 +452,7 @@ export interface UserProfile {
   handle: string;
   displayName: string;
   bio: string;
+  avatarPath: AvatarPath;
   /** Lifetime pins contributed — a tally, may exceed the posts a given viewer can open. */
   pins: number;
   followers: number;
@@ -434,6 +469,7 @@ export interface WireUserProfile {
   handle: string;
   name: string;
   bio: string;
+  avatar?: string | null;
   pins: number;
   followers: number;
   following: number;
@@ -456,6 +492,7 @@ export function decodeUserProfile(w: WireUserProfile): UserProfile {
     handle: w.handle,
     displayName: w.name,
     bio: w.bio ?? "",
+    avatarPath: w.avatar ?? null,
     pins: Number(w.pins) || 0,
     followers: Number(w.followers) || 0,
     following: Number(w.following) || 0,
@@ -494,6 +531,7 @@ export interface Connection {
   handle: string;
   displayName: string;
   bio: string;
+  avatarPath: AvatarPath;
   /** Lifetime pins contributed. Same tally as `UserProfile.pins`. */
   pins: number;
   /** This row is the viewer themselves — no follow button is offered on yourself. */
@@ -509,6 +547,7 @@ export interface WireConnection {
   handle: string;
   name: string;
   bio: string;
+  avatar?: string | null;
   pins: number;
   is_self: boolean;
   is_following: boolean;
@@ -536,6 +575,7 @@ export function decodeConnection(w: WireConnection): Connection {
     handle: w.handle,
     displayName: w.name,
     bio: w.bio ?? '',
+    avatarPath: w.avatar ?? null,
     pins: Number(w.pins) || 0,
     isSelf: Boolean(w.is_self),
     isFollowing: Boolean(w.is_following),
@@ -632,6 +672,7 @@ export interface ChatMessage {
   authorId: string;
   authorHandle: string;
   authorName: string;
+  authorAvatarPath: AvatarPath;
   mine: boolean;
   replyTo: ChatReplyPreview | null;
   reactions: ChatMessageReaction[];
@@ -644,6 +685,7 @@ export interface WireChatMessage {
   author_id: string;
   author_handle: string;
   author_name: string;
+  author_avatar?: string | null;
   mine: boolean;
   reply_to?: { id: string; body: string; author_name: string } | null;
   reactions?: { emoji: string; count: number; mine: boolean }[] | null;
@@ -657,6 +699,7 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
     authorId: w.author_id,
     authorHandle: w.author_handle,
     authorName: w.author_name,
+    authorAvatarPath: w.author_avatar ?? null,
     mine: w.mine,
     replyTo: w.reply_to
       ? { id: w.reply_to.id, body: w.reply_to.body, authorName: w.reply_to.author_name }
@@ -835,6 +878,7 @@ export interface PostReply {
   authorId: string;
   authorHandle: string;
   authorName: string;
+  authorAvatarPath: AvatarPath;
   mine: boolean;
 }
 
@@ -846,6 +890,7 @@ export interface WirePostReply {
   author_id: string;
   author_handle: string;
   author_name: string;
+  author_avatar?: string | null;
   mine: boolean;
 }
 
@@ -858,6 +903,7 @@ export function decodePostReply(w: WirePostReply): PostReply {
     authorId: w.author_id,
     authorHandle: w.author_handle,
     authorName: w.author_name,
+    authorAvatarPath: w.author_avatar ?? null,
     mine: w.mine,
   };
 }
@@ -906,6 +952,7 @@ export interface DmThread {
   otherId: string;
   otherHandle: string;
   otherName: string;
+  otherAvatarPath: AvatarPath;
   /** Their ECDH public key, base64 SPKI. Null until they've opened messages once. */
   otherKey: string | null;
   lastMessageAt: string | null;
@@ -920,6 +967,7 @@ export interface WireDmThread {
   other_id: string;
   other_handle: string;
   other_name: string;
+  other_avatar?: string | null;
   other_key: string | null;
   last_message_at: string | null;
   last_ciphertext?: string | null;
@@ -934,6 +982,7 @@ export function decodeDmThread(w: WireDmThread): DmThread {
     otherId: w.other_id,
     otherHandle: w.other_handle,
     otherName: w.other_name,
+    otherAvatarPath: w.other_avatar ?? null,
     otherKey: w.other_key ?? null,
     lastMessageAt: w.last_message_at ?? null,
     lastCiphertext: w.last_ciphertext ?? null,

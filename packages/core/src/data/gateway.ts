@@ -17,6 +17,7 @@
 
 import type { AreaCellId, CellId } from '../domain/grid';
 import type {
+  AvatarPath,
   Board,
   BoardStrokeBatch,
   BoardTileGetRequest,
@@ -146,14 +147,74 @@ export interface SosoGateway {
   myProfile(): Promise<MyProfile | null>;
 
   /**
-   * Updates your own display name and bio. Handle is deliberately not
-   * editable here — it is claimed once at signup (see `complete_signup`),
-   * and a rename that frees the old handle is an impersonation vector that
-   * needs a reservation period this app has no reason to build yet. Returns
-   * the profile as saved, so the caller renders the server's own trimmed
-   * copy rather than the raw input.
+   * Updates your own display name, bio and profile picture. Handle is
+   * deliberately not editable here — it is claimed once at signup (see
+   * `complete_signup`), and a rename that frees the old handle is an
+   * impersonation vector that needs a reservation period this app has no
+   * reason to build yet. Returns the profile as saved, so the caller renders
+   * the server's own trimmed copy rather than the raw input.
+   *
+   * `avatarPath` IS THE WHOLE INTENDED STATE, NOT A PATCH: null means "no
+   * picture", never "leave whatever is there alone". The screen that calls
+   * this always knows the complete profile it is saving, and "remove my
+   * photo" has to be sayable — see `update_profile`'s own note in migration
+   * 0038. Pass the path returned by `uploadAvatar`, or the one already on
+   * the `MyProfile` you loaded, to keep an existing picture.
    */
-  updateProfile(input: { displayName: string; bio: string }): Promise<MyProfile>;
+  updateProfile(input: {
+    displayName: string;
+    bio: string;
+    avatarPath: AvatarPath;
+  }): Promise<MyProfile>;
+
+  /**
+   * Stores image bytes and returns the object path to save.
+   *
+   * Deliberately does NOT touch the profile: uploading and pointing your
+   * profile at the result are two steps, so a picked photo that is never
+   * saved (the screen is cancelled, the name beside it fails validation)
+   * leaves the profile exactly as it was. Pass the returned path to
+   * `updateProfile` to actually adopt it.
+   *
+   * UNLIKE `getBoardTileUploadUrls`, THIS CARRIES THE BYTES. Tiles are
+   * uploaded by the caller straight to R2 through a presigned URL, because
+   * an audience check has to happen before the URL exists at all. An avatar
+   * has no such check to make (see migration 0038's header), so the upload
+   * is a plain authenticated write and there is no reason to expose the
+   * two-step dance — which also means, unlike boards, demo mode can
+   * implement this honestly rather than through an escape hatch outside
+   * this interface.
+   *
+   * The blob is expected to be a square JPEG of at most
+   * `AVATAR_MAX_DIMENSION` — see `packages/core/src/domain/avatar.ts` for
+   * the rules and apps/web/src/web/avatarImage.ts for the encoder. This
+   * does not resize anything; a caller that skips that step will have its
+   * upload rejected by the bucket's own size limit.
+   */
+  uploadAvatar(image: Blob): Promise<string>;
+
+  /**
+   * Deletes a stored avatar object. Best-effort cleanup after a replacement
+   * has been saved, not part of changing your picture: the profile stops
+   * pointing at the old object the moment `updateProfile` returns, so a
+   * failure here leaves an unreferenced file and nothing else. Implementations
+   * should ignore an already-missing object rather than treat it as an error.
+   */
+  deleteAvatar(path: string): Promise<void>;
+
+  /**
+   * Turns a stored `AvatarPath` into something an `<img>` can load, or null
+   * when there is no picture.
+   *
+   * Synchronous and side-effect-free — it is string construction, not I/O —
+   * but it lives on the gateway because the answer depends entirely on which
+   * backend is in play: a public bucket URL against Supabase, a `data:` URL
+   * out of localStorage in demo mode. That is exactly the kind of
+   * transport-shaped knowledge this port exists to keep out of the screens,
+   * which is why `AvatarPath` is a path everywhere else and becomes a URL
+   * only here.
+   */
+  avatarUrl(path: AvatarPath): string | null;
 
   // --- Coins ---------------------------------------------------------------
   //

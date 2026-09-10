@@ -1,21 +1,38 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 /**
- * A person, as a circle.
+ * A person, as a circle — their picture if they have one, their initial if
+ * they don't.
  *
- * Nobody in this app has a profile picture — there is no avatar upload
- * anywhere in the schema — so every list of people is a list of coloured
- * initials. That makes the colour do real work: with one shared brand
- * colour for everyone, a friends list is a column of identical teal discs
- * and the eye has nothing to lock onto. The hue here is derived from the
- * handle, so a given person is the same colour every time you see them,
- * on every screen, and a list becomes scannable without a single photo.
+ * MOST PEOPLE HAVE NO PICTURE, SO THE INITIAL IS NOT A PLACEHOLDER. It is
+ * the normal case, and it does real work: with one shared brand colour for
+ * everyone, a friends list is a column of identical teal discs and the eye
+ * has nothing to lock onto. The hue is derived from the handle, so a given
+ * person is the same colour every time you see them, on every screen, and a
+ * list stays scannable whether or not anyone in it has uploaded anything.
  *
- * Deliberately a hash rather than a stored preference: a colour that
- * needed a column would need a migration, a default, and a way to change
- * it. This needs none of those and is stable by construction.
+ * Deliberately a hash rather than a stored preference: a colour that needed
+ * a column would need a migration, a default, and a way to change it. This
+ * needs none of those and is stable by construction.
+ *
+ * WHY THE GRADIENT STAYS BEHIND THE IMAGE
+ * ---------------------------------------------------------------------
+ * The coloured disc is not replaced when there is a photo, it is covered.
+ * That gives the image something to load over — no flash of empty circle on
+ * a cold cache, no layout shift — and it is what shows through if the photo
+ * fails to load at all, which is handled explicitly below rather than left
+ * to the browser's broken-image icon.
+ *
+ * WHY THIS TAKES A URL AND NOT AN AvatarPath
+ * ---------------------------------------------------------------------
+ * What a profile carries is a storage path, not a URL, and turning one into
+ * the other depends on which gateway answered (see `SosoGateway.avatarUrl`).
+ * A component that took the path would have to reach for the gateway to
+ * render, so callers resolve it and pass the result. The prop is named
+ * `src` to make that unmistakable: if you have an `avatarPath`, it does not
+ * go here.
  */
 
 /** FNV-1a, small and stable — the same string always lands on the same hue. */
@@ -34,7 +51,7 @@ function initialOf(name: string): string {
 }
 
 interface AvatarProps {
-  /** Shown as a single initial. */
+  /** Shown as a single initial when there is no picture. */
   name: string;
   /**
    * What the colour is derived from. Pass the handle where there is one:
@@ -42,14 +59,28 @@ interface AvatarProps {
    * who edits their display name should not change colour.
    */
   seed?: string;
+  /**
+   * A ready-to-load image URL, from `gateway.avatarUrl(profile.avatarPath)`
+   * — NOT the stored path itself. Null or absent means initials.
+   */
+  src?: string | null;
   size?: number;
   /** Adds the presence dot. Omit entirely where online state is unknown or irrelevant. */
   online?: boolean;
   className?: string;
 }
 
-export function Avatar({ name, seed, size = 44, online, className }: AvatarProps) {
+export function Avatar({ name, seed, src, size = 44, online, className }: AvatarProps) {
   const hue = hueOf(seed ?? name);
+  // A photo that 404s (deleted object, a path from a bucket this deployment
+  // does not have) falls back to the initial rather than showing a broken
+  // image. Keyed reset on `src` so replacing your picture gets a fresh
+  // attempt instead of inheriting the previous one's failure.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+
+  const showImage = Boolean(src) && !failed;
+
   return (
     <span
       className={className ? `avatar ${className}` : "avatar"}
@@ -65,7 +96,25 @@ export function Avatar({ name, seed, size = 44, online, className }: AvatarProps
       }
       aria-hidden="true"
     >
+      {/* The initial stays in the tree under the image, so a photo that
+          fails mid-render reveals it instead of an empty disc. */}
       {initialOf(name)}
+      {showImage && (
+        <img
+          className="avatar-image"
+          src={src as string}
+          alt=""
+          // Every avatar is decorative here: the surrounding row always
+          // carries the person's name as real text, so announcing the
+          // picture too would only repeat it. Matches the aria-hidden on
+          // the wrapper.
+          aria-hidden="true"
+          draggable={false}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+        />
+      )}
       {online !== undefined && <span className={`avatar-dot${online ? " online" : ""}`} />}
     </span>
   );

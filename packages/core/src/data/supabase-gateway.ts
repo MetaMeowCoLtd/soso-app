@@ -10,6 +10,7 @@ import { FunctionsHttpError, type RealtimeChannel, type SupabaseClient } from '@
 
 import { MAX_CELLS_PER_QUERY, type AreaCellId, type CellId } from '../domain/grid';
 import { SosoError, toSosoError } from '../domain/errors';
+import { AVATAR_OUTPUT_MIME, avatarObjectPath, randomAvatarToken } from '../domain/avatar';
 import {
   decodeZone,
   decodeFeedDelta,
@@ -47,6 +48,7 @@ import {
   type WireDmMessage,
   type WireDmThread,
   type WireChatMessage,
+  type AvatarPath,
   decodeBoard,
   decodeBoardTileMeta,
   decodeFlushedBoardTile,
@@ -174,6 +176,14 @@ function decodeCategory(row: WireCategoryRow): CategoryConfig {
   };
 }
 
+/**
+ * The public bucket created by migration 0038. Named here rather than
+ * configured: it is created by a migration in this same repo, so a
+ * deployment cannot have a differently-named one without that migration
+ * having been edited too.
+ */
+const AVATAR_BUCKET = 'avatars';
+
 export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
   return {
     async loadCategories(): Promise<CategoryConfig[]> {
@@ -300,13 +310,63 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return decodeMyProfile(data as WireMyProfile);
     },
 
-    async updateProfile(input: { displayName: string; bio: string }): Promise<MyProfile> {
+    async updateProfile(input: {
+      displayName: string;
+      bio: string;
+      avatarPath: AvatarPath;
+    }): Promise<MyProfile> {
       const { data, error } = await client.rpc('update_profile', {
         p_display_name: input.displayName,
         p_bio: input.bio,
+        p_avatar_path: input.avatarPath,
       });
       if (error) throw toSosoError(error);
       return decodeMyProfile(data as WireMyProfile);
+    },
+
+    async uploadAvatar(image: Blob): Promise<string> {
+      // The path's first segment is the storage policy's authorization
+      // check, so this needs the caller's own id and cannot be built from
+      // anything the caller passed in. `getUser()` rather than
+      // `getSession()`: the id is about to be baked into a path the bucket
+      // will verify against the JWT it sees, so it should come from the same
+      // place that JWT does.
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError || !userData?.user) throw new SosoError('soso/unauthenticated');
+
+      const path = avatarObjectPath(userData.user.id, randomAvatarToken());
+
+      const { error } = await client.storage.from(AVATAR_BUCKET).upload(path, image, {
+        contentType: AVATAR_OUTPUT_MIME,
+        // Every upload gets a fresh random name, so there is never an
+        // existing object to overwrite. Leaving upsert off means a token
+        // collision fails loudly instead of silently replacing whatever was
+        // there — which, for a name this random, would be much more likely
+        // to be a bug in the path builder than an actual collision.
+        upsert: false,
+        // A year. Safe because the name is new every time: changing your
+        // picture produces a different URL rather than needing the old one
+        // to expire. This is the whole reason a public bucket beats signed
+        // URLs here.
+        cacheControl: '31536000',
+      });
+      if (error) throw new SosoError('soso/avatar_upload_failed', error);
+
+      return path;
+    },
+
+    async deleteAvatar(path: string): Promise<void> {
+      // Best-effort by contract (see the port): the profile already stopped
+      // pointing here, so the only cost of a failure is an orphaned object.
+      // Storage reports a missing object as success anyway, which matches
+      // the "no-op, not an error" shape the rest of this interface uses for
+      // deletes.
+      await client.storage.from(AVATAR_BUCKET).remove([path]);
+    },
+
+    avatarUrl(path: AvatarPath): string | null {
+      if (!path) return null;
+      return client.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
     },
 
     // --- Coins -----------------------------------------------------------

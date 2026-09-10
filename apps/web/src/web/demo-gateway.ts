@@ -43,6 +43,9 @@
  */
 
 import {
+  avatarObjectPath,
+  isOwnAvatarPath,
+  randomAvatarToken,
   SosoError,
   cellOf,
   coinsForDistanceMetres,
@@ -96,6 +99,10 @@ const DEMO_PEOPLE = {
     displayName: "Kenji Nakamura",
     bio: "New around Nakano — say hi 👋",
     pins: 12,
+    // Null for every invented person: demo mode has nobody else who could
+    // have uploaded a picture, and inventing one would be the only fake
+    // image in an app whose demo data is otherwise plausible-but-honest.
+    avatarPath: null,
     isSelf: false,
     isFollowing: false,
     followsYou: true,
@@ -106,6 +113,7 @@ const DEMO_PEOPLE = {
     displayName: "HiRO",
     bio: "Street photography, mostly at night.",
     pins: 84,
+    avatarPath: null,
     isSelf: false,
     isFollowing: true,
     followsYou: true,
@@ -116,6 +124,7 @@ const DEMO_PEOPLE = {
     displayName: "Enru Lin",
     bio: "Coffee, trains, and the occasional cat.",
     pins: 41,
+    avatarPath: null,
     isSelf: false,
     isFollowing: true,
     followsYou: true,
@@ -126,6 +135,7 @@ const DEMO_PEOPLE = {
     displayName: "Tokyo Spring Patrol",
     bio: "Volunteers keeping the neighbourhood tidy. 🌸",
     pins: 213,
+    avatarPath: null,
     isSelf: false,
     isFollowing: true,
     followsYou: false,
@@ -136,6 +146,7 @@ const DEMO_PEOPLE = {
     displayName: "jodi m",
     bio: "",
     pins: 3,
+    avatarPath: null,
     isSelf: false,
     isFollowing: false,
     followsYou: true,
@@ -146,6 +157,7 @@ const DEMO_PEOPLE = {
     displayName: "Bora",
     bio: "Cat photos. That's the whole account.",
     pins: 0,
+    avatarPath: null,
     isSelf: false,
     isFollowing: false,
     followsYou: false,
@@ -156,6 +168,7 @@ const DEMO_PEOPLE = {
     displayName: "Homebody Life（温兜）",
     bio: "Small apartments, big plants.",
     pins: 27,
+    avatarPath: null,
     isSelf: false,
     isFollowing: true,
     followsYou: false,
@@ -417,6 +430,7 @@ const COINS_KEY = "soso-demo:coins:v1";
 const WALKS_KEY = "soso-demo:walks:v1";
 const BOARDS_KEY = "soso-demo:boards:v1";
 const BOARD_TILES_KEY = "soso-demo:board-tiles:v1";
+const AVATARS_KEY = "soso-demo:avatars:v1";
 
 // Same ceiling record_walk enforces server-side (migration 0016): how many
 // coins one user can earn from walking per hour, regardless of how many
@@ -451,6 +465,63 @@ function writeJSON(key: string, value: unknown): void {
   }
 }
 
+/**
+ * Demo profile pictures.
+ *
+ * THE ONE PLACE DEMO MODE IS A HONEST DROP-IN, UNLIKE BOARD TILES. A board
+ * tile upload is "PUT bytes to a presigned URL", which has no local
+ * equivalent — hence `demoStoreBoardTileBlob` further down, the one export
+ * here that is deliberately NOT part of `SosoGateway`. An avatar upload has
+ * no such shape: `uploadAvatar` carries the bytes itself (see the port's own
+ * note on why), so this mode can implement the same method the real gateway
+ * does, and nothing downstream needs an `if (mode !== "supabase")` branch to
+ * set a profile picture.
+ *
+ * Unlike tile blobs, these DO persist across a reload: there is exactly one
+ * of them, it is small (a 512px JPEG as a data URL, tens of kilobytes), and
+ * a profile picture that vanished on refresh would read as the feature being
+ * broken rather than as demo mode being simplified — which is the same
+ * reasoning that put the name and bio edits in localStorage in the first
+ * place.
+ *
+ * Keyed by object path so the store behaves like the bucket it stands in
+ * for: `avatarUrl` is a lookup, a replaced picture is a new key, and
+ * `deleteAvatar` removes one.
+ */
+type DemoAvatarStore = Record<string, string>;
+
+function loadAvatars(): DemoAvatarStore {
+  return readJSON<DemoAvatarStore>(AVATARS_KEY, {});
+}
+
+function saveAvatars(store: DemoAvatarStore): void {
+  writeJSON(AVATARS_KEY, store);
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * The demo user's own avatar path, or null.
+ *
+ * Used wherever demo mode builds a row it attributes to "you" — your own
+ * posts, your own chat messages, your own replies. Without it the picture
+ * would appear on the settings screen and nowhere else, which is precisely
+ * the part of the feature worth being able to look at: an avatar is only
+ * really testable in the lists it shows up in. The invented other people
+ * here keep `null` and render as initials, since demo mode has no second
+ * person to have uploaded anything.
+ */
+function myAvatarPath(): string | null {
+  return loadProfileEdits().avatarPath ?? null;
+}
+
 function getMe(): string {
   let id = window.localStorage.getItem(ME_KEY);
   if (!id) {
@@ -463,6 +534,15 @@ function getMe(): string {
 interface DemoProfileEdits {
   displayName?: string;
   bio?: string;
+  /**
+   * The stored object PATH, not the image — exactly what the real
+   * `profiles.avatar_path` column holds. The bytes live in the separate
+   * avatar store below, mirroring the real split between a column that
+   * names an object and a bucket that holds it. Keeping them apart is not
+   * ceremony: it means changing your display name rewrites a few dozen
+   * bytes instead of rewriting a base64 photo alongside it every time.
+   */
+  avatarPath?: string | null;
 }
 
 function loadProfileEdits(): DemoProfileEdits {
@@ -951,6 +1031,7 @@ export function createDemoGateway(): SosoGateway {
           id: post.authorId,
           handle: post.authorId === me ? "demo_user" : "demo",
           displayName: post.authorId === me ? "You" : "A neighbour",
+          avatarPath: post.authorId === me ? myAvatarPath() : null,
         },
         media: [],
         replyCount: post.replyCount,
@@ -1134,6 +1215,7 @@ export function createDemoGateway(): SosoGateway {
         handle: "demo_user",
         displayName: edits.displayName ?? "You (demo)",
         bio: edits.bio ?? "",
+        avatarPath: edits.avatarPath ?? null,
         coinBalance: getCoinBalance(me),
       };
     },
@@ -1143,18 +1225,59 @@ export function createDemoGateway(): SosoGateway {
     // would, rather than resetting and making the screen look broken. Mirrors
     // update_profile's validation (migration 0033) so demo and real reject
     // the same inputs; the trimming here is what the server would store.
-    async updateProfile(input: { displayName: string; bio: string }) {
+    async updateProfile(input: { displayName: string; bio: string; avatarPath: string | null }) {
       const displayName = input.displayName.trim();
       const bio = input.bio.trim();
+      const me = getMe();
       if (displayName.length < 1 || displayName.length > 40) {
         throw new SosoError("soso/invalid_display_name");
       }
       if (bio.length > 160) {
         throw new SosoError("soso/bio_too_long");
       }
-      saveProfileEdits({ displayName, bio });
-      const me = getMe();
-      return { id: me, handle: "demo_user", displayName, bio, coinBalance: getCoinBalance(me) };
+      // Mirrors update_profile's own path check (migration 0038), which
+      // exists because this is the one field the client constructs rather
+      // than the person typing. Same rule, same coded error, so a bug in the
+      // upload path fails identically in both modes instead of only showing
+      // up against the real backend.
+      const avatarPath = input.avatarPath === null ? null : input.avatarPath.trim();
+      if (avatarPath !== null && !isOwnAvatarPath(avatarPath, me)) {
+        throw new SosoError("soso/invalid_avatar_path");
+      }
+      saveProfileEdits({ displayName, bio, avatarPath });
+      return {
+        id: me,
+        handle: "demo_user",
+        displayName,
+        bio,
+        avatarPath,
+        coinBalance: getCoinBalance(me),
+      };
+    },
+
+    async uploadAvatar(image: Blob): Promise<string> {
+      const path = avatarObjectPath(getMe(), randomAvatarToken());
+      const store = loadAvatars();
+      store[path] = await blobToDataUrl(image);
+      saveAvatars(store);
+      return path;
+    },
+
+    async deleteAvatar(path: string): Promise<void> {
+      const store = loadAvatars();
+      // Same "no-op, not an error" contract the real one has for an object
+      // that is already gone.
+      if (!(path in store)) return;
+      delete store[path];
+      saveAvatars(store);
+    },
+
+    avatarUrl(path: string | null): string | null {
+      if (!path) return null;
+      // A `data:` URL, which an <img> loads exactly like the public bucket
+      // URL the real gateway returns — so no component has to know which
+      // mode produced it.
+      return loadAvatars()[path] ?? null;
     },
 
     // --- Coins -------------------------------------------------------------
@@ -1250,6 +1373,7 @@ export function createDemoGateway(): SosoGateway {
           handle: "kenji_naka",
           displayName: "Kenji Nakamura",
           bio: "New around Nakano — say hi 👋",
+          avatarPath: null,
           followedAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
         },
       ];
@@ -1341,6 +1465,7 @@ export function createDemoGateway(): SosoGateway {
           id: post.authorId,
           handle: post.authorId === me ? "demo_user" : "demo",
           displayName: post.authorId === me ? "You" : "A neighbour",
+          avatarPath: post.authorId === me ? myAvatarPath() : null,
         },
           media: [],
           replyCount: post.replyCount,
@@ -1366,6 +1491,7 @@ export function createDemoGateway(): SosoGateway {
           handle,
           displayName: edits.displayName ?? "You (demo)",
           bio: edits.bio ?? "",
+          avatarPath: edits.avatarPath ?? null,
           pins: posts.filter((p) => p.authorId === me).length,
           // The length of the lists these numbers now open, not a
           // stand-alone figure: tapping "5 followers" and being handed a
@@ -1384,6 +1510,7 @@ export function createDemoGateway(): SosoGateway {
         handle,
         displayName: "A neighbour",
         bio: "Sharing what's happening around the neighbourhood. 🌸",
+        avatarPath: null,
         pins: posts.filter((p) => p.authorId === "seed").length,
         // Was a flattering 128/86 back when these were display-only. They
         // open a real list now, so they have to be that list's length.
@@ -1437,6 +1564,7 @@ export function createDemoGateway(): SosoGateway {
             id: post.authorId,
             handle: post.authorId === me ? "demo_user" : "demo",
             displayName: post.authorId === me ? "You" : "A neighbour",
+            avatarPath: post.authorId === me ? myAvatarPath() : null,
           },
           media: [],
           replyCount: post.replyCount,
@@ -1475,6 +1603,7 @@ export function createDemoGateway(): SosoGateway {
         authorId: me,
         authorHandle: "demo",
         authorName: "You",
+        authorAvatarPath: myAvatarPath(),
         mine: true,
       };
     },
@@ -1508,6 +1637,7 @@ export function createDemoGateway(): SosoGateway {
           authorId: r.authorId,
           authorHandle: "demo",
           authorName: r.authorId === me ? "You" : "A neighbour",
+          authorAvatarPath: r.authorId === me ? myAvatarPath() : null,
           mine: r.authorId === me,
         }));
     },
@@ -1564,6 +1694,7 @@ export function createDemoGateway(): SosoGateway {
         authorId: me,
         authorHandle: "you",
         authorName: "You",
+        authorAvatarPath: myAvatarPath(),
         mine: true,
         replyTo: preview
           ? { id: preview.id, body: preview.body, authorName: preview.author_name }
@@ -1592,6 +1723,7 @@ export function createDemoGateway(): SosoGateway {
           // Falls back to the same "A neighbour"/@demo the demo posts use.
           authorHandle: mine ? "you" : "demo",
           authorName: mine ? "You" : "A neighbour",
+          authorAvatarPath: mine ? myAvatarPath() : null,
           mine,
           replyTo: preview
             ? { id: preview.id, body: preview.body, authorName: preview.author_name }

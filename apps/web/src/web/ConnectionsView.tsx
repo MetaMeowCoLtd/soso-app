@@ -415,6 +415,7 @@ export default function ConnectionsView({
               <ConnectionRow
                 key={person.id}
                 person={person}
+                avatarSrc={gateway.avatarUrl(person.avatarPath)}
                 busy={busyIds.has(person.id)}
                 onOpenProfile={onOpenProfile}
                 onToggleFollow={() => void toggleFollow(person)}
@@ -457,11 +458,14 @@ function ConnectionSkeleton() {
 
 function ConnectionRow({
   person,
+  avatarSrc,
   busy,
   onOpenProfile,
   onToggleFollow,
 }: {
   person: Connection;
+  /** Resolved by the caller — see `SosoGateway.avatarUrl` on why a path is not a URL. */
+  avatarSrc: string | null;
   busy: boolean;
   onOpenProfile: (handle: string) => void;
   onToggleFollow: () => void;
@@ -481,7 +485,7 @@ function ConnectionRow({
         onClick={() => onOpenProfile(person.handle)}
         aria-label={`View ${person.displayName}'s profile`}
       >
-        <Avatar name={person.displayName} seed={person.handle} size={46} />
+        <Avatar name={person.displayName} seed={person.handle} src={avatarSrc} size={46} />
         <span className="connection-id">
           <span className="connection-name">
             <strong>{person.displayName}</strong>

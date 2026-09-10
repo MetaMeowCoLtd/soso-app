@@ -133,7 +133,12 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refresh
       {rows.map(({ thread, preview, unreadable }) => (
         <li key={thread.id}>
           <button type="button" className="dm-row" onClick={() => onOpenThread(thread)}>
-            <Avatar name={thread.otherName} seed={thread.otherHandle} size={46} />
+            <Avatar
+              name={thread.otherName}
+              seed={thread.otherHandle}
+              src={gateway.avatarUrl(thread.otherAvatarPath)}
+              size={46}
+            />
             <span className="dm-row-main">
               <span className="dm-row-top">
                 <span className="dm-row-name">{thread.otherName}</span>

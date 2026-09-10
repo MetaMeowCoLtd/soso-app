@@ -350,6 +350,7 @@ export default function ChatPanel({
               {showDivider && <div className="chat-divider">{dividerLabel(message.createdAt)}</div>}
               <ChatMessageRow
                 message={message}
+                avatarSrc={gateway.avatarUrl(message.authorAvatarPath)}
                 startsRun={startsRun}
                 endsRun={endsRun}
                 pressed={menu?.message.id === message.id}
@@ -445,6 +446,7 @@ export default function ChatPanel({
 
 function ChatMessageRow({
   message,
+  avatarSrc,
   startsRun,
   endsRun,
   pressed,
@@ -453,6 +455,8 @@ function ChatMessageRow({
   onSwipeReply,
 }: {
   message: ChatMessage;
+  /** Resolved by the caller — see `SosoGateway.avatarUrl` on why a path is not a URL. */
+  avatarSrc: string | null;
   startsRun: boolean;
   endsRun: boolean;
   /** This is the message the open action sheet is showing a copy of — hide the original so it isn't drawn twice. */
@@ -531,7 +535,15 @@ function ChatMessageRow({
         // one person reads as one block instead of a column of repeated
         // avatars. The empty div still holds the indent for the others.
         <div className="chat-row-avatar" aria-hidden="true">
-          {endsRun ? initialsOf(author) : ""}
+          {endsRun && (
+            <>
+              {initialsOf(author)}
+              {/* Layered over the initials rather than replacing them, the
+                  same way Avatar does it — the coloured disc is what shows
+                  while this loads, and what stays if it never does. */}
+              {avatarSrc && <img src={avatarSrc} alt="" loading="lazy" decoding="async" />}
+            </>
+          )}
         </div>
       )}
 

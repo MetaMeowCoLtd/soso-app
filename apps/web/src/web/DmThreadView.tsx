@@ -334,7 +334,12 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
         <button type="button" className="dm-thread-back" onClick={onClose} aria-label="Back">
           <Icon src={ICONS.chevronLeft} size={17} />
         </button>
-        <Avatar name={thread.otherName} seed={thread.otherHandle} size={32} />
+        <Avatar
+          name={thread.otherName}
+          seed={thread.otherHandle}
+          src={gateway.avatarUrl(thread.otherAvatarPath)}
+          size={32}
+        />
         <div className="dm-thread-who">
           <strong>{thread.otherName}</strong>
           <span>@{thread.otherHandle}</span>
@@ -372,6 +377,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
                 showAvatar={endsRun && !message.mine}
                 endsRun={endsRun}
                 otherName={thread.otherName}
+                otherAvatarSrc={gateway.avatarUrl(thread.otherAvatarPath)}
                 otherHandle={thread.otherHandle}
                 pressed={menu?.message.id === message.id}
                 onOpenMenu={(rect) => setMenu({ message, rect })}
@@ -505,6 +511,7 @@ function DmBubble({
   endsRun,
   otherName,
   otherHandle,
+  otherAvatarSrc,
   pressed,
   onOpenMenu,
   onSwipeReply,
@@ -515,6 +522,13 @@ function DmBubble({
   endsRun: boolean;
   otherName: string;
   otherHandle: string;
+  /**
+   * Already resolved to a URL by the caller, which has the gateway; a
+   * stored `AvatarPath` would be useless here. Every bubble in a thread
+   * shows the same person, so this is passed down rather than looked up
+   * per row.
+   */
+  otherAvatarSrc: string | null;
   pressed: boolean;
   onOpenMenu: (rect: DOMRect) => void;
   onSwipeReply: () => void;
@@ -577,7 +591,7 @@ function DmBubble({
     >
       {!message.mine &&
         (showAvatar ? (
-          <Avatar name={otherName} seed={otherHandle} size={26} />
+          <Avatar name={otherName} seed={otherHandle} src={otherAvatarSrc} size={26} />
         ) : (
           <div className="chat-row-avatar" aria-hidden="true" />
         ))}

@@ -221,7 +221,12 @@ export default function PeopleTab({
             have. Two halves of the same question, so one surface. */}
         <section className="people-you" aria-label="You">
           <div className="people-you-head">
-            <Avatar name={presence.me?.displayName ?? "You"} seed={presence.me?.handle ?? "you"} size={46} />
+            <Avatar
+              name={presence.me?.displayName ?? "You"}
+              seed={presence.me?.handle ?? "you"}
+              src={gateway.avatarUrl(presence.me?.avatarPath ?? null)}
+              size={46}
+            />
             <div className="people-you-id">
               <strong>{presence.me?.displayName ?? "You"}</strong>
               {/* Omitted rather than shown as a placeholder when there is no
@@ -304,7 +309,12 @@ export default function PeopleTab({
                     onClick={() => onOpenProfile(item.handle)}
                     aria-label={`View ${item.displayName}'s profile`}
                   >
-                    <Avatar name={item.displayName} seed={item.handle} size={44} />
+                    <Avatar
+                      name={item.displayName}
+                      seed={item.handle}
+                      src={gateway.avatarUrl(item.avatarPath)}
+                      size={44}
+                    />
                     <span className="people-request-id">
                       <strong>{item.displayName}</strong>
                       <span>followed you {formatAgo(Math.floor(new Date(item.followedAt).getTime() / 1000), nowSeconds)}</span>
@@ -425,6 +435,7 @@ export default function PeopleTab({
                       <Avatar
                         name={friend.displayName}
                         seed={friend.handle}
+                        src={gateway.avatarUrl(friend.avatarPath)}
                         size={44}
                         online={friend.isOnline}
                       />
@@ -506,7 +517,12 @@ export default function PeopleTab({
             <div className="people-sheet-scrim" />
             <div className="people-sheet-panel" onClick={(e) => e.stopPropagation()}>
               <div className="people-sheet-head">
-                <Avatar name={sheetFor.displayName} seed={sheetFor.handle} size={40} />
+                <Avatar
+                  name={sheetFor.displayName}
+                  seed={sheetFor.handle}
+                  src={gateway.avatarUrl(sheetFor.avatarPath)}
+                  size={40}
+                />
                 <div>
                   <strong>{sheetFor.displayName}</strong>
                   <span>@{sheetFor.handle}</span>

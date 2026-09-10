@@ -57,6 +57,8 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
   const [reported, setReported] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
+  const authorAvatarSrc = gateway.avatarUrl(post.author.avatarPath);
+
   const listRef = useRef<HTMLDivElement>(null);
 
   async function reload() {
@@ -198,6 +200,9 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
         <div className="feed-card thought-thread-post">
           <div className="feed-card-avatar" aria-hidden="true">
             {post.author.displayName.trim().charAt(0).toUpperCase() || "?"}
+            {authorAvatarSrc && (
+              <img src={authorAvatarSrc} alt="" loading="lazy" decoding="async" />
+            )}
           </div>
           <div className="feed-card-body">
             <div className="feed-card-byline">
@@ -308,6 +313,14 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
                 {!r.mine && (
                   <div className="chat-row-avatar" aria-hidden="true">
                     {(r.authorName || r.authorHandle).trim().charAt(0).toUpperCase() || "?"}
+                    {gateway.avatarUrl(r.authorAvatarPath) && (
+                      <img
+                        src={gateway.avatarUrl(r.authorAvatarPath) as string}
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    )}
                   </div>
                 )}
                 <div className="chat-row-stack">

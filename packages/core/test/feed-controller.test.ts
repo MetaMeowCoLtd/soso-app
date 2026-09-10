@@ -144,8 +144,24 @@ class FakeGateway implements SosoGateway {
   async myProfile() {
     return null;
   }
-  async updateProfile(input: { displayName: string; bio: string }) {
-    return { id: "u", handle: "u", displayName: input.displayName, bio: input.bio, coinBalance: 0 };
+  async updateProfile(input: { displayName: string; bio: string; avatarPath: string | null }) {
+    return {
+      id: "u",
+      handle: "u",
+      displayName: input.displayName,
+      bio: input.bio,
+      avatarPath: input.avatarPath,
+      coinBalance: 0,
+    };
+  }
+  async uploadAvatar(): Promise<string> {
+    throw new Error('not used');
+  }
+  async deleteAvatar() {
+    throw new Error('not used');
+  }
+  avatarUrl() {
+    return null;
   }
   async userProfile() {
     return null;

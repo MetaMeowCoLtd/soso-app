@@ -1,17 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AVATAR_MIME_TYPES,
   bioRemaining,
   BIO_MAX,
   DISPLAY_NAME_MAX,
   ERROR_MESSAGES_EN,
+  isOwnAvatarPath,
   validateBio,
   validateDisplayName,
+  type AvatarPath,
   type MyProfile,
   type SosoGateway,
 } from "soso-core";
 import { Avatar } from "./Avatar";
+import { AvatarImageError, avatarImageMessage, prepareAvatarImage } from "./avatarImage";
 import { Icon, ICONS } from "./Icon";
 
 /**
@@ -32,14 +36,26 @@ import { Icon, ICONS } from "./Icon";
  * shows what you can actually change is faster to use than one you have to
  * scan past.
  *
- * WHY THE AVATAR TILE IS PRESENT BUT INERT
+ * HOW THE AVATAR TILE WORKS
  * ---------------------------------------------------------------------
- * Profile pictures need an image-storage subsystem this app has not built
- * (see Avatar.tsx: every avatar is hash-coloured initials). Rather than
- * omit it and reshape the screen when it lands, the tile is here, showing
- * the initials avatar the rest of the app already uses, marked clearly as
- * not-yet-available. It reads as "coming", not as "broken", and the layout
- * is already the one the upload will slot into.
+ * The tile shipped inert first — the initials avatar with a "Photo coming
+ * soon" button — because profile pictures needed storage this app had not
+ * built. Migration 0038 and `SosoGateway.uploadAvatar` built it; the layout
+ * here is unchanged, which was the point of shipping the tile early.
+ *
+ * NOTHING IS STORED UNTIL SAVE. Picking a photo decodes, centre-crops and
+ * re-encodes it locally (see avatarImage.ts) and shows the result as a
+ * preview; the bytes are uploaded, and the profile pointed at them, only
+ * when Save runs. So Cancel leaves nothing behind — no orphaned object in
+ * the bucket, no half-changed profile — and a failed name validation cannot
+ * strand an uploaded file. The cost is a slightly slower Save on a slow
+ * connection, which is the right side of that trade for an action taken
+ * once in a while.
+ *
+ * The previous picture is deleted after the new one is saved, not before:
+ * if the save fails, the profile still points at an object that still
+ * exists. A delete that fails leaves an unreferenced file and nothing worse,
+ * which is why it is not allowed to fail the save.
  *
  * WHY IT OWNS ITS OWN LOAD RATHER THAN TAKING THE PROFILE AS A PROP
  * ---------------------------------------------------------------------
@@ -78,12 +94,22 @@ export default function ProfileSettings({
   const [handle, setHandle] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
+  // The path currently on the profile. Cleared to null by "Remove photo",
+  // replaced by whatever `uploadAvatar` returns on save.
+  const [avatarPath, setAvatarPath] = useState<AvatarPath>(null);
+  // A picked-but-not-yet-uploaded image, and the object URL previewing it.
+  // Both null in the ordinary case where the photo was not touched.
+  const [pending, setPending] = useState<{ blob: Blob; previewUrl: string } | null>(null);
+  const [preparing, setPreparing] = useState(false);
   // The values as last saved, so "Save" can be disabled when nothing
   // actually changed — a save button that does nothing is a button that
   // makes you doubt whether it worked.
-  const [saved, setSaved] = useState<{ name: string; bio: string } | null>(null);
+  const [saved, setSaved] = useState<{ name: string; bio: string; avatarPath: AvatarPath } | null>(
+    null,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -97,7 +123,8 @@ export default function ProfileSettings({
         setHandle(profile.handle);
         setName(profile.displayName);
         setBio(profile.bio);
-        setSaved({ name: profile.displayName, bio: profile.bio });
+        setAvatarPath(profile.avatarPath);
+        setSaved({ name: profile.displayName, bio: profile.bio, avatarPath: profile.avatarPath });
       } catch {
         // Leaves the fields empty and the error visible rather than
         // pretending a blank profile loaded successfully.
@@ -111,20 +138,87 @@ export default function ProfileSettings({
     };
   }, [gateway]);
 
+  // An object URL is a live handle into the document, not a string: dropping
+  // the last reference to one without revoking it keeps the whole decoded
+  // image alive for the life of the page. Revoked when it is replaced and
+  // when the screen closes.
+  useEffect(() => {
+    const url = pending?.previewUrl;
+    return url ? () => URL.revokeObjectURL(url) : undefined;
+  }, [pending]);
+
   const nameCheck = useMemo(() => validateDisplayName(name), [name]);
   const bioCheck = useMemo(() => validateBio(bio), [bio]);
   const remaining = bioRemaining(bio);
 
+  // What the circle shows right now: a freshly picked image before it is
+  // uploaded, otherwise whatever the profile already points at. Resolved
+  // through the gateway because a stored path is not a URL — see
+  // `SosoGateway.avatarUrl`.
+  const avatarSrc = pending?.previewUrl ?? gateway.avatarUrl(avatarPath);
+
   const dirty =
-    saved !== null && (name.trim() !== saved.name.trim() || bio.trim() !== saved.bio.trim());
-  const canSave = loaded && dirty && nameCheck.ok && bioCheck.ok && !saving;
+    saved !== null &&
+    (name.trim() !== saved.name.trim() ||
+      bio.trim() !== saved.bio.trim() ||
+      pending !== null ||
+      avatarPath !== saved.avatarPath);
+  const busy = saving || preparing;
+  const canSave = loaded && dirty && nameCheck.ok && bioCheck.ok && !busy;
+
+  async function pickPhoto(file: File | null | undefined) {
+    if (!file) return;
+    setPreparing(true);
+    setError(null);
+    try {
+      const blob = await prepareAvatarImage(file);
+      // Supersedes both the stored path and any earlier pick — `pending`
+      // wins over `avatarPath` everywhere it is read, so choosing a photo
+      // after pressing Remove means "use this one" without needing to undo
+      // the removal first.
+      setPending({ blob, previewUrl: URL.createObjectURL(blob) });
+    } catch (err) {
+      setError(
+        err instanceof AvatarImageError
+          ? avatarImageMessage(err.problem)
+          : ERROR_MESSAGES_EN["soso/unknown"],
+      );
+    } finally {
+      setPreparing(false);
+    }
+  }
+
+  function removePhoto() {
+    setPending(null);
+    setAvatarPath(null);
+    setError(null);
+  }
 
   async function save() {
     if (!canSave || !nameCheck.ok || !bioCheck.ok) return;
     setSaving(true);
     setError(null);
     try {
-      const updated = await gateway.updateProfile({ displayName: nameCheck.value, bio: bioCheck.value });
+      // The upload comes first and is the only step that can leave anything
+      // behind on failure — an object nothing points at, which the next
+      // successful save does not compound.
+      const nextPath = pending ? await gateway.uploadAvatar(pending.blob) : avatarPath;
+      const previousPath = saved?.avatarPath ?? null;
+
+      const updated = await gateway.updateProfile({
+        displayName: nameCheck.value,
+        bio: bioCheck.value,
+        avatarPath: nextPath,
+      });
+
+      // Only now that the profile no longer references it, and only if it
+      // really was this person's own object. Deliberately not awaited into
+      // the failure path: the save has already succeeded, and an orphaned
+      // file is not worth telling anyone about, let alone worth making a
+      // successful save look failed.
+      if (previousPath && previousPath !== nextPath && isOwnAvatarPath(previousPath, updated.id)) {
+        void gateway.deleteAvatar(previousPath).catch(() => {});
+      }
       // Closes the screen rather than sitting on a "Saved ✓" state — Save
       // is the one action here with somewhere to go back TO (the profile
       // that just changed), so completing it should return there, the same
@@ -169,18 +263,58 @@ export default function ProfileSettings({
         <p className="settings-loading">Loading…</p>
       ) : (
         <div className="settings-scroll">
-          {/* Avatar — present, styled, and deliberately not yet wired to an
-              upload (see the component comment). */}
+          {/* Avatar. The circle and the pill open the same picker; the
+              hidden input is the only actual file control. */}
           <section className="settings-avatar-block">
-            <div className="settings-avatar-wrap">
-              <Avatar name={name || "You"} seed={handle ?? "you"} size={92} />
-              <span className="settings-avatar-badge" aria-hidden="true">
-                <Icon src={ICONS.plus} size={16} />
+            <input
+              ref={fileInput}
+              type="file"
+              accept={AVATAR_MIME_TYPES.join(",")}
+              hidden
+              onChange={(e) => {
+                void pickPhoto(e.target.files?.[0]);
+                // Cleared so picking the SAME file twice in a row still
+                // fires a change event — without this, re-choosing a photo
+                // after removing it does nothing at all.
+                e.target.value = "";
+              }}
+            />
+
+            <button
+              type="button"
+              className="settings-avatar-button"
+              onClick={() => fileInput.current?.click()}
+              disabled={busy}
+              aria-label={avatarSrc ? "Change profile photo" : "Add a profile photo"}
+            >
+              <span className="settings-avatar-wrap">
+                <Avatar name={name || "You"} seed={handle ?? "you"} src={avatarSrc} size={92} />
+                <span className="settings-avatar-badge" aria-hidden="true">
+                  <Icon src={ICONS.plus} size={16} />
+                </span>
               </span>
-            </div>
-            <button type="button" className="settings-avatar-cta" disabled title="Photo upload is coming soon">
-              Photo coming soon
             </button>
+
+            <div className="settings-avatar-actions">
+              <button
+                type="button"
+                className="settings-avatar-cta"
+                onClick={() => fileInput.current?.click()}
+                disabled={busy}
+              >
+                {preparing ? "Preparing…" : avatarSrc ? "Change photo" : "Add photo"}
+              </button>
+              {avatarSrc && (
+                <button
+                  type="button"
+                  className="settings-avatar-remove"
+                  onClick={removePhoto}
+                  disabled={busy}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
           </section>
 
           <section className="settings-group" aria-label="Profile">

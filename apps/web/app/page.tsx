@@ -197,6 +197,7 @@ function Map({
   // in demo mode too, where presence — and therefore presence.me — is off.
   const [myHandle, setMyHandle] = useState<string | null>(null);
   const [myName, setMyName] = useState<string>("You");
+  const [myAvatarPath, setMyAvatarPath] = useState<string | null>(null);
 
   const refreshMyIdentity = useCallback(() => {
     void gateway
@@ -205,6 +206,7 @@ function Map({
         if (!p) return;
         setMyHandle(p.handle);
         setMyName(p.displayName);
+        setMyAvatarPath(p.avatarPath);
       })
       .catch(() => {});
   }, [gateway]);
@@ -1421,7 +1423,7 @@ function Map({
           onSaved={() => {
             // The People card reads the name from presence; the Profile tab
             // and its tab-bar avatar read it from myProfile. Refresh both so
-            // the new name shows everywhere the moment you're back.
+            // the new name and photo show everywhere the moment you're back.
             presence.refreshMe();
             refreshMyIdentity();
           }}
@@ -1517,9 +1519,10 @@ function Map({
             <span>Friends</span>
           </button>
           {/* Your own profile, last — the Instagram/Threads convention. The
-              tab icon is your own avatar (initials for now) rather than a
-              generic person glyph, so it reads as "you" and never collides
-              with the Friends icon. A teal ring marks it when active. */}
+              tab icon is your own avatar — your photo if you have set one,
+              your initial if not — rather than a generic person glyph, so it
+              reads as "you" and never collides with the Friends icon. A teal
+              ring marks it when active. */}
           <button
             type="button"
             role="tab"
@@ -1528,7 +1531,12 @@ function Map({
             onClick={() => switchTab("profile")}
           >
             <span className={`tab-bar-avatar${activeTab === "profile" ? " active" : ""}`}>
-              <Avatar name={myName} seed={myHandle ?? "you"} size={22} />
+              <Avatar
+                name={myName}
+                seed={myHandle ?? "you"}
+                src={gateway.avatarUrl(myAvatarPath)}
+                size={22}
+              />
             </span>
             <span>Profile</span>
           </button>

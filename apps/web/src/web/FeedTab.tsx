@@ -284,6 +284,8 @@ export function FeedCard({
     }
   }
 
+  const authorAvatarSrc = gateway.avatarUrl(post.author.avatarPath);
+
   return (
     <li className="feed-card" onClick={onOpen} role="button" tabIndex={0}>
       {/* The avatar and name/handle open the AUTHOR's profile; the rest of
@@ -299,6 +301,9 @@ export function FeedCard({
         }}
       >
         {initialsOf(post.author.displayName)}
+        {authorAvatarSrc && (
+          <img src={authorAvatarSrc} alt="" loading="lazy" decoding="async" />
+        )}
       </button>
       <div className="feed-card-body">
         <div className="feed-card-byline">

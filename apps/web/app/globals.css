@@ -347,6 +347,12 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 /* The run's earlier rows keep the indent but show no circle — one avatar
    per run, on the last message, the way every threaded chat does it. */
 .chat-row-avatar:empty { background:transparent; }
+/* These two circles are hand-rolled rather than <Avatar> (they predate it
+   and are sized to their own rows), so they need the same object-fit
+   treatment for the photo case. `position:relative` on the parent is what
+   the absolutely-positioned image anchors to. */
+.chat-row-avatar { position:relative; overflow:hidden; }
+.chat-row-avatar img, .feed-card-avatar img { position:absolute; inset:0; width:100%; height:100%; border-radius:50%; object-fit:cover; }
 .chat-row-stack { display:flex; flex-direction:column; min-width:0; max-width:min(78%, 460px); }
 .chat-row.mine .chat-row-stack { align-items:flex-end; }
 .chat-row-author { margin:8px 0 3px 12px; color:var(--muted); font-size:.66rem; font-weight:750; }
@@ -617,6 +623,9 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    colour derived from the handle so a face-less list is still scannable;
    see Avatar.tsx. */
 .avatar { position:relative; flex-shrink:0; display:grid; place-items:center; border-radius:50%; color:#fff; font-weight:800; letter-spacing:-.01em; }
+/* Covers the gradient rather than replacing it, so the disc is never empty
+   while the photo loads and the colour is what shows if it never does. */
+.avatar-image { position:absolute; inset:0; width:100%; height:100%; border-radius:50%; object-fit:cover; }
 .avatar-dot { position:absolute; right:0; bottom:0; width:12px; height:12px; border-radius:50%; border:2.5px solid #fff; background:#c3ccc8; }
 .avatar-dot.online { background:#34d399; }
 
@@ -825,7 +834,7 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    divider-only treatment is what makes a stream of posts read as one
    continuous surface. */
 .feed-card { display:flex; gap:11px; padding:14px clamp(14px,3vw,22px) 8px; background:#fff; border-bottom:1px solid var(--hairline); }
-.feed-card-avatar { flex-shrink:0; display:grid; place-items:center; width:38px; height:38px; border-radius:50%; background:var(--teal); color:#fff; font-weight:800; font-size:.88rem; }
+.feed-card-avatar { position:relative; overflow:hidden; flex-shrink:0; display:grid; place-items:center; width:38px; height:38px; border-radius:50%; background:var(--teal); color:#fff; font-weight:800; font-size:.88rem; }
 .feed-card-body { min-width:0; flex:1; }
 /* The avatar and name are their own buttons (they open the profile, not the
    post) — reset the button chrome so they look identical to the plain
@@ -987,8 +996,20 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .settings-avatar-block { display:flex; flex-direction:column; align-items:center; gap:10px; padding:8px 0 4px; }
 .settings-avatar-wrap { position:relative; }
 .settings-avatar-badge { position:absolute; right:-2px; bottom:-2px; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; background:var(--deep); color:#fff; border:3px solid #f6f8f7; }
-.settings-avatar-cta { border:0; border-radius:999px; padding:7px 14px; background:#eef2f0; color:var(--muted); font-size:.76rem; font-weight:750; }
-.settings-avatar-cta:disabled { opacity:.7; }
+.settings-avatar-cta { border:0; border-radius:999px; padding:7px 14px; background:#eef2f0; color:var(--deep); font-size:.76rem; font-weight:750; cursor:pointer; }
+.settings-avatar-cta:active { transform:scale(.97); }
+.settings-avatar-cta:disabled { opacity:.7; cursor:default; transform:none; }
+/* The whole tile is the picker. A 92px circle is a far easier target than
+   the pill beneath it, and it is where people reach first. */
+.settings-avatar-button { border:0; padding:0; background:transparent; cursor:pointer; display:block; border-radius:50%; }
+.settings-avatar-button:active { transform:scale(.97); }
+.settings-avatar-button:disabled { cursor:default; transform:none; }
+/* Destructive, so it does not sit in the same pill as "Change photo" — it
+   reads as a quiet link under the primary action, the way removing
+   something optional should. */
+.settings-avatar-remove { border:0; background:transparent; padding:2px 6px; color:var(--muted); font-size:.72rem; font-weight:700; text-decoration:underline; cursor:pointer; }
+.settings-avatar-remove:disabled { opacity:.5; cursor:default; }
+.settings-avatar-actions { display:flex; align-items:center; gap:10px; }
 
 .settings-group { display:flex; flex-direction:column; gap:2px; padding:6px; border-radius:18px; background:#fff; box-shadow:var(--e1); }
 .settings-field { display:flex; flex-direction:column; gap:6px; padding:12px 12px 13px; }

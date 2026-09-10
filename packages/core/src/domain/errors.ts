@@ -67,6 +67,9 @@ export const SOSO_ERROR_CODES = [
   'soso/handle_already_set',
   'soso/invalid_display_name',
   'soso/bio_too_long',
+  'soso/invalid_avatar_path',
+  'soso/invalid_avatar_image',
+  'soso/avatar_upload_failed',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -164,5 +167,11 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/handle_already_set': 'Your username has already been set.',
   'soso/invalid_display_name': 'Enter a name between 1 and 40 characters.',
   'soso/bio_too_long': 'That bio is too long (160 characters max).',
+  // Not something a person can act on by choosing differently — a path is
+  // built by the client, never typed — so this says what happened rather
+  // than asking them to fix it.
+  'soso/invalid_avatar_path': "That photo couldn't be saved. Try picking it again.",
+  'soso/invalid_avatar_image': 'Pick a JPEG, PNG or WebP image under 12 MB.',
+  'soso/avatar_upload_failed': "Couldn't upload that photo. Check your connection and try again.",
   'soso/unknown': 'Something went wrong. Try again.',
 };

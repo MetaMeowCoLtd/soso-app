@@ -208,7 +208,12 @@ export default function ProfileView({
 
           <section className="profile-view-head">
             <div className="profile-view-avatar-ring">
-              <Avatar name={profile.displayName} seed={profile.handle} size={96} />
+              <Avatar
+                name={profile.displayName}
+                seed={profile.handle}
+                src={gateway.avatarUrl(profile.avatarPath)}
+                size={96}
+              />
             </div>
             <h1 className="profile-view-name">{profile.displayName}</h1>
             <span className="profile-view-handle">@{profile.handle}</span>

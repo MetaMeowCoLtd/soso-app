@@ -52,7 +52,8 @@ Supabase.
 | Topic groups | Not implemented |
 | Presence and mutual-follow contacts | Implemented. Its own People tab; opt-in, off by default; see [Presence and people](#presence-and-people). |
 | Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
-| Photo uploads | Not implemented. The `post_media` table exists; nothing writes to it. |
+| Profile pictures (avatar upload) | Implemented. Storage layer not verified against a real bucket. See [Profile pictures](#profile-pictures). |
+| Photo uploads on posts | Not implemented. The `post_media` table exists; nothing writes to it. Unrelated to profile pictures above, which use their own bucket. |
 | Push notifications | Implemented, not verified end-to-end. See [Push notifications](#push-notifications). |
 | Early resolution (author's own early removal) | Implemented, not verified end-to-end. See [Early resolution](#early-resolution). |
 | Native iOS/Android application | Not present in this repository. See [Platforms](#platforms). |
@@ -1358,6 +1359,155 @@ stay in sync, as with `CELL_ZOOM`.
 - **Demo mode reports zero, honestly.** With no backend there are no other
   users, so the panel says so rather than inventing plausible activity.
 
+## Profile pictures
+
+Anyone can set a profile picture from **Edit profile**. It appears wherever
+that person does — the friends list, the DM inbox, chat bubbles, feed
+bylines, follower lists, their profile header, and the Profile tab's own
+icon in the tab bar. Most people have no picture, and that stays a
+first-class state: `Avatar` falls back to the hash-coloured initial it has
+always drawn, which is why a list with no photos in it is still scannable.
+
+**Status: implemented, storage layer not verified against a real bucket.**
+Everything that can be exercised locally has been — the crop and resize
+maths (`packages/core/test/avatar.test.ts`), and the whole pick → crop →
+save → render → remove cycle in demo mode. What has not been exercised is
+the half that needs a live Supabase project: creating the bucket, applying
+its policies, and performing an actual upload. That carries the same
+caveat as `board-tile-urls` and `notify-new-pin`; the full list is under
+"Not verified end-to-end" at the end of this section.
+
+### Why Supabase Storage and not an `avatar-url` Edge Function
+
+The app already has a presigned-URL pattern for binary data:
+[`board-tile-urls`](#drawing-boards) mints short-lived R2 URLs after
+running the same audience check that gates seeing the board's pin.
+Copying it for avatars would have been the consistent-looking choice, and
+it would have been wrong, for three reasons:
+
+1. **A board tile is audience-gated; an avatar is not.** That Edge
+   Function exists because R2 has no row-level security, so something must
+   run `can_see_post_as` before handing over a URL. A profile picture has
+   no such check to make — it sits beside a display name and handle that
+   `user_profile` already serves to `anon`. An access-control shim in front
+   of a public object protects nothing.
+2. **Signed URLs cannot be cached, and avatars are rendered by the dozen.**
+   A tile URL is minted once for one board someone is looking at. Avatars
+   appear in every list in the app. Presigned GETs would mean an Edge
+   Function round trip before a page of forty people could draw, and URLs
+   expiring in minutes, so neither the browser nor a CDN could keep
+   anything. A stable public URL is fetched once and served from cache
+   until the picture changes.
+3. **It needs no new infrastructure.** No R2 secrets, no second storage
+   provider, no extra `supabase functions deploy` in the release
+   checklist. The upload is an ordinary authenticated
+   `storage.from('avatars').upload(...)` whose authorization is an RLS
+   policy reviewed alongside every other policy in this repo, rather than
+   TypeScript inside a function.
+
+What this gives up: the bucket is public-read, so an avatar URL that is
+guessed or shared is readable by anyone — the same property a profile
+picture has on every other social product. Writes are not public.
+
+### How it works
+
+- **`profiles.avatar_path`** (migration 0038) holds an object path,
+  `<user id>/<random>.jpg`, or null. Never a URL: a URL bakes the project's
+  hostname into every row, and turning a path into something an `<img>` can
+  load is `SosoGateway.avatarUrl`'s job, which is also how demo mode
+  resolves the same field to a `data:` URL with no backend at all.
+- **The leading folder is the authorization.** The storage policies are
+  `(storage.foldername(name))[1] = auth.uid()::text` for insert, update and
+  delete; reads are open because the bucket is public. The column carries a
+  `CHECK` enforcing the same shape, and `update_profile` re-validates it, so
+  a row can never name an object its owner could not have written.
+- **Every read path that shows a person carries their avatar.** Migration
+  0038 restates `my_profile`, `update_profile`, `user_profile`,
+  `friends_presence`, `list_incoming_follows`, `soso.connection_rows`,
+  `open_dm_thread`, `list_dm_threads`, `send_chat_message`,
+  `list_recent_chat_messages`, `post_detail`, `list_feed_posts`,
+  `list_user_posts`, `create_post_reply` and `get_post_replies` — each in
+  whole, with one key added and nothing else changed, the same mechanic
+  migration 0033 used to add `bio`. `soso.pin` deliberately gains nothing: a
+  map marker renders as a category glyph, never as a face.
+- **The client re-encodes before uploading.** `prepareAvatarImage`
+  (`apps/web/src/web/avatarImage.ts`) centre-crops to a square, downscales
+  to at most 512px, and re-encodes as JPEG at quality 0.82 — a 4032px phone
+  photo becomes roughly 40 KB. The rules themselves (allowed types, the size
+  ceiling, the crop rectangle, the target size, the path shape) live in
+  `packages/core/src/domain/avatar.ts` and are unit-tested there; only the
+  canvas work is in the web app.
+- **A side effect worth knowing about:** re-encoding through a canvas drops
+  every EXIF tag, including the GPS coordinates a phone writes into a photo.
+  On an app about location, publishing where someone took their profile
+  picture would be a bad thing to do by accident. This is not the main
+  reason for the re-encode, but removing that step would reintroduce it.
+- **Nothing is stored until Save.** Picking a photo only produces a local
+  preview; the bytes are uploaded and the profile pointed at them when Save
+  runs. Cancelling therefore leaves nothing behind — no orphaned object, no
+  half-changed profile — and a name that fails validation cannot strand an
+  uploaded file. The previous object is deleted after the new one is saved,
+  never before, so a failed save leaves the profile pointing at something
+  that still exists.
+- **A new random filename per upload**, rather than overwriting a
+  per-user key. Changing your picture produces a URL nothing has cached, so
+  the new one appears immediately instead of after whatever lifetime the CDN
+  chose — which is what makes a year-long `cacheControl` safe.
+
+### Demo mode
+
+Unlike drawing boards, this is a genuine drop-in. A tile upload is "PUT
+bytes to a presigned URL", which has no local equivalent, hence
+`demoStoreBoardTileBlob` — the one export in `demo-gateway.ts` that is
+deliberately not part of `SosoGateway`. `uploadAvatar` carries the bytes
+itself, so demo mode implements the same method the real gateway does and
+no screen needs a mode check to set a profile picture.
+
+Images are stored as `data:` URLs in `localStorage` under
+`soso-demo:avatars:v1`, keyed by the same object path the real bucket would
+use, while `soso-demo:profile:v1` stores the path alongside the name and bio
+edits — the same split between "a column that names an object" and "a bucket
+that holds it". They persist across reloads (unlike demo tile pixels, which
+do not): there is exactly one, it is small, and a profile picture that
+vanished on refresh would read as broken rather than simplified.
+
+The invented people in demo mode have no pictures and render as initials.
+Fabricating one would be the only fake image in a set of demo data that is
+otherwise plausible-but-honest.
+
+### Setup
+
+Nothing beyond applying migrations. `supabase db push` (or `supabase db
+reset` locally) creates the `avatars` bucket and its policies. There are no
+secrets to set and no functions to deploy.
+
+If the bucket already exists, the migration converges it onto the settings
+here (public, 2 MB, `image/jpeg` only) rather than leaving whatever was
+there.
+
+### Not verified end-to-end
+
+Nothing in the environment that wrote migration 0038 can create a storage
+bucket, apply a policy to `storage.objects`, or perform a real upload. The
+same expectation applies as for `board-tile-urls` and `notify-new-pin`:
+budget a deploy-and-fix cycle before trusting the storage half against a
+real project. Specifically unverified:
+
+- The `storage.buckets` insert and its column set.
+- The four `storage.objects` policies, including whether a migration has the
+  privileges to create them in a given project.
+- `storage.from('avatars').upload(...)` against a live bucket, and the
+  public URL `avatarUrl` builds from a path.
+- Every restated function in migration 0038 — reviewed line by line against
+  its source and differing only by the added key, but not executed, the same
+  as every migration since 0025.
+
+Verified locally: the domain rules under `node --test`, and the complete
+pick → crop → preview → save → reload → remove cycle in demo mode,
+including that a rejected file (SVG, PDF, over 12 MB) reports the right
+message, that Cancel stores nothing, and that removing a picture deletes the
+now-unreferenced object.
+
 ## Drawing boards
 
 A `board` is a post category like any other — it gets a pin, an audience,
@@ -1465,8 +1615,11 @@ regardless of the registration fix.
 - `supabase/functions/board-tile-urls/`: mints short-lived presigned R2 GET
   (read) or PUT (write) URLs after checking `can_see_post_as` for the
   caller — the same audience predicate every other read path in the app
-  uses. This is the piece that has no precedent elsewhere in the codebase;
-  `post_media` stores an `object_key` too but nothing signs a URL for it.
+  uses. This is still the only signed-URL path in the codebase:
+  `post_media` stores an `object_key` too but nothing signs a URL for it,
+  and [profile pictures](#profile-pictures) deliberately use a public
+  Supabase Storage bucket instead, because an avatar has no audience check
+  to make and is rendered far too often for an uncacheable URL.
 - `SosoGateway`'s board methods (`getBoard`, `listBoardTiles`,
   `getBoardTileDownloadUrls`, `getBoardTileUploadUrls`, `flushBoardTile`):
   the tile-index-and-persistence half of the gateway surface the plan calls
@@ -1613,8 +1766,13 @@ None of the following occurs automatically from a `git push`.
   `seats` report's condition has changed (tables filling up) the way, say,
   a sensor might. It is manual (or vote-driven) either way now, just no
   longer impossible.
-- **Photo uploads are not implemented**, despite the `post_media` table
-  existing in the schema.
+- **Photos on posts are not implemented**, despite the `post_media` table
+  existing in the schema. Profile pictures are a separate feature and are
+  implemented — see [Profile pictures](#profile-pictures) — but nothing
+  attaches an image to a report.
+- **The avatar storage layer is unverified against a real bucket.** The
+  bucket, its policies, and the upload call have been reviewed, not
+  executed. See [Profile pictures](#profile-pictures).
 - **Push notifications are implemented but unverified end-to-end**, and
   have no area management interface beyond a single toggle. See [Push
   notifications](#push-notifications) for the complete list of limitations.
