@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0039  Profiles list only location-less posts
+-- 0041  Profiles list only location-less posts
 -- ============================================================================
 --
 -- A profile page was listing every live post its owner had written,

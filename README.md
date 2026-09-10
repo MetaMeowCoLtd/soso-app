@@ -722,6 +722,16 @@ notification you have to open to triage, every time.
 Naming the sender discloses nothing new. DMs exist only between mutual
 follows, and the inbox shows that same name the instant it loads.
 
+**An image-only message has an empty body**, so both the DM and room
+notifications route through `messageNotificationBody`, which reads
+"Alex sent a photo" rather than interpolating the empty string into
+"Alex: " with nothing after the colon. A captioned image is announced as
+its caption with a 📷 prefix — the caption is the part with something to
+say, and suppressing it because a picture came along too would be worse
+than not mentioning the picture. The push carries no image and no URL:
+reading one needs a presigned URL minted per viewer, which is not work a
+notification should be doing.
+
 This section used to describe something considerably more elaborate. Under
 end-to-end encryption the server had no preview to send, so the push payload
 carried the message's **ciphertext**, its nonce, and the sender's public key,
@@ -1027,7 +1037,7 @@ tab's own "+" composer.
 ### Profiles list only these
 
 A profile page shows a person's location-less posts and nothing else
-(migration 0039). It used to list every live post they had written,
+(migration 0041). It used to list every live post they had written,
 including pinned ones, which was never a decision anyone made:
 `list_user_posts` (migration 0034) reused `list_feed_posts`' body minus the
 one predicate that makes the global feed location-less. The effect was that

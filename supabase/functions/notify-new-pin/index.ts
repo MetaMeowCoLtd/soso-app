@@ -191,6 +191,7 @@ interface DmMessagePayload {
   thread_id: string;
   sender_id: string;
   body: string;
+  has_image: boolean;
 }
 
 /**
@@ -216,6 +217,10 @@ function parseDmMessagePayload(value: unknown): DmMessagePayload | null {
     thread_id: r.thread_id,
     sender_id: r.sender_id,
     body: r.body,
+    // Only whether there IS one. The path itself would be useless in a push
+    // payload: reading the object needs a presigned URL, and minting one is
+    // per-viewer work this function has no reason to do for a notification.
+    has_image: typeof r.image_path === "string" && r.image_path.length > 0,
   };
 }
 
@@ -416,10 +421,6 @@ async function handleDmMessage(
   }
 
   const senderName = sender?.display_name ?? "Someone";
-  const text =
-    payload.body.length > DM_PREVIEW_LIMIT
-      ? `${payload.body.slice(0, DM_PREVIEW_LIMIT)}…`
-      : payload.body;
 
   // Naming the sender discloses nothing new: DMs only exist between mutual
   // follows, and the inbox shows this exact name the instant it loads.
@@ -432,7 +433,7 @@ async function handleDmMessage(
   // actually saw. One body now, with the text in it.
   const notificationBody = JSON.stringify({
     title: "SoSo",
-    body: `${senderName}: ${text}`,
+    body: messageNotificationBody(senderName, payload.body, payload.has_image, DM_PREVIEW_LIMIT),
     dmSenderId: payload.sender_id,
   });
 
@@ -534,6 +535,7 @@ interface ChatPayload {
   author_id: string;
   body: string;
   reply_to_id: string | null;
+  has_image: boolean;
 }
 
 function parseChatPayload(value: unknown): ChatPayload | null {
@@ -547,6 +549,7 @@ function parseChatPayload(value: unknown): ChatPayload | null {
     author_id: r.author_id,
     body: r.body,
     reply_to_id: typeof r.reply_to_id === "string" ? r.reply_to_id : null,
+    has_image: typeof r.image_path === "string" && r.image_path.length > 0,
   };
 }
 
@@ -588,6 +591,32 @@ const CHAT_PREVIEW_LIMIT = 140;
 
 /** The same, for a DM. Same reasoning, kept as its own name so either can move alone. */
 const DM_PREVIEW_LIMIT = 140;
+
+/**
+ * The notification body for a message that may be text, an image, or both.
+ *
+ * An image-only message has an EMPTY body (migration 0040 relaxed the
+ * not-empty check to "text or an image"), and both handlers below used to
+ * interpolate that body unconditionally — which produced a notification
+ * reading exactly "Alice: " with nothing after the colon. That is the whole
+ * reason this function exists rather than the two call sites each doing
+ * their own template string.
+ *
+ * A captioned image is announced as its caption, prefixed, rather than as
+ * "sent a photo": the caption is the part with something to say, and
+ * hiding it because a picture came along too would be worse than not
+ * mentioning the picture.
+ */
+function messageNotificationBody(
+  name: string,
+  body: string,
+  hasImage: boolean,
+  limit: number,
+): string {
+  const text = body.length > limit ? `${body.slice(0, limit)}…` : body;
+  if (text.length === 0) return hasImage ? `${name} sent a photo` : `${name} sent you a message`;
+  return hasImage ? `${name}: 📷 ${text}` : `${name}: ${text}`;
+}
 
 /**
  * A new message in the shared chat room.
@@ -703,20 +732,20 @@ async function handleChatMessage(
   }
 
   const name = author?.display_name || (author?.handle ? `@${author.handle}` : "Someone");
-  const text =
-    payload.body.length > CHAT_PREVIEW_LIMIT
-      ? `${payload.body.slice(0, CHAT_PREVIEW_LIMIT)}…`
-      : payload.body;
+  const summary = messageNotificationBody(name, payload.body, payload.has_image, CHAT_PREVIEW_LIMIT);
 
   const notificationBody = JSON.stringify({
     title: "SoSo",
     // "replied to you" only when that is the whole audience — saying it to a
     // room that also received this as ordinary chatter would be wrong for
     // everyone but one person, and the payload is shared by all of them.
+    // The reply wording replaces the name `summary` already starts with,
+    // rather than being prefixed onto it, so it never reads "Alex replied
+    // to you: Alex: hello".
     body:
       repliedToAuthor && ids.length === 1
-        ? `${name} replied to you: ${text}`
-        : `${name}: ${text}`,
+        ? summary.replace(`${name}: `, `${name} replied to you: `)
+        : summary,
     // Opens the Chat tab — see sw.js, and page.tsx's `?chat=` handling.
     chat: true,
   });
