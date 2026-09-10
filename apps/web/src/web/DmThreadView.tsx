@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
+  MESSAGE_IMAGE_MIME_TYPES,
   type DmMessage,
   type DmThread,
   type SosoGateway,
@@ -12,6 +13,8 @@ import {
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
+import { MessageImageLightbox, MessageImageView } from "./MessageImageView";
+import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
 
@@ -77,6 +80,9 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
   const [reportOpen, setReportOpen] = useState<DmMessage | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachment = useImageAttachment(gateway, { kind: "dm", threadId: thread.id });
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -119,13 +125,16 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
 
   async function send() {
     const body = input.trim();
-    if (!body || sending) return;
+    // Image-only is allowed; still blocked while one is uploading, or the
+    // send would attach nothing and silently drop the picture.
+    if ((!body && !attachment.image) || sending || attachment.busy) return;
     setSending(true);
     setError(null);
     try {
-      const sent = await gateway.sendDm(thread.id, body, replyingTo?.id ?? null);
+      const sent = await gateway.sendDm(thread.id, body, replyingTo?.id ?? null, attachment.image);
       setInput("");
       setReplyingTo(null);
+      attachment.clear();
       // The server's own echo, appended as-is. It used to be reassembled
       // here from the plaintext we still held, because decrypting our own
       // message back out of the cipher to recover a string we never lost
@@ -252,6 +261,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
               <DmBubble
                 message={message}
                 myId={myId}
+                gateway={gateway}
                 showAvatar={endsRun && !message.mine}
                 endsRun={endsRun}
                 otherName={thread.otherName}
@@ -261,6 +271,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onSwipeReply={() => startReply(message)}
                 onToggleReaction={(emoji) => void react(message, emoji)}
+                onOpenImage={setLightbox}
               />
             </Fragment>
           );
@@ -277,7 +288,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
               Replying to {replyingTo.mine ? "yourself" : thread.otherName}
             </span>
             <span className="chat-reply-bar-text">
-              {replyingTo.body}
+              {replyingTo.body || (replyingTo.image ? "Photo" : "")}
             </span>
           </div>
           <button
@@ -285,6 +296,28 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
             className="chat-reply-bar-cancel"
             onClick={() => setReplyingTo(null)}
             aria-label="Cancel reply"
+          >
+            <Icon src={ICONS.close} size={11} />
+          </button>
+        </div>
+      )}
+
+      {(attachment.previewUrl || attachment.error) && (
+        <div className="chat-attachment">
+          {attachment.previewUrl && (
+            <span className="chat-attachment-thumb">
+              <img src={attachment.previewUrl} alt="" />
+              {attachment.busy && <span className="chat-attachment-spinner" aria-label="Uploading" />}
+            </span>
+          )}
+          <span className="chat-attachment-text">
+            {attachment.error ?? (attachment.busy ? "Uploading…" : "Ready to send")}
+          </span>
+          <button
+            type="button"
+            className="chat-attachment-remove"
+            onClick={attachment.clear}
+            aria-label="Remove photo"
           >
             <Icon src={ICONS.close} size={11} />
           </button>
@@ -299,19 +332,42 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
         }}
       >
         <input
+          ref={fileInput}
+          type="file"
+          accept={MESSAGE_IMAGE_MIME_TYPES.join(",")}
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) attachment.pick(file);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          className="chat-attach"
+          onClick={() => fileInput.current?.click()}
+          disabled={sending || attachment.busy}
+          aria-label="Add a photo"
+          title="Add a photo"
+        >
+          <Icon src={ICONS.image} size={18} />
+        </button>
+        <input
           ref={inputRef}
           className="chat-input"
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={replyingTo ? "Reply…" : "Message…"}
+          placeholder={
+            attachment.previewUrl ? "Add a caption…" : replyingTo ? "Reply…" : "Message…"
+          }
           maxLength={DM_MAX_LENGTH}
           aria-label="Message"
         />
         <button
           className="chat-send"
           type="submit"
-          disabled={sending || input.trim().length === 0}
+          disabled={sending || attachment.busy || (input.trim().length === 0 && !attachment.image)}
           aria-label="Send"
         >
           <Icon src={ICONS.send} size={16} />
@@ -385,6 +441,7 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
 function DmBubble({
   message,
   myId,
+  gateway,
   showAvatar,
   endsRun,
   otherName,
@@ -394,10 +451,13 @@ function DmBubble({
   onOpenMenu,
   onSwipeReply,
   onToggleReaction,
+  onOpenImage,
 }: {
   message: DmMessage;
   /** Only used to label a reply quote as yours or theirs. */
   myId: string;
+  /** Needed to mint a presigned URL for an attached image — see MessageImageView. */
+  gateway: SosoGateway;
   showAvatar: boolean;
   endsRun: boolean;
   otherName: string;
@@ -413,6 +473,7 @@ function DmBubble({
   onOpenMenu: (rect: DOMRect) => void;
   onSwipeReply: () => void;
   onToggleReaction: (emoji: string) => void;
+  onOpenImage: (url: string) => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // The node useSwipeToReply actually moves — see ChatPanel's own
@@ -490,7 +551,7 @@ function DmBubble({
             <div ref={swipeTrackRef} className="chat-bubble-swipe-track">
               <div
                 ref={bubbleRef}
-                className="chat-bubble"
+                className={`chat-bubble${message.image && !message.body ? " chat-bubble-image-only" : ""}`}
                 {...bubbleHandlers}
               >
                 {message.replyTo && (
@@ -498,10 +559,23 @@ function DmBubble({
                     <span className="chat-quote-author">
                       {message.replyTo.senderId === myId ? "You" : otherName}
                     </span>
-                    <span className="chat-quote-body">{message.replyTo.body}</span>
+                    {message.replyTo.image && (
+                      <MessageImageView
+                        gateway={gateway}
+                        image={message.replyTo.image}
+                        availableWidth={40}
+                        maxHeight={40}
+                      />
+                    )}
+                    <span className="chat-quote-body">
+                      {message.replyTo.body || (message.replyTo.image ? "Photo" : "")}
+                    </span>
                   </div>
                 )}
-                <span className="chat-bubble-text">{message.body}</span>
+                {message.image && (
+                  <MessageImageView gateway={gateway} image={message.image} onOpen={onOpenImage} />
+                )}
+                {message.body && <span className="chat-bubble-text">{message.body}</span>}
               </div>
 
               {message.reactions.length > 0 && (

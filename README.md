@@ -1280,6 +1280,85 @@ encryption, and each adaptation existed only because of it:
   same `{emoji, count, mine}` shape as the room's — which is what lets the
   two surfaces share the components that render them.
 
+### Images in messages
+
+Both surfaces take one image per message, with an optional caption. Schema
+and RPCs in `supabase/migrations/20260910000040_message_images.sql`; the
+bytes live in **Cloudflare R2**, reached through the `message-image-urls`
+Edge Function.
+
+**Why R2 here when avatars use Supabase Storage.** The split is not
+arbitrary. An avatar is public by nature — anyone who can see a profile can
+see its picture — so it sits in a public bucket and `avatarUrl` is string
+construction with no round trip. A DM image is the opposite: exactly two
+people may ever see it, and R2 has no row-level security, so something has
+to stand between the browser and the bucket and apply a rule. That is the
+same shape drawing-board tiles already needed, so this reuses it rather
+than inventing a third storage pattern.
+
+**The object key carries the authorization**, which is why its shape is
+load-bearing rather than cosmetic:
+
+```
+chat/<author_id>/<uuid>.jpg          room
+dm/<thread_id>/<author_id>/<uuid>.jpg   conversation
+```
+
+- The **author** segment is checked by `send_chat_message`/`send_dm`
+  (`soso.owns_message_image`). Without it, anyone could attach a key
+  somebody else uploaded and publish their image under their own name.
+- The **thread** segment is what lets the Edge Function decide who may
+  *read* a DM image, by reading the thread id out of the key and calling
+  `may_read_dm_thread` — the same membership and block rules as every other
+  DM read. A flat key would make that either impossible or dependent on the
+  message referencing it, which breaks the moment a message is deleted and
+  its image is not.
+
+Keys are minted server-side and never accepted from the caller, so "you can
+only be issued a key under your own id" is true by construction.
+
+**Uploading happens on pick, not on send** (`useImageAttachment`, shared by
+both composers). Encoding a phone photo and uploading it after the send
+button is pressed would make sending an image feel broken in a way sending
+text does not; picking starts the work immediately and by the time a caption
+is typed the bytes are usually already in the bucket.
+
+**The client re-encodes before upload** (`messageImage.ts`, rules and tests
+in `packages/core/src/domain/message-image.ts`): downscaled to a 1600px
+longest edge and re-encoded to JPEG, which turns a 3–8 MB phone photo into
+roughly 200–400 KB. Aspect ratio is preserved — unlike an avatar, cropping a
+message image would be the app deciding what the picture is about.
+
+That re-encode also strips EXIF, **including the GPS coordinates a phone
+writes into a photo**. On an app whose entire subject is location, silently
+attaching the exact spot a picture was taken to a message sent to a room of
+strangers would be a genuinely harmful thing to do by accident. It is a side
+effect of the resize rather than its motive, but removing the resize would
+reintroduce it.
+
+**Reading needs a presigned URL per image**, cached by path in a
+module-level cache and batched per tick (`MessageImageView.tsx`) — a
+conversation is dozens of bubbles mounting and unmounting as it scrolls, and
+per-component fetching would mean a round trip every time one scrolled back
+into view. Stored dimensions size the box before the bytes arrive, so a
+decoding image never shoves the conversation around.
+
+**Not built, and named rather than implied:** one image per message (no
+galleries); no thumbnails or server-side transcoding; and **no orphan
+cleanup** — an image picked and then abandoned stays in the bucket, and
+deleting a message does not delete its object. Both need a sweeper holding
+R2 credentials.
+
+**Setup.** The same four R2 secrets `board-tile-urls` already uses; if that
+function works, these are set. Then:
+
+```bash
+supabase functions deploy message-image-urls
+```
+
+No `--no-verify-jwt` — this one is called from the browser and the whole
+point is establishing which user is asking.
+
 ### One sheet, one gesture, both surfaces
 
 The long-press action sheet (reply, react, copy, delete/report) and the

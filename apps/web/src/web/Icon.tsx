@@ -65,6 +65,7 @@ export const ICONS = {
   eraser: "icons/ui/eraser.svg",
   feed: "icons/ui/feed.svg",
   heart: "icons/ui/heart.svg",
+  image: "icons/ui/image.svg",
   heartFilled: "icons/ui/heart-filled.svg",
   locate: "icons/ui/locate.svg",
   lock: "icons/ui/lock.svg",

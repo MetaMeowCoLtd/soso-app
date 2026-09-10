@@ -66,6 +66,8 @@ import type {
   BoardTileMeta,
   BoardTilePutRequest,
   ChatMessage,
+  ChatReplyPreview,
+  MessageImage,
   Connection,
   ConnectionsPage,
   DmMessage,
@@ -431,6 +433,15 @@ const WALKS_KEY = "soso-demo:walks:v1";
 const BOARDS_KEY = "soso-demo:boards:v1";
 const BOARD_TILES_KEY = "soso-demo:board-tiles:v1";
 const AVATARS_KEY = "soso-demo:avatars:v1";
+/**
+ * Message images, keyed by the same object path the real backend would use.
+ *
+ * Demo mode has no R2 and no Edge Function to presign against, so the bytes
+ * live here as data URLs — the same trick avatars already use. That keeps
+ * images testable offline instead of making them the one messaging feature
+ * that cannot be tried without a Cloudflare bucket.
+ */
+const MESSAGE_IMAGES_KEY = "soso-demo:message-images:v1";
 
 // Same ceiling record_walk enforces server-side (migration 0016): how many
 // coins one user can earn from walking per hour, regardless of how many
@@ -489,6 +500,14 @@ function writeJSON(key: string, value: unknown): void {
  * `deleteAvatar` removes one.
  */
 type DemoAvatarStore = Record<string, string>;
+
+function loadMessageImages(): Record<string, string> {
+  return readJSON<Record<string, string>>(MESSAGE_IMAGES_KEY, {});
+}
+
+function saveMessageImages(store: Record<string, string>): void {
+  writeJSON(MESSAGE_IMAGES_KEY, store);
+}
 
 function loadAvatars(): DemoAvatarStore {
   return readJSON<DemoAvatarStore>(AVATARS_KEY, {});
@@ -757,6 +776,9 @@ interface DemoChatMessage {
   createdAt: string;
   authorId: string;
   replyToId: string | null;
+  imagePath?: string | null;
+  imageWidth?: number | null;
+  imageHeight?: number | null;
 }
 
 function loadChatMessages(): DemoChatMessage[] {
@@ -782,10 +804,7 @@ function saveChatReactions(reactions: DemoChatReaction[]): void {
   writeJSON(CHAT_REACTIONS_KEY, reactions);
 }
 
-function chatReplyPreview(
-  id: string | null,
-  me: string,
-): { id: string; body: string; author_name: string } | null {
+function chatReplyPreview(id: string | null, me: string): ChatReplyPreview | null {
   if (!id) return null;
   const target = loadChatMessages().find((m) => m.id === id);
   if (!target) return null;
@@ -793,8 +812,15 @@ function chatReplyPreview(
   return {
     id: target.id,
     body: target.body,
-    author_name: target.authorId === me ? "You" : "A neighbour",
+    authorName: target.authorId === me ? "You" : "A neighbour",
+    image: demoMessageImage(target),
   };
+}
+
+/** The decoded shape `MessageImage` expects, or null when there is no image. */
+function demoMessageImage(m: DemoChatMessage): MessageImage | null {
+  if (!m.imagePath || !m.imageWidth || !m.imageHeight) return null;
+  return { path: m.imagePath, width: m.imageWidth, height: m.imageHeight };
 }
 
 function chatReactionsFor(messageId: string, me: string): { emoji: string; count: number; mine: boolean }[] {
@@ -1397,6 +1423,33 @@ export function createDemoGateway(): SosoGateway {
     },
 
     async unfollowUser(): Promise<void> {},
+    // Paths match the real backend's shape (see migration 0040) so demo data
+    // and real data are the same kind of value, even though nothing here
+    // parses them — a demo that invented `demo-image-3` would hide a whole
+    // class of key-shape bug.
+    async uploadMessageImage(
+      image: Blob,
+      scope: { kind: "room" } | { kind: "dm"; threadId: string },
+    ): Promise<string> {
+      const me = getMe();
+      const path =
+        scope.kind === "room"
+          ? `chat/${me}/${crypto.randomUUID()}.jpg`
+          : `dm/${scope.threadId}/${me}/${crypto.randomUUID()}.jpg`;
+      const store = loadMessageImages();
+      store[path] = await blobToDataUrl(image);
+      saveMessageImages(store);
+      return path;
+    },
+
+    async messageImageUrls(paths: readonly string[]): Promise<Record<string, string | null>> {
+      const store = loadMessageImages();
+      // Null for anything missing, exactly as the real one returns null for
+      // an object the caller may not read — so the renderer's "no URL" path
+      // is exercised here too rather than only in production.
+      return Object.fromEntries(paths.map((p) => [p, store[p] ?? null]));
+    },
+
     async blockUser(): Promise<void> {},
     async unblockUser(): Promise<void> {},
 
@@ -1683,9 +1736,15 @@ export function createDemoGateway(): SosoGateway {
     // sense of the UI without pretending to share anything. Rate limiting
     // and reporting exist server-side for real accounts; neither applies
     // when the only participant is you.
-    async sendChatMessage(body: string, replyToId?: string | null): Promise<ChatMessage> {
+    async sendChatMessage(
+      body: string,
+      replyToId?: string | null,
+      image?: MessageImage | null,
+    ): Promise<ChatMessage> {
       const trimmed = body.trim();
-      if (trimmed.length === 0) throw new SosoError("soso/empty_message");
+      // Empty is allowed with an image, matching send_chat_message's own
+      // relaxed check in migration 0040.
+      if (trimmed.length === 0 && !image) throw new SosoError("soso/empty_message");
       if (trimmed.length > 500) throw new SosoError("soso/message_too_long");
       if (replyToId && !loadChatMessages().some((m) => m.id === replyToId)) {
         throw new SosoError("soso/message_not_found");
@@ -1698,6 +1757,9 @@ export function createDemoGateway(): SosoGateway {
         createdAt: new Date().toISOString(),
         authorId: me,
         replyToId: replyToId ?? null,
+        imagePath: image?.path ?? null,
+        imageWidth: image?.width ?? null,
+        imageHeight: image?.height ?? null,
       };
       saveChatMessages([...loadChatMessages(), message]);
 
@@ -1711,10 +1773,9 @@ export function createDemoGateway(): SosoGateway {
         authorName: "You",
         authorAvatarPath: myAvatarPath(),
         mine: true,
-        replyTo: preview
-          ? { id: preview.id, body: preview.body, authorName: preview.author_name }
-          : null,
+        replyTo: preview,
         reactions: [],
+        image: demoMessageImage(message),
       };
     },
 
@@ -1740,10 +1801,9 @@ export function createDemoGateway(): SosoGateway {
           authorName: mine ? "You" : "A neighbour",
           authorAvatarPath: mine ? myAvatarPath() : null,
           mine,
-          replyTo: preview
-            ? { id: preview.id, body: preview.body, authorName: preview.author_name }
-            : null,
+          replyTo: preview,
           reactions: chatReactionsFor(m.id, me),
+          image: demoMessageImage(m),
         };
       });
     },

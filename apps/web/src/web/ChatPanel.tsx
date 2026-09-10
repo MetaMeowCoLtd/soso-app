@@ -5,12 +5,15 @@ import { createPortal } from "react-dom";
 import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
+  MESSAGE_IMAGE_MIME_TYPES,
   type ChatMessage,
   type DmThread,
   type SosoGateway,
 } from "soso-core";
 import DmInbox from "./DmInbox";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
+import { MessageImageLightbox, MessageImageView } from "./MessageImageView";
+import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
 import { Icon, ICONS } from "./Icon";
@@ -139,6 +142,12 @@ export default function ChatPanel({
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachment = useImageAttachment(gateway, { kind: "room" });
+  // The URL of the image currently open full-screen, or null. Holds the URL
+  // rather than the path because the thumbnail that opened it already had
+  // one minted — see MessageImageLightbox.
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   async function reload() {
     try {
@@ -181,14 +190,19 @@ export default function ChatPanel({
 
   async function send() {
     const body = input.trim();
-    if (!body || sending) return;
+    // An image-only message is allowed (see migration 0040), so "nothing to
+    // send" now means neither text NOR a finished attachment. Still blocked
+    // while one is uploading: sending then would attach nothing and silently
+    // drop the picture.
+    if ((!body && !attachment.image) || sending || attachment.busy) return;
     setSending(true);
     setError(null);
     const replyToId = replyingTo?.id ?? null;
     try {
-      const message = await gateway.sendChatMessage(body, replyToId);
+      const message = await gateway.sendChatMessage(body, replyToId, attachment.image);
       setInput("");
       setReplyingTo(null);
+      attachment.clear();
       // Optimistic append rather than waiting on the realtime round trip —
       // demo mode has no realtime signal at all, so without this a sent
       // message would never appear for its own sender there. The
@@ -350,6 +364,7 @@ export default function ChatPanel({
               {showDivider && <div className="chat-divider">{dividerLabel(message.createdAt)}</div>}
               <ChatMessageRow
                 message={message}
+                gateway={gateway}
                 avatarSrc={gateway.avatarUrl(message.authorAvatarPath)}
                 startsRun={startsRun}
                 endsRun={endsRun}
@@ -357,6 +372,7 @@ export default function ChatPanel({
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onSwipeReply={() => startReply(message)}
+                onOpenImage={setLightbox}
               />
             </Fragment>
           );
@@ -384,6 +400,28 @@ export default function ChatPanel({
         </div>
       )}
 
+      {(attachment.previewUrl || attachment.error) && (
+        <div className="chat-attachment">
+          {attachment.previewUrl && (
+            <span className="chat-attachment-thumb">
+              <img src={attachment.previewUrl} alt="" />
+              {attachment.busy && <span className="chat-attachment-spinner" aria-label="Uploading" />}
+            </span>
+          )}
+          <span className="chat-attachment-text">
+            {attachment.error ?? (attachment.busy ? "Uploading…" : "Ready to send")}
+          </span>
+          <button
+            type="button"
+            className="chat-attachment-remove"
+            onClick={attachment.clear}
+            aria-label="Remove photo"
+          >
+            <Icon src={ICONS.close} size={11} />
+          </button>
+        </div>
+      )}
+
       <form
         className="chat-compose"
         onSubmit={(e) => {
@@ -391,20 +429,61 @@ export default function ChatPanel({
           void send();
         }}
       >
+        {/* Hidden, driven by the button beside the input — a bare file
+            input cannot be styled to match anything, and every app people
+            already use presents this as an icon. */}
+        <input
+          ref={fileInput}
+          type="file"
+          accept={MESSAGE_IMAGE_MIME_TYPES.join(",")}
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) attachment.pick(file);
+            // Cleared so picking the SAME file twice in a row still fires a
+            // change event the second time.
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          className="chat-attach"
+          onClick={() => fileInput.current?.click()}
+          disabled={sending || attachment.busy}
+          aria-label="Add a photo"
+          title="Add a photo"
+        >
+          <Icon src={ICONS.image} size={18} />
+        </button>
         <input
           ref={inputRef}
           className="chat-input"
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={replyingTo ? "Reply…" : demoMode ? "Nobody else will see this" : "Message…"}
+          placeholder={
+            attachment.previewUrl
+              ? "Add a caption…"
+              : replyingTo
+                ? "Reply…"
+                : demoMode
+                  ? "Nobody else will see this"
+                  : "Message…"
+          }
           maxLength={500}
           aria-label="Message"
         />
-        <button className="chat-send" type="submit" disabled={sending || input.trim().length === 0} aria-label="Send">
+        <button
+          className="chat-send"
+          type="submit"
+          disabled={sending || attachment.busy || (input.trim().length === 0 && !attachment.image)}
+          aria-label="Send"
+        >
           <Icon src={ICONS.send} size={16} />
         </button>
       </form>
+
+      {lightbox && <MessageImageLightbox url={lightbox} onClose={() => setLightbox(null)} />}
 
       {/*
         Portalled to <body> rather than rendered here. .chat-tab is
@@ -446,6 +525,7 @@ export default function ChatPanel({
 
 function ChatMessageRow({
   message,
+  gateway,
   avatarSrc,
   startsRun,
   endsRun,
@@ -453,8 +533,11 @@ function ChatMessageRow({
   onOpenMenu,
   onToggleReaction,
   onSwipeReply,
+  onOpenImage,
 }: {
   message: ChatMessage;
+  /** Needed to mint a presigned URL for an attached image — see MessageImageView. */
+  gateway: SosoGateway;
   /** Resolved by the caller — see `SosoGateway.avatarUrl` on why a path is not a URL. */
   avatarSrc: string | null;
   startsRun: boolean;
@@ -464,6 +547,7 @@ function ChatMessageRow({
   onOpenMenu: (rect: DOMRect) => void;
   onToggleReaction: (emoji: string) => void;
   onSwipeReply: () => void;
+  onOpenImage: (url: string) => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // What actually moves during a drag — see the JSX below for why this is
@@ -581,14 +665,39 @@ function ChatMessageRow({
                 same positioned subtree as their own bubble, in the same
                 correct top-to-bottom order as everything else. */}
             <div ref={swipeTrackRef} className="chat-bubble-swipe-track">
-              <div ref={bubbleRef} className="chat-bubble" {...bubbleHandlers}>
+              <div
+                ref={bubbleRef}
+                className={`chat-bubble${message.image && !message.body ? " chat-bubble-image-only" : ""}`}
+                {...bubbleHandlers}
+              >
                 {message.replyTo && (
                   <div className="chat-bubble-quote">
                     <span className="chat-quote-author">{message.replyTo.authorName}</span>
-                    <span className="chat-quote-body">{message.replyTo.body}</span>
+                    {message.replyTo.image && (
+                      <MessageImageView
+                        gateway={gateway}
+                        image={message.replyTo.image}
+                        availableWidth={40}
+                        maxHeight={40}
+                      />
+                    )}
+                    <span className="chat-quote-body">
+                      {message.replyTo.body || (message.replyTo.image ? "Photo" : "")}
+                    </span>
                   </div>
                 )}
-                <span className="chat-bubble-text">{message.body}</span>
+                {message.image && (
+                  <MessageImageView
+                    gateway={gateway}
+                    image={message.image}
+                    onOpen={onOpenImage}
+                  />
+                )}
+                {/* Omitted entirely for an image-only message rather than
+                    rendered empty — an empty span still has line-height, and
+                    the gap under the picture would look like a missing
+                    caption. */}
+                {message.body && <span className="chat-bubble-text">{message.body}</span>}
               </div>
 
               {message.reactions.length > 0 && (

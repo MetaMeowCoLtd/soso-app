@@ -28,6 +28,7 @@ import type {
   DmMessage,
   DmThread,
   FeedPostsPage,
+  MessageImage,
   FlushedBoardTile,
   FriendTier,
   NewZone,
@@ -302,6 +303,53 @@ export interface SosoGateway {
   listFollowers(userId: string, before?: string): Promise<ConnectionsPage>;
   listFollowing(userId: string, before?: string): Promise<ConnectionsPage>;
 
+  // --- Message images ------------------------------------------------------
+  //
+  // Bytes go to Cloudflare R2, never through this interface. Both methods
+  // are round trips to the `message-image-urls` Edge Function, because R2
+  // has no access control of its own and the rule about who may read a DM
+  // image can only be applied somewhere that can ask the database — see
+  // migration 0040.
+  //
+  // This is why `MessageImage.path` is a path and not a URL, unlike
+  // `avatarUrl`'s synchronous string construction: an avatar lives in a
+  // public bucket, and these do not.
+
+  /**
+   * Stores image bytes for a message and returns the object path to attach.
+   *
+   * TAKES THE BYTES, like `uploadAvatar` and unlike `getBoardTileUploadUrls`.
+   * The Supabase adapter still does the two-step presigned dance R2 needs
+   * (mint a key, PUT to it) — it just does it INSIDE this method rather than
+   * handing the caller a URL to PUT to themselves. Boards expose the two
+   * steps because a board's audience check has to happen before a URL exists
+   * and the caller genuinely needs the URL; a message image has no such
+   * need, so the transport stays behind the port where it belongs. That is
+   * also what lets demo mode implement this honestly, with no R2 at all,
+   * instead of needing an escape hatch.
+   *
+   * Deliberately does NOT send a message: uploading and sending are two
+   * steps, so an image picked and then abandoned leaves no message behind.
+   * Pass the returned path to `sendChatMessage`/`sendDm` to attach it.
+   *
+   * The blob is expected to be a JPEG already downscaled to display size —
+   * see apps/web/src/web/messageImage.ts. Nothing here resizes anything.
+   */
+  uploadMessageImage(
+    image: Blob,
+    scope: { kind: "room" } | { kind: "dm"; threadId: string },
+  ): Promise<string>;
+
+  /**
+   * Presigned GET URLs for stored images, batched.
+   *
+   * Returns null for any path the caller may not read or that is malformed,
+   * rather than failing the whole batch — one image somebody lost access to
+   * must not blank out the rest of a conversation. URLs expire, so callers
+   * are expected to cache by path with a TTL rather than hold one forever.
+   */
+  messageImageUrls(paths: readonly string[]): Promise<Record<string, string | null>>;
+
   blockUser(userId: string): Promise<void>;
   unblockUser(userId: string): Promise<void>;
 
@@ -410,7 +458,11 @@ export interface SosoGateway {
    * server resolves it into `replyTo`'s preview, so the sender doesn't need
    * to already have that message's body on hand to show its own reply.
    */
-  sendChatMessage(body: string, replyToId?: string | null): Promise<ChatMessage>;
+  sendChatMessage(
+    body: string,
+    replyToId?: string | null,
+    image?: MessageImage | null,
+  ): Promise<ChatMessage>;
 
   /** Most recent messages, oldest first. Pass a prior page's oldest `createdAt` to page further back. */
   listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]>;
@@ -458,7 +510,12 @@ export interface SosoGateway {
    * `sendChatMessage` does for the room. The two are the same call shape
    * again now that neither one is moving ciphertext.
    */
-  sendDm(threadId: string, body: string, replyToId?: string | null): Promise<DmMessage>;
+  sendDm(
+    threadId: string,
+    body: string,
+    replyToId?: string | null,
+    image?: MessageImage | null,
+  ): Promise<DmMessage>;
 
   /** Moves your read cursor to now, clearing the thread's unread count. */
   markDmRead(threadId: string): Promise<void>;

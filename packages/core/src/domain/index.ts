@@ -11,3 +11,4 @@ export * from './phone';
 export * from './profile';
 export * from './avatar';
 export * from './connections';
+export * from './message-image';

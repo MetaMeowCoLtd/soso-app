@@ -69,6 +69,7 @@ import {
   type FlushedBoardTile,
   type WireFlushedBoardTile,
   type FeedPostsPage,
+  type MessageImage,
   type WireFeedPostsPage,
   type UserProfile,
   type ConnectionsPage,
@@ -493,6 +494,48 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return decodeConnectionsPage(data as WireConnectionsPage);
     },
 
+    async uploadMessageImage(
+      image: Blob,
+      scope: { kind: 'room' } | { kind: 'dm'; threadId: string },
+    ): Promise<string> {
+      const { data, error } = await client.functions.invoke('message-image-urls', {
+        body:
+          scope.kind === 'room'
+            ? { action: 'put', scope: 'room' }
+            : { action: 'put', scope: 'dm', threadId: scope.threadId },
+      });
+      if (error) throw await toEdgeFunctionError(error);
+      const row = data as { objectKey?: string; url?: string };
+      if (!row?.objectKey || !row?.url) throw new SosoError('soso/internal_error');
+
+      // Straight to R2, not back through the Edge Function: the presigned
+      // URL exists precisely so image bytes never occupy a function
+      // invocation's memory or its request-size ceiling.
+      const put = await fetch(row.url, {
+        method: 'PUT',
+        body: image,
+        // Must match the ContentType the URL was signed with, or R2 rejects
+        // the request as a signature mismatch — the header is part of what
+        // was signed, not metadata added afterwards.
+        headers: { 'Content-Type': 'image/jpeg' },
+      });
+      if (!put.ok) {
+        console.error('[soso] message image upload failed:', put.status);
+        throw new SosoError('soso/internal_error');
+      }
+      return row.objectKey;
+    },
+
+    async messageImageUrls(paths: readonly string[]): Promise<Record<string, string | null>> {
+      if (paths.length === 0) return {};
+      const { data, error } = await client.functions.invoke('message-image-urls', {
+        body: { action: 'get', paths: [...paths] },
+      });
+      if (error) throw await toEdgeFunctionError(error);
+      const rows = (data as { urls?: { path: string; url: string | null }[] })?.urls ?? [];
+      return Object.fromEntries(rows.map((r) => [r.path, r.url ?? null]));
+    },
+
     async blockUser(userId: string): Promise<void> {
       const { error } = await client.rpc('block_user', { p_user_id: userId });
       if (error) throw toSosoError(error);
@@ -649,10 +692,17 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       };
     },
 
-    async sendChatMessage(body: string, replyToId?: string | null): Promise<ChatMessage> {
+    async sendChatMessage(
+      body: string,
+      replyToId?: string | null,
+      image?: MessageImage | null,
+    ): Promise<ChatMessage> {
       const { data, error } = await client.rpc('send_chat_message', {
         p_body: body,
         p_reply_to: replyToId ?? null,
+        p_image_path: image?.path ?? null,
+        p_image_w: image?.width ?? null,
+        p_image_h: image?.height ?? null,
       });
       if (error) throw toSosoError(error);
       return decodeChatMessage(data as WireChatMessage);
@@ -719,11 +769,19 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return ((data ?? []) as WireDmMessage[]).map(decodeDmMessage);
     },
 
-    async sendDm(threadId: string, body: string, replyToId?: string | null): Promise<DmMessage> {
+    async sendDm(
+      threadId: string,
+      body: string,
+      replyToId?: string | null,
+      image?: MessageImage | null,
+    ): Promise<DmMessage> {
       const { data, error } = await client.rpc('send_dm', {
         p_thread_id: threadId,
         p_body: body,
         p_reply_to: replyToId ?? null,
+        p_image_path: image?.path ?? null,
+        p_image_w: image?.width ?? null,
+        p_image_h: image?.height ?? null,
       });
       if (error) throw toSosoError(error);
       return decodeDmMessage(data as WireDmMessage);

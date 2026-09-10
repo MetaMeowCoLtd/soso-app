@@ -707,11 +707,51 @@ export interface ChatMessageReaction {
   mine: boolean;
 }
 
+/**
+ * An image attached to a message.
+ *
+ * `path` is an R2 object key, not a URL — turning one into something an
+ * `<img>` can load needs a presigned URL from the `message-image-urls` Edge
+ * Function, because R2 has no access control of its own (see migration
+ * 0040). That asymmetry with `AvatarPath`, which becomes a URL by string
+ * construction, is the whole difference between a public bucket and a
+ * private one.
+ *
+ * The dimensions travel with it so a list can reserve the right space
+ * before the bytes arrive; without them every image that decodes shoves the
+ * messages below it down the screen.
+ */
+export interface MessageImage {
+  path: string;
+  width: number;
+  height: number;
+}
+
+export interface WireMessageImage {
+  image_path?: string | null;
+  image_width?: number | string | null;
+  image_height?: number | string | null;
+}
+
+export function decodeMessageImage(w: WireMessageImage): MessageImage | null {
+  if (!w.image_path) return null;
+  const width = Number(w.image_width) || 0;
+  const height = Number(w.image_height) || 0;
+  // A path with no usable dimensions is treated as no image at all rather
+  // than rendered at a guessed size — the database's own check constraint
+  // makes this unreachable, so reaching it means something upstream is
+  // wrong and guessing would hide it.
+  if (width <= 0 || height <= 0) return null;
+  return { path: w.image_path, width, height };
+}
+
 /** A quoted preview of the message being replied to — null once it's been deleted, same as no reply at all. */
 export interface ChatReplyPreview {
   id: string;
   body: string;
   authorName: string;
+  /** Non-null when the quoted message was an image; a quote of an image-only message is otherwise blank. */
+  image: MessageImage | null;
 }
 
 export interface ChatMessage {
@@ -725,6 +765,8 @@ export interface ChatMessage {
   mine: boolean;
   replyTo: ChatReplyPreview | null;
   reactions: ChatMessageReaction[];
+  /** Null for an ordinary text message. `body` may be empty when this is set. */
+  image: MessageImage | null;
 }
 
 export interface WireChatMessage {
@@ -736,8 +778,11 @@ export interface WireChatMessage {
   author_name: string;
   author_avatar?: string | null;
   mine: boolean;
-  reply_to?: { id: string; body: string; author_name: string } | null;
+  reply_to?: ({ id: string; body: string; author_name: string } & WireMessageImage) | null;
   reactions?: { emoji: string; count: number; mine: boolean }[] | null;
+  image_path?: string | null;
+  image_width?: number | string | null;
+  image_height?: number | string | null;
 }
 
 export function decodeChatMessage(w: WireChatMessage): ChatMessage {
@@ -751,9 +796,15 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
     authorAvatarPath: w.author_avatar ?? null,
     mine: w.mine,
     replyTo: w.reply_to
-      ? { id: w.reply_to.id, body: w.reply_to.body, authorName: w.reply_to.author_name }
+      ? {
+          id: w.reply_to.id,
+          body: w.reply_to.body,
+          authorName: w.reply_to.author_name,
+          image: decodeMessageImage(w.reply_to),
+        }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({ emoji: r.emoji, count: r.count, mine: r.mine })),
+    image: decodeMessageImage(w),
   };
 }
 
@@ -1007,6 +1058,8 @@ export interface DmThread {
   lastMessageAt: string | null;
   /** The last message's text, for the inbox preview. Null on a thread with no messages yet. */
   lastBody: string | null;
+  /** The last message carried an image — the inbox says "Photo" when its body is empty. */
+  lastHasImage: boolean;
   lastSenderId: string | null;
   unread: number;
 }
@@ -1019,6 +1072,7 @@ export interface WireDmThread {
   other_avatar?: string | null;
   last_message_at: string | null;
   last_body?: string | null;
+  last_has_image?: boolean | null;
   last_sender_id?: string | null;
   unread: number | string;
 }
@@ -1032,6 +1086,7 @@ export function decodeDmThread(w: WireDmThread): DmThread {
     otherAvatarPath: w.other_avatar ?? null,
     lastMessageAt: w.last_message_at ?? null,
     lastBody: w.last_body ?? null,
+    lastHasImage: Boolean(w.last_has_image),
     lastSenderId: w.last_sender_id ?? null,
     // `count(*)` comes back as a string from PostgREST for bigint columns.
     unread: Number(w.unread) || 0,
@@ -1050,6 +1105,8 @@ export interface DmReplyPreview {
   id: string;
   body: string;
   senderId: string;
+  /** Non-null when the quoted message was an image; a quote of an image-only message is otherwise blank. */
+  image: MessageImage | null;
 }
 
 /**
@@ -1079,6 +1136,8 @@ export interface DmMessage {
   /** Null once the quoted message is deleted (ON DELETE SET NULL), same as no reply at all. */
   replyTo: DmReplyPreview | null;
   reactions: DmMessageReaction[];
+  /** Null for an ordinary text message. `body` may be empty when this is set. */
+  image: MessageImage | null;
 }
 
 export interface WireDmMessage {
@@ -1088,8 +1147,11 @@ export interface WireDmMessage {
   body: string;
   created_at: string;
   mine: boolean;
-  reply_to?: { id: string; body: string; sender_id: string } | null;
+  reply_to?: ({ id: string; body: string; sender_id: string } & WireMessageImage) | null;
   reactions?: { emoji: string; count: number | string; mine: boolean }[] | null;
+  image_path?: string | null;
+  image_width?: number | string | null;
+  image_height?: number | string | null;
 }
 
 export function decodeDmMessage(w: WireDmMessage): DmMessage {
@@ -1101,12 +1163,18 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
     createdAt: w.created_at,
     mine: w.mine,
     replyTo: w.reply_to
-      ? { id: w.reply_to.id, body: w.reply_to.body, senderId: w.reply_to.sender_id }
+      ? {
+          id: w.reply_to.id,
+          body: w.reply_to.body,
+          senderId: w.reply_to.sender_id,
+          image: decodeMessageImage(w.reply_to),
+        }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({
       emoji: r.emoji,
       count: Number(r.count) || 0,
       mine: r.mine,
     })),
+    image: decodeMessageImage(w),
   };
 }

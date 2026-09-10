@@ -482,6 +482,54 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    flex:1 space instead, which is what actually moves the input above the
    keyboard rather than just adding empty room below it. --keyboard-inset
    is 0px whenever the keyboard is closed, so this is a no-op otherwise. */
+/* --- Images in messages ---------------------------------------------------
+   A stored image is an R2 object key, not a URL, so every one of these is
+   waiting on a presigned URL before it can paint (see MessageImageView).
+   The box is sized from the stored dimensions first and filled second,
+   which is what stops a decoding image shoving the conversation around. */
+.message-image { display:block; overflow:hidden; border-radius:14px; background:#eef1f0; }
+.message-image-button { padding:0; border:0; cursor:zoom-in; }
+.message-image-button:disabled { cursor:default; }
+.message-image img { display:block; width:100%; height:100%; object-fit:cover; }
+.message-image-missing { display:grid; place-items:center; padding:6px; color:var(--muted); font-size:.7rem; font-weight:650; text-align:center; }
+/* An image-only bubble is a frame around the picture, not a text bubble that
+   happens to contain one — the padding and background would otherwise show
+   as a border on three sides and a gap under it. */
+/* A bubble built around a picture, whether or not it has a caption: the
+   text padding that suits a sentence leaves a thick, uneven frame around an
+   image. `:has()` rather than another class on the element, because the
+   condition is literally "this bubble contains an image" and both
+   ChatPanel and DmThreadView would otherwise have to compute and pass it. */
+.chat-bubble:has(.message-image) { padding:4px; }
+.chat-bubble:has(.message-image) .chat-bubble-text { display:block; padding:4px 6px 2px; }
+.chat-bubble-image-only { padding:3px; background:transparent; box-shadow:none; }
+.chat-bubble-image-only .message-image { border-radius:12px; }
+.chat-bubble-quote .message-image { flex-shrink:0; border-radius:6px; }
+
+/* Full-screen viewer. Deliberately plain: one image, one way out, no
+   controls competing with the picture. */
+.message-lightbox { position:fixed; z-index:40; inset:0; display:grid; place-items:center; padding:24px; background:rgba(8,20,17,.92); }
+.message-lightbox img { max-width:100%; max-height:100%; border-radius:10px; }
+.message-lightbox-close { position:absolute; top:max(14px, env(safe-area-inset-top)); right:16px; width:36px; height:36px; display:grid; place-items:center; border:0; border-radius:50%; background:rgba(255,255,255,.16); color:#fff; font-size:1.5rem; line-height:1; }
+.message-lightbox-close:hover { background:rgba(255,255,255,.26); }
+
+/* The pending-attachment strip, above the composer like the reply bar. */
+.chat-attachment { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:8px 12px; background:#f6f8f7; border-top:1px solid var(--hairline); }
+.chat-attachment-thumb { position:relative; flex-shrink:0; width:40px; height:40px; border-radius:8px; overflow:hidden; background:#e6ebe8; }
+.chat-attachment-thumb img { width:100%; height:100%; object-fit:cover; }
+/* Sits over the thumbnail rather than beside it: the picture is the subject,
+   and the spinner is a state of that picture. */
+.chat-attachment-spinner { position:absolute; inset:0; background:rgba(255,255,255,.55); }
+.chat-attachment-spinner::after { content:""; position:absolute; top:50%; left:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%; border:2px solid var(--teal); border-top-color:transparent; animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.chat-attachment-text { flex:1; min-width:0; color:var(--muted); font-size:.78rem; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-attachment-remove { flex-shrink:0; display:grid; place-items:center; width:24px; height:24px; border:0; border-radius:50%; background:#e6ebe8; color:var(--muted); }
+.chat-attachment-remove:hover { background:#dae1dd; color:var(--deep); }
+
+.chat-attach { flex-shrink:0; display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:transparent; color:var(--muted); transition:background .16s, color .16s; }
+.chat-attach:hover:not(:disabled) { background:#eef1f0; color:var(--deep); }
+.chat-attach:disabled { opacity:.45; }
+
 .chat-compose { flex-shrink:0; display:flex; align-items:center; gap:8px; padding:9px 10px; padding-bottom:max(9px, env(safe-area-inset-bottom)); margin-bottom:var(--keyboard-inset, 0px); background:#fff; border-top:1px solid var(--hairline); }
 .chat-input { flex:1; min-width:0; border:1px solid transparent; border-radius:999px; padding:9px 15px; background:#f0f2f5; color:var(--ink); font-size:.86rem; font-family:inherit; transition:border-color .16s, background .16s; }
 .chat-input:focus { outline:none; border-color:var(--teal); background:#fff; }
