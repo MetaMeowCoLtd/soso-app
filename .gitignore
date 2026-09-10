@@ -12,3 +12,4 @@ supabase/.temp/
 
 # Screenshots captured for review; regenerated on demand, not source.
 .shots/
+apps/web/out

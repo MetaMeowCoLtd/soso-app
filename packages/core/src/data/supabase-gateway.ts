@@ -86,6 +86,8 @@ interface WireCategoryRow {
   default_ttl_seconds: number;
   max_ttl_seconds: number;
   location_precision_m: number;
+  /** Absent from a database that has not run migration 0043. */
+  requires_location?: boolean;
   requires_proximity: boolean;
   proximity_radius_m: number;
   allows_body: boolean;
@@ -166,6 +168,11 @@ function decodeCategory(row: WireCategoryRow): CategoryConfig {
     defaultTtlSeconds: row.default_ttl_seconds,
     maxTtlSeconds: row.max_ttl_seconds,
     locationPrecisionM: row.location_precision_m,
+    // Defaults to true for the same reason `bio` defaults to '': a server
+    // that has not run 0043 omits the key, and treating an unknown category
+    // as located keeps it visible in the map composer rather than making a
+    // stale backend look like it has no categories at all.
+    requiresLocation: row.requires_location ?? true,
     requiresProximity: row.requires_proximity,
     proximityRadiusM: row.proximity_radius_m,
     allowsBody: row.allows_body,

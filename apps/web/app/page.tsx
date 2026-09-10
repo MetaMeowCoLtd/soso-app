@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DmThread, NewPost, Pin, PostDetail, ReportReason, SosoGateway, UserProfile } from "soso-core";
 import { ERROR_MESSAGES_EN } from "soso-core";
 import PinPreview from "@/src/web/PinPreview";
@@ -175,6 +175,16 @@ function Map({
   onExitGuest?: () => void;
 }) {
   const { categories } = useCategories(gateway);
+  // The map's own controls only make sense for categories that keep a place.
+  // A "thought" (post_categories.requires_location = false) never gets a
+  // cell, so it can never be inside the viewport useFeed queries — a filter
+  // chip for it would be a button that reliably empties the map. ReportForm
+  // applies the same rule to its category list, and does it internally so it
+  // holds whoever passes it a list.
+  const placeableCategories = useMemo(
+    () => categories.filter((c) => c.requiresLocation),
+    [categories],
+  );
   const nowSeconds = useNowSeconds();
 
   // Lives here rather than inside ChatPanel because the badge's whole job is
@@ -1109,7 +1119,7 @@ function Map({
               >
                 All
               </button>
-              {categories.map((c) => (
+              {placeableCategories.map((c) => (
                 <button
                   className={activeFilters.includes(c.key) ? "chip active" : "chip"}
                   key={c.key}

@@ -61,9 +61,26 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
   const [geoState, setGeoState] = useState<GeoState>("unknown");
   const [device, setDevice] = useState<Coordinates | null>(null);
 
+  /**
+   * This composer starts from a dropped pin, so it can only honestly offer
+   * categories that keep one. A location-optional category ("thought", see
+   * post_categories.requires_location) has its lng/lat discarded by
+   * `create_post`, which would make choosing it here look like dropping a
+   * pin and then watching it never appear — the post exists, but only in
+   * the Feed tab, which has its own composer for exactly this.
+   *
+   * Filtered on the flag rather than on the key, so a second
+   * location-optional category added later is excluded without anyone
+   * having to remember this line.
+   */
+  const placeableCategories = useMemo(
+    () => categories.filter((c) => c.requiresLocation),
+    [categories],
+  );
+
   const category = useMemo(
-    () => categories.find((c) => c.key === categoryKey) ?? null,
-    [categories, categoryKey],
+    () => placeableCategories.find((c) => c.key === categoryKey) ?? null,
+    [placeableCategories, categoryKey],
   );
 
   // Subtypes are scoped to a category server-side, so switching category
@@ -173,7 +190,7 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
           </p>
           <h2>What&rsquo;s here?</h2>
           <div className="category-launcher">
-            {categories.map((c, i) => {
+            {placeableCategories.map((c, i) => {
               const look = lookOf(c.key);
               return (
                 <button

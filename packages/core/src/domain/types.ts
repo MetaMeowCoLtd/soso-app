@@ -26,6 +26,12 @@ export interface CategoryConfig {
   defaultTtlSeconds: number;
   maxTtlSeconds: number;
   locationPrecisionM: number;
+  /**
+   * False for a category composed without a place at all ("thought", see
+   * post_categories.requires_location). `create_post` discards lng/lat for
+   * these, so the map composer filters them out — see ReportForm.
+   */
+  requiresLocation: boolean;
   requiresProximity: boolean;
   proximityRadiusM: number;
   allowsBody: boolean;
