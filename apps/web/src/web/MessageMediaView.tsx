@@ -468,9 +468,13 @@ export function MessageMediaView({
       className="message-image message-image-button"
       style={style}
       onClick={
-        // A video plays in place; an image opens the viewer. Tapping a clip
-        // should start it, not move you to another screen first.
-        isVideo ? () => setPlaying(true) : onOpen ? () => onOpen(url, image) : undefined
+        // BOTH kinds open the viewer. A clip used to play inside its own
+        // bubble instead, which meant watching it in a ~260px box with the
+        // browser's control bar crammed into the bottom of it — and it was
+        // the one attachment you could not get a proper look at, when a
+        // video is the attachment that most needs the room. Inline play
+        // remains the fallback for a surface that offers no viewer.
+        onOpen ? () => onOpen(url, image) : isVideo ? () => setPlaying(true) : undefined
       }
       // A quote's thumbnail is not independently tappable — the whole quote
       // is — so it is not offered as a control either.
@@ -551,18 +555,33 @@ function InlineVideo({
 }
 
 /**
- * Full-screen viewer, opened by tapping a bubble's image.
+ * Full-screen viewer, opened by tapping a bubble's attachment.
  *
  * Takes the already-minted URL rather than the path: the thumbnail that
  * opened it necessarily had one, and re-minting would mean a spinner over a
  * picture the person can already see behind the overlay.
+ *
+ * FOR A VIDEO that same URL is the POSTER, not the clip — which is exactly
+ * what should be on screen first. The clip's own URL is minted here, once,
+ * after the viewer is open, so the poster fills the frame immediately and
+ * the bytes are still only fetched for a clip somebody actually opened.
  */
 export function MessageMediaLightbox({
   url,
+  media,
+  gateway,
   onSave,
   onClose,
 }: {
   url: string;
+  /**
+   * What is being viewed. Optional so a caller with nothing but a URL still
+   * works, in which case it is treated as an image — the shape this had
+   * before clips could be opened here at all.
+   */
+  media?: MessageMedia;
+  /** Needed only to mint a clip's URL, so it is optional alongside `media`. */
+  gateway?: SosoGateway;
   /** Omitted where saving is not offered; the button disappears rather than failing. */
   onSave?: () => Promise<SaveOutcome>;
   onClose: () => void;
@@ -637,9 +656,51 @@ export function MessageMediaLightbox({
           ×
         </button>
       </div>
-      <img src={url} alt="" />
+      {media?.kind === "video" && gateway ? (
+        <LightboxVideo gateway={gateway} media={media} poster={url} />
+      ) : (
+        <img src={url} alt="" />
+      )}
       {error && <p className="message-lightbox-error">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * The clip, at viewer size.
+ *
+ * Separate from `InlineVideo` rather than a reuse of it: that one is sized in
+ * pixels to fit a bubble, and this one has to fill whatever the viewer's
+ * frame turns out to be without breaking its aspect — the same
+ * `object-fit: contain` treatment the image beside it gets, which is what
+ * keeps the two feeling like one viewer.
+ */
+function LightboxVideo({
+  gateway,
+  media,
+  poster,
+}: {
+  gateway: SosoGateway;
+  media: MessageMedia;
+  poster: string;
+}) {
+  const { url, loading } = useMessageImageUrl(gateway, media.path);
+
+  // The poster holds the frame while the clip's URL is minted, so opening a
+  // video does not flash an empty black box first.
+  if (loading || !url) return <img src={poster} alt="" />;
+
+  return (
+    <video
+      src={url}
+      poster={poster}
+      controls
+      autoPlay
+      // Required on iOS, or play hands the clip to the fullscreen system
+      // player — which here would mean a second viewer on top of this one.
+      playsInline
+      preload="metadata"
+    />
   );
 }
 

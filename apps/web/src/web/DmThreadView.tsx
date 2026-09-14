@@ -637,6 +637,8 @@ export default function DmThreadView({
         createPortal(
           <MessageMediaLightbox
             url={lightbox.url}
+            media={lightbox.media}
+            gateway={gateway}
             onSave={() => saveMessageMedia(gateway, lightbox.media)}
             onClose={() => setLightbox(null)}
           />,

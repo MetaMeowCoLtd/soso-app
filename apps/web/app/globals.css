@@ -658,7 +658,9 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    `width`/`height:auto` keeps the image at its own aspect rather than
    stretching to the track, so the rounded corners stay on the picture
    instead of floating around a letterboxed box. */
-.message-lightbox img { display:block; width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; border-radius:10px; }
+/* The clip gets the same treatment as the picture beside it, so opening
+   either feels like the same viewer. */
+.message-lightbox img, .message-lightbox video { display:block; width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; border-radius:10px; }
 /* Save and close together, top-right, rather than close alone — a viewer
    with one control in the corner and another somewhere else is two places
    to look for the same kind of thing. */
