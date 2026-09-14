@@ -228,7 +228,38 @@ export default function ChatPanel({
 
   // `view` as the reset key: switching to Direct unmounts the room list, so
   // coming back is an open, not a continuation. See useChatScroll.
-  useChatScroll(listRef, messages, firstUnreadId, view);
+  const { jumpTo } = useChatScroll(listRef, messages, firstUnreadId, view);
+  /**
+   * The message a reply quote was just tapped to reach.
+   *
+   * Held as state and rendered as a class rather than toggled imperatively
+   * on the node: the rows are React's, so a re-render between the add and
+   * the remove would wipe an imperative class off and leave the animation
+   * half-played.
+   */
+  const [flashId, setFlashId] = useState<string | null>(null);
+
+  /**
+   * Scrolls to the message a quote is quoting.
+   *
+   * The "not loaded" branch is the interesting one. A conversation opens
+   * with only its newest messages, so a reply to something from last week
+   * points at a message that is not on the page — and the honest answer is
+   * to say so rather than to scroll somewhere arbitrary and let it look like
+   * the wrong message was highlighted.
+   */
+  function jumpToReply(id: string) {
+    if (!jumpTo(id)) {
+      setError("That message is further back in the conversation.");
+      return;
+    }
+    setError(null);
+    setFlashId(id);
+    // Cleared by id, so a second tap on a different quote mid-animation
+    // does not cancel the newer highlight.
+    window.setTimeout(() => setFlashId((current) => (current === id ? null : current)), 1500);
+  }
+
 
   const nowSeconds = useNowSeconds();
 
@@ -462,6 +493,10 @@ export default function ChatPanel({
                   message.id === receiptMessageId ? { kind: "count", count: message.seenBy } : null
                 }
                 nowSeconds={nowSeconds}
+                flash={message.id === flashId}
+                onJumpToReply={
+                  message.replyTo ? () => jumpToReply(message.replyTo!.id) : null
+                }
               />
             </Fragment>
           );
@@ -685,6 +720,8 @@ function ChatMessageRow({
   onOpenPost,
   receipt,
   nowSeconds,
+  flash,
+  onJumpToReply,
 }: {
   message: ChatMessage;
   /** Needed to mint a presigned URL for an attached image — see MessageMediaView. */
@@ -704,6 +741,10 @@ function ChatMessageRow({
   /** Non-null on the one message that carries a read receipt, null on the rest. */
   receipt: MessageReceiptState | null;
   nowSeconds: number;
+  /** Non-null when this row is the target of a just-tapped reply quote. */
+  flash: boolean;
+  /** Jumps to the message this one is replying to. Null when it has no quote. */
+  onJumpToReply: (() => void) | null;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // What actually moves during a drag — see the JSX below for why this is
@@ -768,7 +809,7 @@ function ChatMessageRow({
 
   return (
     <div
-      className={`chat-row ${message.mine ? "mine" : "theirs"}${endsRun ? " run-end" : ""}${pressed ? " pressed" : ""}`}
+      className={`chat-row ${message.mine ? "mine" : "theirs"}${endsRun ? " run-end" : ""}${pressed ? " pressed" : ""}${flash ? " flash" : ""}`}
       // How useChatScroll finds the message to open the conversation at.
       // An attribute rather than a ref per row: the hook needs to look up
       // ONE row out of a list it does not own, and threading a ref callback
@@ -837,7 +878,18 @@ function ChatMessageRow({
                 {...bubbleHandlers}
               >
                 {message.replyTo && (
-                  <div className="chat-bubble-quote">
+                  <button
+                    type="button"
+                    className="chat-bubble-quote"
+                    onClick={(e) => {
+                      // Stopped so the tap does not also reach the bubble,
+                      // which owns the long-press and swipe gestures.
+                      e.stopPropagation();
+                      onJumpToReply?.();
+                    }}
+                    disabled={!onJumpToReply}
+                    aria-label="Go to the message this replies to"
+                  >
                     <span className="chat-quote-author">{message.replyTo.authorName}</span>
                     {message.replyTo.media && (
                       <MessageMediaView
@@ -855,7 +907,7 @@ function ChatMessageRow({
                             ? "Pin"
                             : "")}
                     </span>
-                  </div>
+                  </button>
                 )}
                 {message.media && (
                   <MessageMediaView

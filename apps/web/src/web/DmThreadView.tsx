@@ -191,7 +191,30 @@ export default function DmThreadView({
     return messages[Math.max(0, messages.length - unreadAtOpen)]?.id ?? null;
   }, [messages, unreadAtOpen]);
 
-  useChatScroll(listRef, messages, firstUnreadId);
+  const { jumpTo } = useChatScroll(listRef, messages, firstUnreadId);
+  const [flashId, setFlashId] = useState<string | null>(null);
+
+  /**
+   * Scrolls to the message a quote is quoting.
+   *
+   * The "not loaded" branch is the interesting one. A conversation opens with
+   * only its newest messages, so a reply to something from last week points
+   * at a message that is not on the page — and the honest answer is to say
+   * so rather than to scroll somewhere arbitrary and let it look like the
+   * wrong message was highlighted.
+   */
+  function jumpToReply(id: string) {
+    if (!jumpTo(id)) {
+      setError("That message is further back in the conversation.");
+      return;
+    }
+    setError(null);
+    setFlashId(id);
+    // Cleared by id, so a second tap on a different quote mid-animation does
+    // not cancel the newer highlight.
+    window.setTimeout(() => setFlashId((current) => (current === id ? null : current)), 1500);
+  }
+
 
   const nowSeconds = useNowSeconds();
 
@@ -369,6 +392,8 @@ export default function DmThreadView({
                     : null
                 }
                 nowSeconds={nowSeconds}
+                flash={message.id === flashId}
+                onJumpToReply={message.replyTo ? () => jumpToReply(message.replyTo!.id) : null}
               />
             </Fragment>
           );
@@ -613,6 +638,8 @@ function DmBubble({
   onOpenPost,
   receipt,
   nowSeconds,
+  flash,
+  onJumpToReply,
 }: {
   message: DmMessage;
   /** Only used to label a reply quote as yours or theirs. */
@@ -640,6 +667,10 @@ function DmBubble({
   /** Non-null on the one message that carries a read receipt, null on the rest. */
   receipt: MessageReceiptState | null;
   nowSeconds: number;
+  /** Non-null when this row is the target of a just-tapped reply quote. */
+  flash: boolean;
+  /** Jumps to the message this one is replying to. Null when it has no quote. */
+  onJumpToReply: (() => void) | null;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // The node useSwipeToReply actually moves — see ChatPanel's own
@@ -694,7 +725,7 @@ function DmBubble({
 
   return (
     <div
-      className={`chat-row ${message.mine ? "mine" : "theirs"}${endsRun ? " run-end" : ""}${pressed ? " pressed" : ""}`}
+      className={`chat-row ${message.mine ? "mine" : "theirs"}${endsRun ? " run-end" : ""}${pressed ? " pressed" : ""}${flash ? " flash" : ""}`}
       // How useChatScroll finds the message to open the conversation at.
       // An attribute rather than a ref per row: the hook needs to look up
       // ONE row out of a list it does not own, and threading a ref callback
@@ -731,7 +762,18 @@ function DmBubble({
                 {...bubbleHandlers}
               >
                 {message.replyTo && (
-                  <div className="chat-bubble-quote">
+                  <button
+                    type="button"
+                    className="chat-bubble-quote"
+                    onClick={(e) => {
+                      // Stopped so the tap does not also reach the bubble,
+                      // which owns the long-press and swipe gestures.
+                      e.stopPropagation();
+                      onJumpToReply?.();
+                    }}
+                    disabled={!onJumpToReply}
+                    aria-label="Go to the message this replies to"
+                  >
                     <span className="chat-quote-author">
                       {message.replyTo.senderId === myId ? "You" : otherName}
                     </span>
@@ -751,7 +793,7 @@ function DmBubble({
                             ? "Pin"
                             : "")}
                     </span>
-                  </div>
+                  </button>
                 )}
                 {message.media && (
                   <MessageMediaView gateway={gateway} image={message.media} onOpen={onOpenImage} />

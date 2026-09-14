@@ -388,7 +388,21 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    JS-driven horizontal movement of its own, only opacity/scale. */
 .chat-swipe-indicator { position:absolute; top:50%; right:100%; margin-right:8px; opacity:0; transform:translateY(-50%) scale(.5); display:grid; place-items:center; width:30px; height:30px; border-radius:50%; background:#fff; color:var(--teal); box-shadow:var(--e1); pointer-events:none; }
 
-.chat-bubble-quote { display:block; margin:0 0 6px; padding:5px 9px; border-radius:11px; background:rgba(20,50,43,.07); }
+.chat-bubble-quote { display:block; width:100%; margin:0 0 6px; padding:5px 9px; border:0; border-radius:11px; background:rgba(20,50,43,.07); color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background .16s; }
+.chat-bubble-quote:hover:not(:disabled) { background:rgba(20,50,43,.13); }
+.chat-row.mine .chat-bubble-quote:hover:not(:disabled) { background:rgba(255,255,255,.3); }
+/* Disabled only when the quoted message is gone, so there is nowhere to go. */
+.chat-bubble-quote:disabled { cursor:default; }
+
+/* Where a tapped reply quote lands. A brief wash rather than a border: the
+   bubble's own shape is what you are looking for, and outlining it would
+   change its size mid-animation. */
+@keyframes chat-row-flash { 0% { background:rgba(0,167,143,0); } 22% { background:rgba(0,167,143,.22); } 100% { background:rgba(0,167,143,0); } }
+.chat-row.flash .chat-bubble { animation:chat-row-flash 1.5s ease-out; }
+/* An image-only bubble is transparent, so the wash has to land on the
+   picture's own box instead of a background nobody can see. */
+.chat-row.flash .chat-bubble-image-only .message-image { animation:chat-row-flash 1.5s ease-out; }
+@media (prefers-reduced-motion:reduce) { .chat-row.flash .chat-bubble, .chat-row.flash .chat-bubble-image-only .message-image { animation-duration:.01s; } }
 .chat-row.mine .chat-bubble-quote, .chat-sheet-anchor.mine .chat-bubble-quote { background:rgba(255,255,255,.2); }
 .chat-quote-author { display:block; font-size:.75rem; font-weight:800; opacity:.85; }
 /* Two lines maximum: a reply quoting a long message should show enough to
