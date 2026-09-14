@@ -817,6 +817,17 @@ export interface ChatMessage {
   image: MessageImage | null;
   /** Null unless a post was shared. `body` may be empty when this is set. */
   sharedPost: SharedPost | null;
+  /**
+   * How many OTHER people have read this far in the room.
+   *
+   * A count rather than a list of readers, and that is a property of the
+   * ROOM rather than a shortcut: it has no membership (migration 0015), so
+   * "who read this" would be an unbounded list of strangers. Migration
+   * 0045's header has the full reasoning, including why the table behind
+   * this is already the right shape for per-person receipts once group
+   * conversations exist.
+   */
+  seenBy: number;
 }
 
 export interface WireChatMessage {
@@ -836,6 +847,7 @@ export interface WireChatMessage {
   image_width?: number | string | null;
   image_height?: number | string | null;
   shared_post?: WireSharedPost | null;
+  seen_by?: number | string | null;
 }
 
 export function decodeChatMessage(w: WireChatMessage): ChatMessage {
@@ -860,6 +872,10 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
     reactions: (w.reactions ?? []).map((r) => ({ emoji: r.emoji, count: r.count, mine: r.mine })),
     image: decodeMessageImage(w),
     sharedPost: decodeSharedPost(w.shared_post),
+    // `count(*)` arrives as a string from PostgREST for bigint, and is
+    // absent entirely from a server that has not run migration 0045 — both
+    // of which mean "nobody, as far as we can tell" rather than an error.
+    seenBy: Number(w.seen_by) || 0,
   };
 }
 

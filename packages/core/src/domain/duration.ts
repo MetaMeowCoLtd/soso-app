@@ -70,3 +70,22 @@ export function formatAgoShort(createdAt: number, now: number): string {
   if (d < 7) return `${d}d`;
   return `${Math.floor(d / 7)}w`;
 }
+
+/**
+ * A read receipt's wording: "Seen just now", "Seen 13m ago", "Seen 2d ago".
+ *
+ * Built on `formatAgoShort` rather than `formatAgo` because a receipt sits
+ * under a message bubble as a caption, where "13 min ago" is wide enough to
+ * wrap on a narrow phone and the compact form is not.
+ *
+ * The sub-minute case is spelled out rather than composed, because
+ * `formatAgoShort` returns "now" there and "Seen now ago" is not English.
+ * That single seam is the whole reason this is a function and not a template
+ * string at the call site — and the reason it is here, next to the
+ * formatters it depends on, rather than in a component.
+ */
+export function formatSeenAt(readAt: number, now: number): string {
+  const s = Math.max(0, now - readAt);
+  if (s < 60) return 'Seen just now';
+  return `Seen ${formatAgoShort(readAt, now)} ago`;
+}

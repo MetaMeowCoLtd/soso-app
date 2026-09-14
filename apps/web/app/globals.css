@@ -532,6 +532,13 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 
 .chat-bubble-quote .message-image { flex-shrink:0; border-radius:6px; }
 
+/* Read receipt. Aligned to the same edge as the message it belongs to, so a
+   receipt under your own message reads as part of it rather than as a stray
+   line of chrome. Quiet on purpose: it is a status, not a message. */
+.message-receipt { display:block; margin:3px 2px 0; font-size:.68rem; font-weight:650; color:var(--muted); letter-spacing:.01em; }
+.chat-row.mine .message-receipt { text-align:right; }
+.chat-row.theirs .message-receipt { text-align:left; }
+
 /* Full-screen viewer. Deliberately plain: one image, one way out, no
    controls competing with the picture. */
 .message-lightbox { position:fixed; z-index:40; inset:0; display:grid; place-items:center; padding:24px; background:rgba(8,20,17,.92); }

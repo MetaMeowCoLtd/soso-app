@@ -699,6 +699,11 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return decodeChatMessage(data as WireChatMessage);
     },
 
+    async markChatRoomRead(upTo: string | null): Promise<void> {
+      const { error } = await client.rpc('mark_chat_room_read', { p_up_to: upTo });
+      if (error) throw toSosoError(error);
+    },
+
     async listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]> {
       const { data, error } = await client.rpc('list_recent_chat_messages', {
         p_before: before ?? null,
@@ -778,6 +783,12 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       });
       if (error) throw toSosoError(error);
       return decodeDmMessage(data as WireDmMessage);
+    },
+
+    async dmOtherReadAt(threadId: string): Promise<string | null> {
+      const { data, error } = await client.rpc('dm_other_read_at', { p_thread_id: threadId });
+      if (error) throw toSosoError(error);
+      return typeof data === 'string' ? data : null;
     },
 
     async markDmRead(threadId: string): Promise<void> {

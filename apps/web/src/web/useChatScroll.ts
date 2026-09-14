@@ -42,6 +42,19 @@ export function useChatScroll(
   messages: readonly { id: string }[],
   /** `data-mid` of the oldest unread message, or null to land at the bottom. */
   firstUnreadId: string | null,
+  /**
+   * Changing this re-arms the one-time positioning, for a caller that shows
+   * and hides its list WITHOUT unmounting.
+   *
+   * ChatPanel is exactly that: the Room and Direct halves are alternatives
+   * inside one component, so flipping to Direct and back tears down the room
+   * list's DOM node and builds a fresh one at scrollTop 0 — while this hook's
+   * refs, which live in the component, still say the list has been
+   * positioned. The result was returning to the room at the very top of the
+   * history. A conversation being re-shown is a conversation being opened,
+   * and this is how the caller says so.
+   */
+  resetKey?: unknown,
 ): void {
   // Whether the one-time "resume where I stopped" positioning has happened.
   // Refs rather than state: neither should cause a render, and both have to
@@ -51,8 +64,19 @@ export function useChatScroll(
   // "follow the conversation" mean a message actually ARRIVED, rather than
   // the array merely being replaced.
   const lastSeenId = useRef<string | null>(null);
+  // `undefined` would be a legitimate resetKey, so first-run is tracked
+  // separately rather than by comparing against it.
+  const lastResetKey = useRef<{ value: unknown } | null>(null);
 
   useEffect(() => {
+    if (lastResetKey.current === null) {
+      lastResetKey.current = { value: resetKey };
+    } else if (lastResetKey.current.value !== resetKey) {
+      lastResetKey.current = { value: resetKey };
+      anchored.current = false;
+      lastSeenId.current = null;
+    }
+
     const list = listRef.current;
     // Nothing rendered yet. Crucially this does NOT set `anchored`, so the
     // first real list still gets its one chance at the unread position
@@ -105,5 +129,5 @@ export function useChatScroll(
       // of the new stuff rather than as a line clipped by the header.
       12;
     list.scrollTo({ top: Math.max(0, top) });
-  }, [listRef, messages, firstUnreadId]);
+  }, [listRef, messages, firstUnreadId, resetKey]);
 }

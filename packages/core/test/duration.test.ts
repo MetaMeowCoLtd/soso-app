@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   formatAgo,
   formatAgoShort,
+  formatSeenAt,
   formatCountdown,
   formatDuration,
   remainingFraction,
@@ -93,5 +94,24 @@ describe('formatAgoShort', () => {
 
   it('clamps a skewed clock the same way formatAgo does', () => {
     assert.equal(formatAgoShort(NOW + 60, NOW), 'now');
+  });
+});
+
+describe('formatSeenAt', () => {
+  it('reads as a sentence under a minute, where the compact form would not', () => {
+    // "Seen now ago" is the thing this function exists to avoid.
+    assert.equal(formatSeenAt(NOW - 5, NOW), 'Seen just now');
+    assert.equal(formatSeenAt(NOW - 59, NOW), 'Seen just now');
+  });
+
+  it('uses the compact form past a minute', () => {
+    assert.equal(formatSeenAt(NOW - 60, NOW), 'Seen 1m ago');
+    assert.equal(formatSeenAt(NOW - 13 * 60, NOW), 'Seen 13m ago');
+    assert.equal(formatSeenAt(NOW - 3600, NOW), 'Seen 1h ago');
+    assert.equal(formatSeenAt(NOW - 50 * 3600, NOW), 'Seen 2d ago');
+  });
+
+  it('never reads as the future when the clock is skewed', () => {
+    assert.equal(formatSeenAt(NOW + 600, NOW), 'Seen just now');
   });
 });

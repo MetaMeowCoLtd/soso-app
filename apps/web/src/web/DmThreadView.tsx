@@ -19,8 +19,10 @@ import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./Mess
 import SharedPostCard from "./SharedPostCard";
 import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
+import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import { useChatScroll } from "./useChatScroll";
 import { useSwipeToReply } from "./useSwipeToReply";
+import { useNowSeconds } from "./hooks";
 
 /**
  * One conversation.
@@ -102,8 +104,24 @@ export default function DmThreadView({
   const fileInput = useRef<HTMLInputElement>(null);
   const attachment = useImageAttachment(gateway, { kind: "dm", threadId: thread.id });
   const [lightbox, setLightbox] = useState<{ url: string; image: MessageImage } | null>(null);
+  /** How far the other person has read. Null until fetched, or if never. */
+  const [otherReadAt, setOtherReadAt] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
+    // Fetched alongside the messages rather than on its own schedule: the
+    // other side's cursor only ever becomes interesting when something in
+    // this conversation changed, and `dm_threads` is not in the realtime
+    // publication anyway (only `dm_messages` is), so there is no separate
+    // signal to hang it on. The practical consequence, stated rather than
+    // hidden: their "Seen" appears on the next refresh here, not the instant
+    // they open the thread.
+    void gateway
+      .dmOtherReadAt(thread.id)
+      .then(setOtherReadAt)
+      .catch(() => {
+        // A missing receipt renders as no receipt, which is also what an
+        // honestly-unread message looks like. Nothing to report.
+      });
     try {
       setMessages(await gateway.listDmMessages(thread.id));
     } catch {
@@ -168,6 +186,25 @@ export default function DmThreadView({
   }, [messages, unreadAtOpen]);
 
   useChatScroll(listRef, messages, firstUnreadId);
+
+  const nowSeconds = useNowSeconds();
+
+  /**
+   * The newest message of mine the other person has actually read.
+   *
+   * Not simply my last message: if I have sent three since they last looked,
+   * the receipt belongs under the one their cursor reached, with the two
+   * they have not seen below it. That placement is the whole information
+   * content of a read receipt in a two-person thread.
+   */
+  const receiptMessageId = useMemo(() => {
+    if (!otherReadAt) return null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i]!;
+      if (m.mine && m.createdAt <= otherReadAt) return m.id;
+    }
+    return null;
+  }, [messages, otherReadAt]);
 
   async function send() {
     const body = input.trim();
@@ -320,6 +357,12 @@ export default function DmThreadView({
                 onOpenImage={(url, image) => setLightbox({ url, image })}
                 categories={categories}
                 onOpenPost={onOpenPost}
+                receipt={
+                  message.id === receiptMessageId && otherReadAt
+                    ? { kind: "seen-at", readAt: otherReadAt }
+                    : null
+                }
+                nowSeconds={nowSeconds}
               />
             </Fragment>
           );
@@ -549,6 +592,8 @@ function DmBubble({
   onOpenImage,
   categories,
   onOpenPost,
+  receipt,
+  nowSeconds,
 }: {
   message: DmMessage;
   /** Only used to label a reply quote as yours or theirs. */
@@ -573,6 +618,9 @@ function DmBubble({
   onOpenImage: (url: string, image: MessageImage) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
+  /** Non-null on the one message that carries a read receipt, null on the rest. */
+  receipt: MessageReceiptState | null;
+  nowSeconds: number;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // The node useSwipeToReply actually moves — see ChatPanel's own

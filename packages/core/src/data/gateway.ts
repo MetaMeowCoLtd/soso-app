@@ -438,6 +438,22 @@ export interface SosoGateway {
   /** Most recent messages, oldest first. Pass a prior page's oldest `createdAt` to page further back. */
   listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]>;
 
+  /**
+   * Moves your read cursor in the room, which is what feeds every other
+   * reader's `seenBy` count.
+   *
+   * Takes the newest message actually on screen rather than "now", so
+   * anything that arrived between the fetch and this call is still counted
+   * as unread instead of being silently swallowed — the same argument, for
+   * the same reason, as `markRoomSeen` on the client.
+   *
+   * Distinct from that client-side cursor, which stays: this one is the
+   * SERVER's record, used to tell other people you have read, while
+   * localStorage still drives your own unread badge. Merging them needs the
+   * badge to move server-side too, which is a bigger change than receipts.
+   */
+  markChatRoomRead(upTo: string | null): Promise<void>;
+
   /** Removes your own message. No-op, not an error, if it's already gone. */
   deleteChatMessage(messageId: string): Promise<void>;
 
@@ -491,6 +507,15 @@ export interface SosoGateway {
 
   /** Moves your read cursor to now, clearing the thread's unread count. */
   markDmRead(threadId: string): Promise<void>;
+
+  /**
+   * How far the OTHER person has read in this thread, or null if never.
+   *
+   * Its own call rather than a field on `DmMessage`, because it is one value
+   * for the whole conversation and hanging it off every message would be
+   * thread state smuggled through a message. See migration 0045.
+   */
+  dmOtherReadAt(threadId: string): Promise<string | null>;
 
   /** Unsends your own message — for both sides, since there is only one copy. */
   deleteDmMessage(messageId: string): Promise<void>;

@@ -88,6 +88,10 @@ class FakeGateway implements SosoGateway {
   async sendChatMessage() {
     return {} as never;
   }
+  async markChatRoomRead() {}
+  async dmOtherReadAt() {
+    return null;
+  }
   async listRecentChatMessages() {
     return [];
   }

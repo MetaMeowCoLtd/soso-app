@@ -446,6 +446,26 @@ const AVATARS_KEY = "soso-demo:avatars:v1";
  */
 const MESSAGE_IMAGES_KEY = "soso-demo:message-images:v1";
 
+/**
+ * Room read cursors, keyed by reader — demo mode's stand-in for the
+ * `chat_room_reads` table added in migration 0045.
+ *
+ * Seeded with two fictional neighbours rather than left empty, for the same
+ * reason the seeded posts have a "A neighbour" author: a read receipt whose
+ * count is permanently zero is a feature that cannot be looked at offline,
+ * and this app's demo mode is the only place most of its UI ever gets
+ * exercised. The numbers are made up; the rendering path they drive is the
+ * real one.
+ */
+const ROOM_READS_KEY = "soso-demo:room-reads:v1";
+
+/** Fictional readers. Their cursors move with yours, a beat behind. */
+const DEMO_ROOM_READERS = ["seed-neighbour", "seed-neighbour-2"];
+
+function loadRoomReads(): Record<string, string> {
+  return readJSON<Record<string, string>>(ROOM_READS_KEY, {});
+}
+
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -1728,11 +1748,41 @@ export function createDemoGateway(): SosoGateway {
         reactions: [],
         image: demoMessageImage(message),
         sharedPost: demoSharedPost(message.sharedPostId),
+        // Nobody has read a message that was sent a millisecond ago.
+        seenBy: 0,
       };
+    },
+
+    async markChatRoomRead(upTo: string | null): Promise<void> {
+      const at = upTo ?? new Date().toISOString();
+      const reads = loadRoomReads();
+      const me = getMe();
+      // `greatest`, same as the real RPC: a cursor never moves backwards.
+      if (!reads[me] || reads[me]! < at) reads[me] = at;
+      // The fictional readers catch up to whatever was newest when you
+      // looked. They move on YOUR read rather than on a timer, so a message
+      // you have just sent shows no receipt until the next refresh — which
+      // is the same sequence a real conversation produces, and the reason
+      // this is worth simulating at all rather than hardcoding a number.
+      const newest = loadChatMessages()[loadChatMessages().length - 1]?.createdAt;
+      if (newest) {
+        for (const reader of DEMO_ROOM_READERS) {
+          if (!reads[reader] || reads[reader]! < newest) reads[reader] = newest;
+        }
+      }
+      writeJSON(ROOM_READS_KEY, reads);
+    },
+
+    async dmOtherReadAt(): Promise<string | null> {
+      // Demo mode has no DM threads at all, so there is no other side whose
+      // cursor could be reported. Null is the same "never read" this returns
+      // for a real thread nobody has opened.
+      return null;
     },
 
     async listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]> {
       const me = getMe();
+      const reads = loadRoomReads();
       const cap = Math.min(Math.max(limit ?? 50, 1), 100);
       let messages = loadChatMessages();
       if (before) messages = messages.filter((m) => m.createdAt < before);
@@ -1757,6 +1807,11 @@ export function createDemoGateway(): SosoGateway {
           reactions: chatReactionsFor(m.id, me),
           image: demoMessageImage(m),
           sharedPost: demoSharedPost(m.sharedPostId),
+          // Counts readers OTHER than the author, matching the real
+          // function's own exclusion: "you have read this" is not news.
+          seenBy: Object.entries(reads).filter(
+            ([userId, readAt]) => userId !== m.authorId && readAt >= m.createdAt,
+          ).length,
         };
       });
     },

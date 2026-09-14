@@ -18,8 +18,10 @@ import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./Mess
 import SharedPostCard from "./SharedPostCard";
 import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
+import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import { useChatScroll } from "./useChatScroll";
 import { useSwipeToReply } from "./useSwipeToReply";
+import { useNowSeconds } from "./hooks";
 import { Icon, ICONS } from "./Icon";
 
 /**
@@ -190,13 +192,26 @@ export default function ChatPanel({
   }, []);
 
   /**
-   * The cursor as it was when this panel opened, captured in a lazy state
-   * initialiser so it is taken during the FIRST render — before the effect
-   * below marks the room seen and moves it. Reading it any later would
-   * always return "everything is read" and the list would always open at
-   * the bottom.
+   * The cursor as it stood the last time the room was SHOWN.
+   *
+   * Read during render, never in an effect: the effect below marks the room
+   * seen the moment messages are on screen, so anything reading the cursor
+   * afterwards would always be told "everything is read" and the list would
+   * always open at the bottom.
+   *
+   * Re-read when `view` flips back to the room, using React's documented
+   * adjust-state-during-render pattern. Capturing it once at mount was
+   * wrong in a way worth naming: after reading your unread messages and
+   * flipping to Direct and back, a mount-time anchor would still point at
+   * the message you had already caught up on, and the room would keep
+   * re-opening part-way up its own history.
    */
-  const [roomAnchorAt] = useState<string | null>(() => roomSeenAt());
+  const [prevView, setPrevView] = useState(view);
+  const [roomAnchorAt, setRoomAnchorAt] = useState<string | null>(() => roomSeenAt());
+  if (view !== prevView) {
+    setPrevView(view);
+    if (view === "room") setRoomAnchorAt(roomSeenAt());
+  }
 
   const firstUnreadId = useMemo(() => {
     if (!roomAnchorAt) return null;
@@ -205,7 +220,28 @@ export default function ChatPanel({
     return messages.find((m) => !m.mine && m.createdAt > roomAnchorAt)?.id ?? null;
   }, [messages, roomAnchorAt]);
 
-  useChatScroll(listRef, messages, firstUnreadId);
+  // `view` as the reset key: switching to Direct unmounts the room list, so
+  // coming back is an open, not a continuation. See useChatScroll.
+  useChatScroll(listRef, messages, firstUnreadId, view);
+
+  const nowSeconds = useNowSeconds();
+
+  /**
+   * Only the newest message of MINE carries a receipt.
+   *
+   * A count under every message would be both noisy and redundant — reads
+   * are cumulative, so the numbers would march downwards in a column and say
+   * nothing the last one does not. Instagram puts a receipt in exactly one
+   * place for the same reason, and it is your own last message because that
+   * is the one you are waiting to hear about.
+   */
+  const receiptMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i]!;
+      if (m.mine) return m.seenBy > 0 ? m.id : null;
+    }
+    return null;
+  }, [messages]);
 
   // Marks the room read up to whatever is actually rendered, and keeps doing
   // so as new messages land while you sit here — which is why it depends on
@@ -218,7 +254,16 @@ export default function ChatPanel({
       null,
     );
     onRoomSeen(newest);
-  }, [view, messages, onRoomSeen]);
+    // The SERVER's cursor, which is what feeds everyone else's "Seen by"
+    // count. Separate from onRoomSeen, which moves this device's own unread
+    // badge and stays in localStorage — see the gateway's own note on why
+    // the two are not yet one thing.
+    //
+    // Failure is swallowed: a receipt that does not update is a cosmetic
+    // loss, and surfacing it in the composer's error line would put a red
+    // message under someone who did nothing wrong.
+    void gateway.markChatRoomRead(newest).catch(() => {});
+  }, [view, messages, onRoomSeen, gateway]);
 
   async function send() {
     const body = input.trim();
@@ -407,6 +452,10 @@ export default function ChatPanel({
                 onOpenImage={(url, image) => setLightbox({ url, image })}
                 categories={categories}
                 onOpenPost={onOpenPost}
+                receipt={
+                  message.id === receiptMessageId ? { kind: "count", count: message.seenBy } : null
+                }
+                nowSeconds={nowSeconds}
               />
             </Fragment>
           );
@@ -615,6 +664,8 @@ function ChatMessageRow({
   onOpenImage,
   categories,
   onOpenPost,
+  receipt,
+  nowSeconds,
 }: {
   message: ChatMessage;
   /** Needed to mint a presigned URL for an attached image — see MessageImageView. */
@@ -631,6 +682,9 @@ function ChatMessageRow({
   onOpenImage: (url: string, image: MessageImage) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
+  /** Non-null on the one message that carries a read receipt, null on the rest. */
+  receipt: MessageReceiptState | null;
+  nowSeconds: number;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // What actually moves during a drag — see the JSX below for why this is
@@ -829,6 +883,12 @@ function ChatMessageRow({
             <Icon src={ICONS.more} size={14} />
           </button>
         </div>
+
+        {/* Outside the drag zone and below the bubble line, so it sits under
+            the message the way a caption does and does not slide away with a
+            swipe-to-reply. The caller decides which single message gets one
+            — see `receiptMessageId`. */}
+        {receipt && <MessageReceipt receipt={receipt} nowSeconds={nowSeconds} />}
       </div>
     </div>
   );
