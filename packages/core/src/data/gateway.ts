@@ -421,11 +421,18 @@ export interface SosoGateway {
    * fields, mine: true). Pass `replyToId` to quote another message — the
    * server resolves it into `replyTo`'s preview, so the sender doesn't need
    * to already have that message's body on hand to show its own reply.
+   *
+   * `sharedPostId` attaches a post, which the recipient sees as a card (see
+   * `SharedPost`). The room accepts PUBLIC posts only and rejects anything
+   * else with `soso/post_not_public` — the room is global, so a friends-only
+   * pin shared here would be a card almost nobody could open. `sendDm` has
+   * no such restriction.
    */
   sendChatMessage(
     body: string,
     replyToId?: string | null,
     image?: MessageImage | null,
+    sharedPostId?: string | null,
   ): Promise<ChatMessage>;
 
   /** Most recent messages, oldest first. Pass a prior page's oldest `createdAt` to page further back. */
@@ -479,6 +486,7 @@ export interface SosoGateway {
     body: string,
     replyToId?: string | null,
     image?: MessageImage | null,
+    sharedPostId?: string | null,
   ): Promise<DmMessage>;
 
   /** Moves your read cursor to now, clearing the thread's unread count. */

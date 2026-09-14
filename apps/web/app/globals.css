@@ -1352,3 +1352,61 @@ button.profile-view-stat:active { transform:scale(.97); filter:brightness(.97); 
 .connection-skeleton-name { width:120px; }
 .connection-skeleton-handle { width:80px; margin-top:7px; }
 .connection-skeleton-action { flex-shrink:0; width:78px; height:32px; border-radius:999px; }
+
+/* --- Sharing a pin ---------------------------------------------------------
+   Two surfaces: the card a shared pin renders as inside a message bubble
+   (.shared-post), and the sheet that sends it (.share-sheet). The card is
+   deliberately NOT styled like a chat bubble — it is a quotation of
+   something from elsewhere in the app, so it borrows the pin's own category
+   colour (--shared-post-color, set inline from lookOf) and sits on white
+   even inside your own teal bubble, the same way a photo does. */
+.shared-post { display:flex; flex-direction:column; gap:3px; width:100%; min-width:170px; max-width:250px; padding:9px 11px; border:1px solid var(--hairline); border-left:3px solid var(--shared-post-color, var(--teal)); border-radius:13px; background:#fff; color:var(--ink); text-align:left; transition:transform .16s, box-shadow .16s; }
+.shared-post:active { transform:scale(.98); }
+.chat-bubble .shared-post + .chat-bubble-text { display:block; margin-top:6px; }
+/* Inside a bubble that has a caption, the card needs separating from it. */
+.chat-bubble-quote + .shared-post { margin-top:2px; }
+.shared-post-head { display:flex; align-items:center; gap:6px; }
+.shared-post-dot { flex-shrink:0; width:8px; height:8px; border-radius:50%; background:var(--shared-post-color, var(--teal)); }
+.shared-post-label { font-size:.74rem; font-weight:800; letter-spacing:-.01em; color:var(--deep); }
+.shared-post-badge { margin-left:auto; padding:1px 6px; border-radius:999px; background:rgba(20,50,43,.08); color:var(--muted); font-size:.62rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
+/* Two lines, then an ellipsis: a card is a pointer to the post, not a copy
+   of it, and a long body would turn the conversation into a wall of quoted
+   text. */
+.shared-post-body { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:.8rem; line-height:1.35; color:var(--ink); }
+.shared-post-meta { display:flex; align-items:center; gap:4px; font-size:.7rem; color:var(--muted); }
+.shared-post-expired .shared-post-body, .shared-post-expired .shared-post-label { opacity:.6; }
+.shared-post-gone { flex-direction:row; align-items:center; gap:7px; border-left-color:var(--hairline); color:var(--muted); font-size:.78rem; }
+
+.pin-preview-share-btn { display:flex; align-items:center; justify-content:center; margin-left:auto; width:30px; height:30px; border:1px solid var(--hairline); border-radius:999px; background:#fff; color:#5b706a; transition:background .16s, color .16s, transform .16s; }
+.pin-preview-share-btn:hover { background:var(--mint); color:var(--deep); }
+.pin-preview-share-btn:active { transform:scale(.94); }
+/* The vote group was pushed right by justify-content:space-between on the
+   row; with a third child between the countdown and the votes, the share
+   button takes over that job (margin-left:auto above) and the votes sit
+   beside it rather than at the far edge. */
+.pin-preview-meta .pin-preview-vote-buttons { margin-left:8px; }
+
+.share-sheet { position:fixed; inset:0; z-index:40; display:flex; align-items:flex-end; justify-content:center; }
+.share-sheet-scrim { position:absolute; inset:0; background:rgba(10,28,24,.44); backdrop-filter:blur(2px); }
+.share-sheet-panel { position:relative; display:flex; flex-direction:column; width:100%; max-width:460px; max-height:76vh; padding:0 0 max(14px, env(safe-area-inset-bottom)); border-radius:22px 22px 0 0; background:#fff; box-shadow:var(--e3); }
+.share-sheet-head { display:flex; align-items:center; justify-content:space-between; padding:16px 18px 10px; }
+.share-sheet-head h2 { margin:0; font-size:1.02rem; font-weight:900; letter-spacing:-.02em; color:var(--deep); }
+.share-sheet-head button { display:grid; place-items:center; width:30px; height:30px; border-radius:50%; background:rgba(20,50,43,.06); color:#5b706a; }
+.share-sheet-error { margin:0 18px 8px; padding:9px 12px; border-radius:12px; background:#fff0f3; color:#a3243d; font-size:.78rem; line-height:1.4; }
+.share-sheet-list { flex:1; min-height:0; overflow-y:auto; padding:0 10px; }
+.share-sheet-row { display:flex; align-items:center; gap:11px; width:100%; padding:9px 8px; border-radius:14px; background:transparent; text-align:left; transition:background .16s; }
+.share-sheet-row:hover:not(:disabled) { background:rgba(20,50,43,.05); }
+.share-sheet-row:disabled { opacity:.45; }
+.share-sheet-room-icon { display:grid; place-items:center; flex-shrink:0; width:36px; height:36px; border-radius:50%; background:var(--mint); color:var(--deep); }
+.share-sheet-row-main { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.share-sheet-row-name { font-size:.86rem; font-weight:750; color:var(--ink); }
+.share-sheet-row-sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.72rem; color:var(--muted); }
+.share-sheet-row-busy { margin-left:auto; font-size:.72rem; font-weight:700; color:var(--teal); }
+.share-sheet-empty { margin:6px 10px 10px; padding:11px 13px; border-radius:13px; background:#f5f8f7; color:#546a63; font-size:.76rem; line-height:1.5; }
+.share-sheet-foot { display:flex; align-items:center; gap:10px; padding:10px 18px 0; border-top:1px solid var(--hairline); }
+.share-sheet-link { display:flex; align-items:center; gap:7px; padding:9px 14px; border-radius:999px; background:rgba(20,50,43,.06); color:var(--deep); font-size:.82rem; font-weight:750; transition:background .16s; }
+.share-sheet-link:hover { background:var(--mint); }
+.share-sheet-link-notice { font-size:.74rem; color:var(--muted); }
+.share-sheet-done { display:flex; flex-direction:column; align-items:center; gap:10px; padding:30px 20px 22px; color:var(--deep); }
+.share-sheet-done strong { font-size:.94rem; font-weight:800; }
+.share-sheet-close { padding:9px 22px; border-radius:999px; background:var(--teal); color:#fff; font-size:.84rem; font-weight:750; }

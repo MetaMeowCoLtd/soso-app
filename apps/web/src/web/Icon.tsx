@@ -80,6 +80,7 @@ export const ICONS = {
   reply: "icons/ui/reply.svg",
   search: "icons/ui/search.svg",
   send: "icons/ui/send.svg",
+  share: "icons/ui/share.svg",
   sparkle: "icons/ui/sparkle.svg",
   star: "icons/ui/star.svg",
   starFilled: "icons/ui/star-filled.svg",

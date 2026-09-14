@@ -75,6 +75,7 @@ import type {
   Friend,
   PostReply,
   ReportReason,
+  SharedPost,
   SignedBoardTileUrl,
   SosoGateway,
 } from "soso-core";
@@ -770,6 +771,7 @@ interface DemoChatMessage {
   imagePath?: string | null;
   imageWidth?: number | null;
   imageHeight?: number | null;
+  sharedPostId?: string | null;
 }
 
 function loadChatMessages(): DemoChatMessage[] {
@@ -805,6 +807,7 @@ function chatReplyPreview(id: string | null, me: string): ChatReplyPreview | nul
     body: target.body,
     authorName: target.authorId === me ? "You" : "A neighbour",
     image: demoMessageImage(target),
+    hasPost: Boolean(target.sharedPostId),
   };
 }
 
@@ -812,6 +815,36 @@ function chatReplyPreview(id: string | null, me: string): ChatReplyPreview | nul
 function demoMessageImage(m: DemoChatMessage): MessageImage | null {
   if (!m.imagePath || !m.imageWidth || !m.imageHeight) return null;
   return { path: m.imagePath, width: m.imageWidth, height: m.imageHeight };
+}
+
+/**
+ * The card `soso.shared_post_card` builds server-side, built here instead.
+ *
+ * The real one decides per reader whether the post is visible. Demo mode has
+ * exactly one reader, who can see everything in its own localStorage, so the
+ * interesting branch is the other one: a share pointing at a post that has
+ * since been removed or expired, which still has to render as a card rather
+ * than vanish. That branch is reachable here, and is the reason this returns
+ * the unavailable shape at all instead of null.
+ */
+function demoSharedPost(postId: string | null | undefined): SharedPost | null {
+  if (!postId) return null;
+  const post = loadPosts().find((p) => p.id === postId);
+  if (!post) return { id: postId, available: false };
+  return {
+    id: post.id,
+    available: true,
+    category: post.category,
+    subtype: post.subtype,
+    body: post.body ?? null,
+    authorName: post.authorId === getMe() ? "You" : "A neighbour",
+    // No addresses or zones in demo mode; the label the real server resolves
+    // is simply absent rather than invented.
+    place: null,
+    hasLocation: post.lng !== null && post.lat !== null,
+    expiresAt: new Date(post.expiresAt * 1000).toISOString(),
+    gone: post.status !== "live" || post.expiresAt <= nowSeconds(),
+  };
 }
 
 function chatReactionsFor(messageId: string, me: string): { emoji: string; count: number; mine: boolean }[] {
@@ -1645,12 +1678,24 @@ export function createDemoGateway(): SosoGateway {
       body: string,
       replyToId?: string | null,
       image?: MessageImage | null,
+      sharedPostId?: string | null,
     ): Promise<ChatMessage> {
       const trimmed = body.trim();
-      // Empty is allowed with an image, matching send_chat_message's own
-      // relaxed check in migration 0040.
-      if (trimmed.length === 0 && !image) throw new SosoError("soso/empty_message");
+      // Empty is allowed with an image or a shared post, matching
+      // send_chat_message's own relaxed check in migrations 0040 and 0044.
+      if (trimmed.length === 0 && !image && !sharedPostId) {
+        throw new SosoError("soso/empty_message");
+      }
       if (trimmed.length > 500) throw new SosoError("soso/message_too_long");
+      if (sharedPostId && !loadPosts().some((p) => p.id === sharedPostId)) {
+        throw new SosoError("soso/post_not_found");
+      }
+      // The real room rejects non-public posts (soso/post_not_public, see
+      // migration 0044). Not reproduced here for the same reason audience
+      // filtering generally is not: DemoPost has no audience at all, because
+      // every demo post is your own and every audience resolves to visible.
+      // Inventing one purely to reject a share would be simulating a rule
+      // this gateway does not otherwise have.
       if (replyToId && !loadChatMessages().some((m) => m.id === replyToId)) {
         throw new SosoError("soso/message_not_found");
       }
@@ -1665,6 +1710,7 @@ export function createDemoGateway(): SosoGateway {
         imagePath: image?.path ?? null,
         imageWidth: image?.width ?? null,
         imageHeight: image?.height ?? null,
+        sharedPostId: sharedPostId ?? null,
       };
       saveChatMessages([...loadChatMessages(), message]);
 
@@ -1681,6 +1727,7 @@ export function createDemoGateway(): SosoGateway {
         replyTo: preview,
         reactions: [],
         image: demoMessageImage(message),
+        sharedPost: demoSharedPost(message.sharedPostId),
       };
     },
 
@@ -1709,6 +1756,7 @@ export function createDemoGateway(): SosoGateway {
           replyTo: preview,
           reactions: chatReactionsFor(m.id, me),
           image: demoMessageImage(m),
+          sharedPost: demoSharedPost(m.sharedPostId),
         };
       });
     },

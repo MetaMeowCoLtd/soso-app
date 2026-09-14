@@ -6,6 +6,7 @@ import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
+  type CategoryConfig,
   type MessageImage,
   type ChatMessage,
   type DmThread,
@@ -14,6 +15,7 @@ import {
 import DmInbox from "./DmInbox";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
 import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./MessageImageView";
+import SharedPostCard from "./SharedPostCard";
 import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
@@ -62,6 +64,11 @@ import { Icon, ICONS } from "./Icon";
 interface ChatPanelProps {
   gateway: SosoGateway;
   demoMode: boolean;
+  /** Boot-time config, for a shared pin's category label. */
+  categories: CategoryConfig[];
+  /** Opens a shared pin. page.tsx owns that surface, the same as it does for a notification deep link. */
+  onOpenPost: (postId: string) => void;
+
   /** Null until the profile loads (and always, in demo mode) — DMs need it to derive keys. */
   myId: string | null;
   /** Opens a conversation full-screen; page.tsx owns that surface. */
@@ -121,6 +128,8 @@ interface OpenMenu {
 export default function ChatPanel({
   gateway,
   demoMode,
+  categories,
+  onOpenPost,
   myId,
   onOpenThread,
   refreshToken,
@@ -374,6 +383,8 @@ export default function ChatPanel({
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onSwipeReply={() => startReply(message)}
                 onOpenImage={(url, image) => setLightbox({ url, image })}
+                categories={categories}
+                onOpenPost={onOpenPost}
               />
             </Fragment>
           );
@@ -559,6 +570,8 @@ function ChatMessageRow({
   onToggleReaction,
   onSwipeReply,
   onOpenImage,
+  categories,
+  onOpenPost,
 }: {
   message: ChatMessage;
   /** Needed to mint a presigned URL for an attached image — see MessageImageView. */
@@ -573,6 +586,8 @@ function ChatMessageRow({
   onToggleReaction: (emoji: string) => void;
   onSwipeReply: () => void;
   onOpenImage: (url: string, image: MessageImage) => void;
+  categories: CategoryConfig[];
+  onOpenPost: (postId: string) => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // What actually moves during a drag — see the JSX below for why this is
@@ -692,7 +707,11 @@ function ChatMessageRow({
             <div ref={swipeTrackRef} className="chat-bubble-swipe-track">
               <div
                 ref={bubbleRef}
-                className={`chat-bubble${message.image && !message.body ? " chat-bubble-image-only" : ""}`}
+                className={`chat-bubble${
+                  (message.image || message.sharedPost) && !message.body
+                    ? " chat-bubble-image-only"
+                    : ""
+                }`}
                 {...bubbleHandlers}
               >
                 {message.replyTo && (
@@ -707,7 +726,8 @@ function ChatMessageRow({
                       />
                     )}
                     <span className="chat-quote-body">
-                      {message.replyTo.body || (message.replyTo.image ? "Photo" : "")}
+                      {message.replyTo.body ||
+                        (message.replyTo.image ? "Photo" : message.replyTo.hasPost ? "Pin" : "")}
                     </span>
                   </div>
                 )}
@@ -716,6 +736,13 @@ function ChatMessageRow({
                     gateway={gateway}
                     image={message.image}
                     onOpen={onOpenImage}
+                  />
+                )}
+                {message.sharedPost && (
+                  <SharedPostCard
+                    post={message.sharedPost}
+                    categories={categories}
+                    onOpen={onOpenPost}
                   />
                 )}
                 {/* Omitted entirely for an image-only message rather than

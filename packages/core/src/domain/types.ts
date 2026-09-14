@@ -727,6 +727,70 @@ export function decodeMessageImage(w: WireMessageImage): MessageImage | null {
   return { path: w.image_path, width, height };
 }
 
+/**
+ * A post shared into a conversation, as the READER may see it.
+ *
+ * The server decides what this contains, per reader, on every read - see
+ * `soso.shared_post_card` in migration 0044. That is why `available` exists
+ * at all: a pin shared with a group is visible to the people its audience
+ * covers and to nobody else, and the honest way to say "not for you" is a
+ * card that renders as unavailable rather than one the client silently
+ * drops. The id is present either way, because it is already in the message
+ * row the reader can see; nothing else is.
+ */
+export type SharedPost =
+  | { id: string; available: false }
+  | {
+      id: string;
+      available: true;
+      /** Category key - pair with `CategoryConfig` for a label, `lookOf` for a colour. */
+      category: string;
+      subtype: string | null;
+      body: string | null;
+      authorName: string;
+      /** Street address if the post has one, else the zone name, else null. */
+      place: string | null;
+      /** False for a location-optional post; there is no map to show it on. */
+      hasLocation: boolean;
+      expiresAt: string;
+      /** Expired or removed since it was shared. The card says so rather than vanishing. */
+      gone: boolean;
+    };
+
+export interface WireSharedPost {
+  id: string;
+  available?: boolean | null;
+  category?: string | null;
+  subtype?: string | null;
+  body?: string | null;
+  author_name?: string | null;
+  place?: string | null;
+  has_location?: boolean | null;
+  expires_at?: string | null;
+  gone?: boolean | null;
+}
+
+export function decodeSharedPost(w: WireSharedPost | null | undefined): SharedPost | null {
+  if (!w || !w.id) return null;
+  // Anything short of an explicit `available: true` carrying a category is
+  // treated as unavailable. A half-populated card is a server bug, and
+  // rendering one as though the reader were entitled to it is the one
+  // failure mode worth being paranoid about here.
+  if (!w.available || !w.category) return { id: w.id, available: false };
+  return {
+    id: w.id,
+    available: true,
+    category: w.category,
+    subtype: w.subtype ?? null,
+    body: w.body ?? null,
+    authorName: w.author_name ?? '',
+    place: w.place ?? null,
+    hasLocation: Boolean(w.has_location),
+    expiresAt: w.expires_at ?? '',
+    gone: Boolean(w.gone),
+  };
+}
+
 /** A quoted preview of the message being replied to — null once it's been deleted, same as no reply at all. */
 export interface ChatReplyPreview {
   id: string;
@@ -734,6 +798,8 @@ export interface ChatReplyPreview {
   authorName: string;
   /** Non-null when the quoted message was an image; a quote of an image-only message is otherwise blank. */
   image: MessageImage | null;
+  /** The quoted message shared a pin. A flag, not a card — the card itself is a few bubbles up. */
+  hasPost: boolean;
 }
 
 export interface ChatMessage {
@@ -749,6 +815,8 @@ export interface ChatMessage {
   reactions: ChatMessageReaction[];
   /** Null for an ordinary text message. `body` may be empty when this is set. */
   image: MessageImage | null;
+  /** Null unless a post was shared. `body` may be empty when this is set. */
+  sharedPost: SharedPost | null;
 }
 
 export interface WireChatMessage {
@@ -760,11 +828,14 @@ export interface WireChatMessage {
   author_name: string;
   author_avatar?: string | null;
   mine: boolean;
-  reply_to?: ({ id: string; body: string; author_name: string } & WireMessageImage) | null;
+  reply_to?:
+    | ({ id: string; body: string; author_name: string; has_post?: boolean | null } & WireMessageImage)
+    | null;
   reactions?: { emoji: string; count: number; mine: boolean }[] | null;
   image_path?: string | null;
   image_width?: number | string | null;
   image_height?: number | string | null;
+  shared_post?: WireSharedPost | null;
 }
 
 export function decodeChatMessage(w: WireChatMessage): ChatMessage {
@@ -783,10 +854,12 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
           body: w.reply_to.body,
           authorName: w.reply_to.author_name,
           image: decodeMessageImage(w.reply_to),
+          hasPost: Boolean(w.reply_to.has_post),
         }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({ emoji: r.emoji, count: r.count, mine: r.mine })),
     image: decodeMessageImage(w),
+    sharedPost: decodeSharedPost(w.shared_post),
   };
 }
 
@@ -1042,6 +1115,8 @@ export interface DmThread {
   lastBody: string | null;
   /** The last message carried an image — the inbox says "Photo" when its body is empty. */
   lastHasImage: boolean;
+  /** The last message shared a pin — same problem, same shape as `lastHasImage`. */
+  lastHasPost: boolean;
   lastSenderId: string | null;
   unread: number;
 }
@@ -1055,6 +1130,7 @@ export interface WireDmThread {
   last_message_at: string | null;
   last_body?: string | null;
   last_has_image?: boolean | null;
+  last_has_post?: boolean | null;
   last_sender_id?: string | null;
   unread: number | string;
 }
@@ -1069,6 +1145,7 @@ export function decodeDmThread(w: WireDmThread): DmThread {
     lastMessageAt: w.last_message_at ?? null,
     lastBody: w.last_body ?? null,
     lastHasImage: Boolean(w.last_has_image),
+    lastHasPost: Boolean(w.last_has_post),
     lastSenderId: w.last_sender_id ?? null,
     // `count(*)` comes back as a string from PostgREST for bigint columns.
     unread: Number(w.unread) || 0,
@@ -1089,6 +1166,8 @@ export interface DmReplyPreview {
   senderId: string;
   /** Non-null when the quoted message was an image; a quote of an image-only message is otherwise blank. */
   image: MessageImage | null;
+  /** The quoted message shared a pin. A flag, not a card — the card itself is a few bubbles up. */
+  hasPost: boolean;
 }
 
 /**
@@ -1120,6 +1199,8 @@ export interface DmMessage {
   reactions: DmMessageReaction[];
   /** Null for an ordinary text message. `body` may be empty when this is set. */
   image: MessageImage | null;
+  /** Null unless a post was shared. `body` may be empty when this is set. */
+  sharedPost: SharedPost | null;
 }
 
 export interface WireDmMessage {
@@ -1129,11 +1210,14 @@ export interface WireDmMessage {
   body: string;
   created_at: string;
   mine: boolean;
-  reply_to?: ({ id: string; body: string; sender_id: string } & WireMessageImage) | null;
+  reply_to?:
+    | ({ id: string; body: string; sender_id: string; has_post?: boolean | null } & WireMessageImage)
+    | null;
   reactions?: { emoji: string; count: number | string; mine: boolean }[] | null;
   image_path?: string | null;
   image_width?: number | string | null;
   image_height?: number | string | null;
+  shared_post?: WireSharedPost | null;
 }
 
 export function decodeDmMessage(w: WireDmMessage): DmMessage {
@@ -1150,6 +1234,7 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
           body: w.reply_to.body,
           senderId: w.reply_to.sender_id,
           image: decodeMessageImage(w.reply_to),
+          hasPost: Boolean(w.reply_to.has_post),
         }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({
@@ -1158,5 +1243,6 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
       mine: r.mine,
     })),
     image: decodeMessageImage(w),
+    sharedPost: decodeSharedPost(w.shared_post),
   };
 }

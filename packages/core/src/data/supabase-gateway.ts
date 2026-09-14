@@ -685,6 +685,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       body: string,
       replyToId?: string | null,
       image?: MessageImage | null,
+      sharedPostId?: string | null,
     ): Promise<ChatMessage> {
       const { data, error } = await client.rpc('send_chat_message', {
         p_body: body,
@@ -692,6 +693,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_image_path: image?.path ?? null,
         p_image_w: image?.width ?? null,
         p_image_h: image?.height ?? null,
+        p_shared_post_id: sharedPostId ?? null,
       });
       if (error) throw toSosoError(error);
       return decodeChatMessage(data as WireChatMessage);
@@ -763,6 +765,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       body: string,
       replyToId?: string | null,
       image?: MessageImage | null,
+      sharedPostId?: string | null,
     ): Promise<DmMessage> {
       const { data, error } = await client.rpc('send_dm', {
         p_thread_id: threadId,
@@ -771,6 +774,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_image_path: image?.path ?? null,
         p_image_w: image?.width ?? null,
         p_image_h: image?.height ?? null,
+        p_shared_post_id: sharedPostId ?? null,
       });
       if (error) throw toSosoError(error);
       return decodeDmMessage(data as WireDmMessage);

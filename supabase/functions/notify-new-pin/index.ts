@@ -192,6 +192,7 @@ interface DmMessagePayload {
   sender_id: string;
   body: string;
   has_image: boolean;
+  has_post: boolean;
 }
 
 /**
@@ -221,6 +222,11 @@ function parseDmMessagePayload(value: unknown): DmMessagePayload | null {
     // payload: reading the object needs a presigned URL, and minting one is
     // per-viewer work this function has no reason to do for a notification.
     has_image: typeof r.image_path === "string" && r.image_path.length > 0,
+    // Same reasoning, one step further: not only is the post id unnecessary
+    // here, whether this particular recipient may see the post is decided
+    // per read by soso.shared_post_card, and a push payload is the wrong
+    // place to try to answer it.
+    has_post: typeof r.shared_post_id === "string" && r.shared_post_id.length > 0,
   };
 }
 
@@ -433,7 +439,13 @@ async function handleDmMessage(
   // actually saw. One body now, with the text in it.
   const notificationBody = JSON.stringify({
     title: "SoSo",
-    body: messageNotificationBody(senderName, payload.body, payload.has_image, DM_PREVIEW_LIMIT),
+    body: messageNotificationBody(
+      senderName,
+      payload.body,
+      payload.has_image,
+      payload.has_post,
+      DM_PREVIEW_LIMIT,
+    ),
     dmSenderId: payload.sender_id,
   });
 
@@ -536,6 +548,7 @@ interface ChatPayload {
   body: string;
   reply_to_id: string | null;
   has_image: boolean;
+  has_post: boolean;
 }
 
 function parseChatPayload(value: unknown): ChatPayload | null {
@@ -550,6 +563,7 @@ function parseChatPayload(value: unknown): ChatPayload | null {
     body: r.body,
     reply_to_id: typeof r.reply_to_id === "string" ? r.reply_to_id : null,
     has_image: typeof r.image_path === "string" && r.image_path.length > 0,
+    has_post: typeof r.shared_post_id === "string" && r.shared_post_id.length > 0,
   };
 }
 
@@ -605,17 +619,27 @@ const DM_PREVIEW_LIMIT = 140;
  * A captioned image is announced as its caption, prefixed, rather than as
  * "sent a photo": the caption is the part with something to say, and
  * hiding it because a picture came along too would be worse than not
- * mentioning the picture.
+ * mentioning the picture. A shared pin (migration 0044) reads the same way,
+ * with its own marker.
+ *
+ * The marker is CHOSEN, not combined: a message carries at most one
+ * attachment today, and "📷📍" would be noise if that ever changed.
  */
 function messageNotificationBody(
   name: string,
   body: string,
   hasImage: boolean,
+  hasPost: boolean,
   limit: number,
 ): string {
   const text = body.length > limit ? `${body.slice(0, limit)}…` : body;
-  if (text.length === 0) return hasImage ? `${name} sent a photo` : `${name} sent you a message`;
-  return hasImage ? `${name}: 📷 ${text}` : `${name}: ${text}`;
+  if (text.length === 0) {
+    if (hasImage) return `${name} sent a photo`;
+    if (hasPost) return `${name} shared a pin`;
+    return `${name} sent you a message`;
+  }
+  const marker = hasImage ? "📷 " : hasPost ? "📍 " : "";
+  return `${name}: ${marker}${text}`;
 }
 
 /**
@@ -732,7 +756,13 @@ async function handleChatMessage(
   }
 
   const name = author?.display_name || (author?.handle ? `@${author.handle}` : "Someone");
-  const summary = messageNotificationBody(name, payload.body, payload.has_image, CHAT_PREVIEW_LIMIT);
+  const summary = messageNotificationBody(
+    name,
+    payload.body,
+    payload.has_image,
+    payload.has_post,
+    CHAT_PREVIEW_LIMIT,
+  );
 
   const notificationBody = JSON.stringify({
     title: "SoSo",

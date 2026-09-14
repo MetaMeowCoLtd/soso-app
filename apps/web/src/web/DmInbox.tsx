@@ -118,13 +118,13 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refresh
                 )}
               </span>
               <span className={`dm-row-preview${thread.unread > 0 ? " unread" : ""}`}>
-                {thread.lastBody || thread.lastHasImage ? (
+                {thread.lastBody || thread.lastHasImage || thread.lastHasPost ? (
                   <>
                     {thread.lastSenderId === myId && <span className="dm-row-you">You: </span>}
-                    {/* An image-only message has no body, so the row would
-                        otherwise read as blank — indistinguishable from a
-                        thread nobody has written in. */}
-                    {thread.lastBody || "Photo"}
+                    {/* An image-only or share-only message has no body, so the
+                        row would otherwise read as blank — indistinguishable
+                        from a thread nobody has written in. */}
+                    {thread.lastBody || (thread.lastHasImage ? "Photo" : "Shared a pin")}
                   </>
                 ) : (
                   <em>No messages yet</em>

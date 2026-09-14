@@ -6,6 +6,7 @@ import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
+  type CategoryConfig,
   type MessageImage,
   type DmMessage,
   type DmThread,
@@ -15,6 +16,7 @@ import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
 import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./MessageImageView";
+import SharedPostCard from "./SharedPostCard";
 import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
 import { useSwipeToReply } from "./useSwipeToReply";
@@ -46,6 +48,14 @@ interface DmThreadViewProps {
   gateway: SosoGateway;
   /** Whose messages render as "mine" — and who a reply quote belongs to. */
   myId: string;
+  /** Boot-time config, for a shared pin's category label. */
+  categories: CategoryConfig[];
+  /**
+   * Opens a shared pin. page.tsx owns that surface for the same reason it
+   * owns a notification deep link's: opening a post can move the map and
+   * switch tabs, and neither is a conversation's business.
+   */
+  onOpenPost: (postId: string) => void;
   onClose: () => void;
 }
 
@@ -67,7 +77,14 @@ const REPORT_REASONS = [
   { label: "Something else", value: "other" },
 ] as const;
 
-export default function DmThreadView({ thread, gateway, myId, onClose }: DmThreadViewProps) {
+export default function DmThreadView({
+  thread,
+  gateway,
+  myId,
+  categories,
+  onOpenPost,
+  onClose,
+}: DmThreadViewProps) {
   const [messages, setMessages] = useState<DmMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
@@ -273,6 +290,8 @@ export default function DmThreadView({ thread, gateway, myId, onClose }: DmThrea
                 onSwipeReply={() => startReply(message)}
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onOpenImage={(url, image) => setLightbox({ url, image })}
+                categories={categories}
+                onOpenPost={onOpenPost}
               />
             </Fragment>
           );
@@ -479,6 +498,8 @@ function DmBubble({
   onSwipeReply,
   onToggleReaction,
   onOpenImage,
+  categories,
+  onOpenPost,
 }: {
   message: DmMessage;
   /** Only used to label a reply quote as yours or theirs. */
@@ -501,6 +522,8 @@ function DmBubble({
   onSwipeReply: () => void;
   onToggleReaction: (emoji: string) => void;
   onOpenImage: (url: string, image: MessageImage) => void;
+  categories: CategoryConfig[];
+  onOpenPost: (postId: string) => void;
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   // The node useSwipeToReply actually moves — see ChatPanel's own
@@ -578,7 +601,11 @@ function DmBubble({
             <div ref={swipeTrackRef} className="chat-bubble-swipe-track">
               <div
                 ref={bubbleRef}
-                className={`chat-bubble${message.image && !message.body ? " chat-bubble-image-only" : ""}`}
+                className={`chat-bubble${
+                  (message.image || message.sharedPost) && !message.body
+                    ? " chat-bubble-image-only"
+                    : ""
+                }`}
                 {...bubbleHandlers}
               >
                 {message.replyTo && (
@@ -595,12 +622,20 @@ function DmBubble({
                       />
                     )}
                     <span className="chat-quote-body">
-                      {message.replyTo.body || (message.replyTo.image ? "Photo" : "")}
+                      {message.replyTo.body ||
+                        (message.replyTo.image ? "Photo" : message.replyTo.hasPost ? "Pin" : "")}
                     </span>
                   </div>
                 )}
                 {message.image && (
                   <MessageImageView gateway={gateway} image={message.image} onOpen={onOpenImage} />
+                )}
+                {message.sharedPost && (
+                  <SharedPostCard
+                    post={message.sharedPost}
+                    categories={categories}
+                    onOpen={onOpenPost}
+                  />
                 )}
                 {message.body && <span className="chat-bubble-text">{message.body}</span>}
               </div>

@@ -51,6 +51,13 @@ interface PinPreviewProps {
   onVote: (postId: string, vote: 1 | -1) => Promise<void>;
   onReport: (postId: string, reason: ReportReason) => Promise<void>;
   onResolve: (postId: string) => Promise<void>;
+  /**
+   * Opens the share sheet. Hosted by page.tsx rather than here for the same
+   * reason the sheet is not a child of this card: it lists DM threads and
+   * sends messages, which is the app's business and not the pin detail's,
+   * and it has to survive this card being replaced under it.
+   */
+  onShare: (postId: string, categoryLabel: string) => void;
 }
 
 const REPORT_REASONS: { label: string; value: ReportReason }[] = [
@@ -69,6 +76,7 @@ export default function PinPreview({
   onVote,
   onReport,
   onResolve,
+  onShare,
 }: PinPreviewProps) {
   const [voting, setVoting] = useState(false);
   const [voted, setVoted] = useState<1 | -1 | null>(null);
@@ -162,6 +170,23 @@ export default function PinPreview({
               weight than reporting, which is rarer and more deliberate —
               even though, as of validity voting, a vote can now do more
               than it used to (see the module doc above). */}
+          {/* Sits with the vote buttons rather than with Report/Remove
+              below: sharing is neutral and frequent, and the quiet links at
+              the bottom of this card are for the rare, deliberate actions.
+              It is offered for every pin, including your own and including
+              private ones — who may actually see what is shared is decided
+              per reader by the server (migration 0044), so there is nothing
+              for this card to pre-check. */}
+          <button
+            type="button"
+            className="pin-preview-share-btn"
+            onClick={() => onShare(pin.id, subtype?.labelEn ?? category?.labelEn ?? pin.category)}
+            aria-label="Share this pin"
+            title="Share this pin"
+          >
+            <Icon src={ICONS.share} size={15} />
+          </button>
+
           <span className="pin-preview-vote-buttons" role="group" aria-label="Vote">
             <button
               type="button"

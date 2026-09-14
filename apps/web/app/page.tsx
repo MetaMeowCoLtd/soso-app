@@ -14,6 +14,7 @@ import ReportList from "@/src/web/ReportList";
 import PeopleTab from "@/src/web/PeopleTab";
 import DmThreadView from "@/src/web/DmThreadView";
 import ChatPanel from "@/src/web/ChatPanel";
+import SharePinSheet from "@/src/web/SharePinSheet";
 import ProfileSettings from "@/src/web/ProfileSettings";
 import ProfileView from "@/src/web/ProfileView";
 import ConnectionsView from "@/src/web/ConnectionsView";
@@ -533,6 +534,19 @@ function Map({
 
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
+
+  /**
+   * The pin whose share sheet is open, if any.
+   *
+   * Lives here rather than inside PinPreview because the sheet outlives the
+   * card that opened it in every sense that matters: it lists DM threads,
+   * sends messages, and must not be torn down by PinPreview's own remount-
+   * on-pin-change key. The label travels with the id because the sheet needs
+   * a human word for the OS share text and has no category list of its own.
+   */
+  const [sharingPost, setSharingPost] = useState<{ id: string; categoryLabel: string } | null>(
+    null,
+  );
   const [selectedPoi, setSelectedPoi] = useState<SelectedPoi | null>(null);
   const [focusAt, setFocusAt] = useState<Coordinates | null>(null);
 
@@ -1088,6 +1102,7 @@ function Map({
             onVote={vote}
             onReport={report}
             onResolve={resolve}
+            onShare={(id, categoryLabel) => setSharingPost({ id, categoryLabel })}
           />
         ) : viewingPoi && selectedPoi ? (
           <PoiPreview
@@ -1268,6 +1283,8 @@ function Map({
           unreadDm={unread.dm}
           unreadRoom={unread.room}
           onRoomSeen={unread.markRoomSeen}
+          categories={categories}
+          onOpenPost={(postId) => void openPostById(postId)}
         />
       )}
 
@@ -1386,6 +1403,19 @@ function Map({
         />
       )}
 
+      {/* Rendered here, at the top level, rather than inside PinPreview: the
+          sheet sends messages and lists conversations, and it must not be
+          unmounted by PinPreview's own remount-on-pin-change key. */}
+      {sharingPost && (
+        <SharePinSheet
+          gateway={gateway}
+          postId={sharingPost.id}
+          categoryLabel={sharingPost.categoryLabel}
+          demoMode={mode !== "supabase"}
+          onClose={() => setSharingPost(null)}
+        />
+      )}
+
       {/* Above the tab bar and every tab, like the thread and board views:
           a conversation is an exclusive surface, not a panel over one. */}
       {dmError && <DmErrorToast message={dmError} onDismiss={() => setDmError(null)} />}
@@ -1396,6 +1426,8 @@ function Map({
           thread={dmThread}
           gateway={gateway}
           myId={presence.me.id}
+          categories={categories}
+          onOpenPost={(postId) => void openPostById(postId)}
           onClose={() => {
             setDmThread(null);
             setDmRefresh((n) => n + 1);
