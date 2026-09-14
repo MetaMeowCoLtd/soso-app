@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { messageImageDisplaySize, type MessageMedia, type SosoGateway } from "soso-core";
 import { Icon, ICONS } from "./Icon";
+import { cachedMediaBlob, cachedMediaUrl, storeMedia } from "./mediaCache";
 
 /**
  * Rendering an image that lives in a private bucket.
@@ -28,6 +29,20 @@ import { Icon, ICONS } from "./Icon";
  * (which is what a thread load is) put their paths into one pending batch
  * that flushes on the next microtask, so a screen of twelve images is one
  * call to the function, not twelve.
+ *
+ * AND THERE IS A SECOND CACHE UNDERNEATH THIS ONE
+ * ---------------------------------------------------------------------
+ * The map below holds URLs and lives for one page load. `mediaCache.ts`
+ * holds BYTES and survives reloads. They are separate because they solve
+ * separate problems: a presigned URL cannot be persisted (it expires), and
+ * re-minting one does not avoid re-downloading the picture it points at —
+ * the signature is part of the URL, so the browser's own HTTP cache never
+ * hits twice on the same object.
+ *
+ * The order of preference is therefore: a locally stored copy, then a
+ * freshly minted URL, and a miss quietly downloads the bytes for next time.
+ * See mediaCache.ts for why that is a performance layer and emphatically
+ * not an archive.
  */
 
 interface CacheEntry {
@@ -106,6 +121,51 @@ function cached(path: string): CacheEntry | null {
   return entry;
 }
 
+/**
+ * Paths already looked up in, or written to, the on-disk cache this session.
+ *
+ * Without it, every render of every bubble would start another async cache
+ * probe for a path it has already resolved — cheap individually, and a
+ * hundred of them per scroll.
+ */
+const diskChecked = new Set<string>();
+
+/**
+ * Resolves a path against the on-disk cache, and downloads it if missing.
+ *
+ * A hit is promoted into the URL cache with a far-future expiry: a `blob:`
+ * URL does not expire the way a presigned one does, so the refresh machinery
+ * above has nothing to do for it.
+ */
+function resolveFromDisk(gateway: SosoGateway, path: string): void {
+  if (diskChecked.has(path)) return;
+  diskChecked.add(path);
+
+  void (async () => {
+    const local = await cachedMediaUrl(path);
+    if (local) {
+      // A local blob URL is valid for the life of the document, so it is
+      // parked well past any presigned URL's lifetime rather than being
+      // refreshed on a timer that exists for signatures.
+      cache.set(path, { url: local, expiresAt: Number.MAX_SAFE_INTEGER });
+      for (const notify of [...waiters]) notify();
+      return;
+    }
+
+    // Not stored yet. The presigned URL is what renders the image right now;
+    // this is only about having the bytes next time, so it waits for that
+    // URL rather than minting a second one.
+    await scheduleFetch(gateway, path);
+    const minted = cached(path)?.url;
+    if (!minted) return;
+    const stored = await storeMedia(path, minted);
+    if (stored) {
+      cache.set(path, { url: stored, expiresAt: Number.MAX_SAFE_INTEGER });
+      for (const notify of [...waiters]) notify();
+    }
+  })();
+}
+
 export function useMessageImageUrl(gateway: SosoGateway, path: string | null): {
   url: string | null;
   loading: boolean;
@@ -116,7 +176,12 @@ export function useMessageImageUrl(gateway: SosoGateway, path: string | null): {
   useEffect(() => {
     if (!path) return;
     waiters.add(rerender);
+    // Both, deliberately. The mint is what puts something on screen in this
+    // frame; the disk check is what makes the NEXT view instant and what
+    // fills the cache the first time. Whichever resolves first wins, and
+    // `resolveFromDisk` prefers a stored copy when there is one.
     if (!cached(path)) void scheduleFetch(gateway, path);
+    resolveFromDisk(gateway, path);
     return () => {
       waiters.delete(rerender);
     };
@@ -247,6 +312,14 @@ export async function saveMessageMedia(
   gateway: SosoGateway,
   image: MessageMedia,
 ): Promise<SaveOutcome> {
+  // A copy on disk is the common case for anything currently on screen, and
+  // fetching the bytes again over a fresh presigned URL purely to hand them
+  // to a share sheet is a round trip nobody needs.
+  const local = await cachedMediaBlob(image.path);
+  if (local) {
+    return shareOrDownload(local, image);
+  }
+
   const url = await messageMediaUrlNow(gateway, image.path);
   if (!url) throw new MessageMediaSaveError("no url");
 
@@ -277,6 +350,19 @@ export async function saveMessageMedia(
     if (openInNewTab(url)) return "opened";
     throw new MessageMediaSaveError("bytes unreadable and popup blocked");
   }
+  return shareOrDownload(blob, image);
+}
+
+/**
+ * Hands bytes to the platform: the share sheet where there is one, a
+ * download otherwise.
+ *
+ * Pulled out of `saveMessageMedia` when a locally cached copy became the
+ * first thing tried — both paths end here, and the iOS reasoning below is
+ * subtle enough that a second copy of it would eventually drift from this
+ * one.
+ */
+async function shareOrDownload(blob: Blob, image: MessageMedia): Promise<SaveOutcome> {
   // Falls back on the KIND rather than a hardcoded image type: a clip whose
   // blob arrives without one would otherwise be handed to the share sheet
   // labelled as a JPEG, and iOS refuses to save it.
@@ -299,9 +385,10 @@ export async function saveMessageMedia(
       if (name === "AbortError") return "cancelled";
       // `NotAllowedError` is the one worth falling through for rather than
       // reporting: Safari requires share() to happen inside the user
-      // gesture that started it, and the `await fetch` above can outlast
-      // that window on a slow connection. The anchor has no such
-      // requirement, so the save still happens — just into Files.
+      // gesture that started it, and a slow read before it can outlast that
+      // window. The anchor has no such requirement, so the save still
+      // happens — just into Files. Reading from the on-disk cache instead of
+      // the network makes this branch much rarer than it used to be.
       if (name !== "NotAllowedError") throw err;
     }
   }

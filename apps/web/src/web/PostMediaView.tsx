@@ -1,24 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { PostMedia, SosoGateway } from "soso-core";
 import { Icon, ICONS } from "./Icon";
+import { useMessageImageUrl } from "./MessageMediaView";
 
 /**
  * The photo or clip attached to a post.
  *
- * A sibling of `MessageMediaView` rather than a reuse of it, and the reason
- * is authorization rather than looks. A message attachment's readability
- * follows thread membership, which its object key encodes, so
- * `MessageMediaView` can batch a whole conversation's URLs in one call keyed
- * by path. A post attachment's readability follows the POST's audience,
- * which the key does not encode — the Edge Function has to resolve each key
- * back to its post (see `may_read_post_media`) — so batching buys nothing
- * and the caching story is different.
+ * A separate component from `MessageMediaView` because the two LOOK
+ * different — a post's media is a full-width card, a message's is a bubble
+ * with a lightbox — and because their authorization differs underneath: a
+ * message key encodes its thread, while a post key encodes only its author
+ * and has to be resolved back to its post (see `may_read_post_media`).
+ *
+ * None of that is a reason to fetch differently, which is what this used to
+ * do. Resolving a path to a URL is the same problem on both surfaces, so it
+ * now goes through the same `useMessageImageUrl` — which means post media
+ * gets the request batching and the on-device cache that message media
+ * already had, and silently did not before.
  *
  * Sharing one component would have meant one of the two pretending its
- * authorization model was the other's. They share the presign endpoint and
- * the play-badge CSS, which is the part that was actually worth sharing.
+ * authorization model was the other's. They share the presign endpoint, the
+ * play-badge CSS, and `useMessageImageUrl` — which is the part that was
+ * actually worth sharing, and which this used to duplicate. Doing its own
+ * fetching meant post media silently missed the on-device cache and the
+ * request batching that every message image already had.
  *
  * WHY A VIDEO SHOWS ITS POSTER FIRST
  * ---------------------------------------------------------------------
@@ -44,46 +51,16 @@ export default function PostMediaView({
   maxHeight = 420,
 }: PostMediaViewProps) {
   const thumbKey = media.kind === "video" ? media.posterKey! : media.objectKey;
-  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
-  const [clipUrl, setClipUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [playing, setPlaying] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    void (async () => {
-      try {
-        const urls = await gateway.messageMediaUrls([thumbKey]);
-        if (!cancelled) setThumbUrl(urls[thumbKey] ?? null);
-      } catch {
-        if (!cancelled) setThumbUrl(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [gateway, thumbKey]);
-
-  // Fetched only once someone presses play.
-  useEffect(() => {
-    if (!playing || media.kind !== "video" || clipUrl) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const urls = await gateway.messageMediaUrls([media.objectKey]);
-        if (!cancelled) setClipUrl(urls[media.objectKey] ?? null);
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [playing, media.kind, media.objectKey, clipUrl, gateway]);
+  const { url: thumbUrl, loading } = useMessageImageUrl(gateway, thumbKey);
+  // Null until someone presses play, which is what keeps a feed of videos
+  // from minting URLs — and downloading bytes — for clips nobody watches.
+  const { url: clipUrl } = useMessageImageUrl(
+    gateway,
+    playing && media.kind === "video" ? media.objectKey : null,
+  );
 
   const ratio = media.width > 0 && media.height > 0 ? media.height / media.width : 0.75;
   const height = Math.min(Math.round(availableWidth * ratio), maxHeight);
