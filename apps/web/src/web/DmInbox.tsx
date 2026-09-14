@@ -4,21 +4,39 @@ import { useCallback, useEffect, useState } from "react";
 import {
   conversationTitle,
   formatAgoShort,
+  roomPreview,
+  ROOM_NAME,
+  ROOM_TAGLINE,
   threadPreview,
+  type ChatMessage,
   type DmThread,
   type SosoGateway,
 } from "soso-core";
 import { ConversationAvatar } from "./ConversationAvatar";
 import { Icon, ICONS } from "./Icon";
+import { useRefetchOnForeground } from "./useRefetchOnForeground";
 
 /**
- * The message inbox: direct conversations and groups, in one list.
+ * The message inbox: the public room, direct conversations and groups, all in
+ * one list.
  *
  * ONE LIST, NOT TWO, and that follows the schema rather than merely resembling
  * it — a group is a `dm_threads` row with more members, so `list_dm_threads`
  * returns both and this renders both. Splitting them into tabs would make
  * "where is that conversation" a question with two places to look, which is
  * exactly what Instagram, LINE and Messenger all avoid.
+ *
+ * THE ROOM IS PINNED AT THE TOP OF THAT SAME LIST, and it is the one row here
+ * that is not a `dm_threads` row at all — `chat_messages` is its own table
+ * with no membership and no thread id (migration 0015). It is rendered as a
+ * conversation anyway, because that is what it is to the person reading it,
+ * and a segmented control above the list asking "room or chats?" made people
+ * answer a question about this app's schema before they could open anything.
+ *
+ * It does NOT scroll away with the list, and it is deliberately styled apart
+ * from the rows under it: everything below is private to the people in it,
+ * and the room is not. That visual break is load-bearing rather than
+ * decorative — see `.dm-room-row`.
  *
  * The per-row differences are three, and all three live in core rather than
  * here: what the row is called (`conversationTitle` — a name, or the members'
@@ -36,6 +54,19 @@ interface DmInboxProps {
   myId: string | null;
   demoMode: boolean;
   onOpenThread: (thread: DmThread) => void;
+  /** Opens the public room. ChatPanel owns that view, so it owns the handler. */
+  onOpenRoom: () => void;
+  /**
+   * The room's newest message, for its row's preview line, or null when the
+   * room is empty or has not loaded yet.
+   *
+   * Passed in rather than fetched here: ChatPanel already holds the room's
+   * messages for the room view itself, and a second fetch of the same table
+   * to draw one line would be a request for something this app already has.
+   */
+  roomLastMessage: ChatMessage | null;
+  /** The room's unread count, for its row's badge. */
+  unreadRoom: number;
   /** Opens the new-group flow. Owned by page.tsx, which also owns the friends list it needs. */
   onNewGroup: () => void;
   /**
@@ -52,6 +83,9 @@ export default function DmInbox({
   myId,
   demoMode,
   onOpenThread,
+  onOpenRoom,
+  roomLastMessage,
+  unreadRoom,
   onNewGroup,
   refreshToken,
 }: DmInboxProps) {
@@ -101,20 +135,53 @@ export default function DmInbox({
     };
   }, [gateway, myId, demoMode, reload, refreshToken]);
 
-  if (demoMode) {
-    return (
-      <p className="chat-empty">
-        Messages need a backend and accounts that follow each other — demo mode has neither.
-      </p>
-    );
-  }
+  // See the hook's own doc comment: the realtime subscription above can go
+  // silently stale while this tab is backgrounded, so tapping a notification
+  // (or just switching back) is backstopped with an explicit refetch rather
+  // than trusting the socket noticed anything changed while it was away.
+  useRefetchOnForeground(reload);
 
   return (
     <>
+      {/* FIRST, ALWAYS, AND IN DEMO MODE TOO — unlike everything below it.
+          The room is the one conversation that works with no backend and no
+          friends (demo-gateway keeps a local echo of it), so the "you need a
+          backend for this" note belongs under this row rather than in place
+          of the whole screen, which is where it used to sit. */}
+      <button type="button" className="dm-row dm-room-row" onClick={onOpenRoom}>
+        <span className="dm-room-icon" aria-hidden="true">
+          <Icon src={ICONS.place} size={22} />
+        </span>
+        <span className="dm-row-main">
+          <span className="dm-row-top">
+            <span className="dm-row-name">
+              {ROOM_NAME}
+              {/* Said on the row itself, not only inside the room. This is
+                  the only conversation in this list that is not private to
+                  the people in it, and the moment it sits among ones that
+                  ARE, the difference has to be visible without opening it. */}
+              <span className="dm-room-tag">Public</span>
+            </span>
+            {roomLastMessage && (
+              <span className="dm-row-time">
+                {formatAgoShort(
+                  Math.floor(new Date(roomLastMessage.createdAt).getTime() / 1000),
+                  nowSeconds,
+                )}
+              </span>
+            )}
+          </span>
+          <span className={`dm-row-preview${unreadRoom > 0 ? " unread" : ""}`}>
+            {roomPreview(roomLastMessage, myId) ?? <em>{ROOM_TAGLINE}</em>}
+          </span>
+        </span>
+        {unreadRoom > 0 && <span className="dm-unread">{unreadRoom}</span>}
+      </button>
+
       {/* Above the list rather than floating over it: the list scrolls, and a
           compose button that scrolls away is one people hunt for. */}
       <div className="dm-inbox-actions">
-        <button type="button" className="dm-new-group" onClick={onNewGroup}>
+        <button type="button" className="dm-new-group" onClick={onNewGroup} disabled={demoMode}>
           <span className="dm-new-group-icon" aria-hidden="true">
             <Icon src={ICONS.people} size={15} />
           </span>
@@ -122,15 +189,21 @@ export default function DmInbox({
         </button>
       </div>
 
-      {!loaded ? (
+      {demoMode ? (
+        <p className="chat-empty">
+          The room above works here. Private chats and groups need a backend and accounts that
+          follow each other — demo mode has neither.
+        </p>
+      ) : !loaded ? (
         <p className="chat-empty">Loading…</p>
       ) : rows.length === 0 ? (
         <div className="people-blank dm-blank">
           <Icon src={ICONS.lock} size={26} />
-          <strong>No conversations yet</strong>
+          <strong>No private chats yet</strong>
           <p>
-            Open a friend&rsquo;s row in Friends and choose Message, or start a group above. Only
-            people you follow each other with can be in one.
+            The room above is open to everyone. For a private one, open a friend&rsquo;s row in
+            Friends and choose Message, or start a group — only people you follow each other with
+            can be in either.
           </p>
         </div>
       ) : (

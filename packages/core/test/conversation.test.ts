@@ -6,9 +6,16 @@ import {
   conversationTitle,
   describeThreadEvent,
   groupTitleFromMembers,
+  roomPreview,
   threadPreview,
 } from '../src/domain/conversation.js';
-import type { DmEventKind, DmMessage, DmThread, DmThreadMember } from '../src/domain/types.js';
+import type {
+  ChatMessage,
+  DmEventKind,
+  DmMessage,
+  DmThread,
+  DmThreadMember,
+} from '../src/domain/types.js';
 
 const ME = 'me';
 
@@ -250,5 +257,58 @@ describe('threadPreview', () => {
 
   it('is null on a conversation nobody has written in, so the caller can say so itself', () => {
     assert.equal(threadPreview(group(), ME), null);
+  });
+});
+
+function roomMessage(over: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: 'c1',
+    body: 'on my way',
+    createdAt: '2026-09-14T00:00:00Z',
+    authorId: 'u2',
+    authorHandle: 'ana',
+    authorName: 'Ana Ruiz',
+    authorAvatarPath: null,
+    mine: false,
+    replyTo: null,
+    reactions: [],
+    media: null,
+    sharedPost: null,
+    seenBy: 0,
+    ...over,
+  };
+}
+
+describe('roomPreview', () => {
+  it('is null before anyone has spoken, so the caller can say something else', () => {
+    assert.equal(roomPreview(null, ME), null);
+  });
+
+  // Unlike a direct thread, which is titled with the other person's name
+  // already — the room's row is titled "Everyone", so the name is the part
+  // that carries.
+  it('always names the speaker', () => {
+    assert.equal(roomPreview(roomMessage(), ME), 'Ana Ruiz: on my way');
+  });
+
+  it('writes your own in the second person', () => {
+    assert.equal(roomPreview(roomMessage({ authorId: ME }), ME), 'You: on my way');
+  });
+
+  it('describes an attachment that came with no caption', () => {
+    const media = { kind: 'image' as const, path: 'k', width: 10, height: 10, posterPath: null, durationMs: null };
+    assert.equal(roomPreview(roomMessage({ body: '', media }), ME), 'Ana Ruiz: Photo');
+    assert.equal(
+      roomPreview(roomMessage({ body: '', media: { ...media, kind: 'video', posterPath: 'p' } }), ME),
+      'Ana Ruiz: Video',
+    );
+  });
+
+  it('falls back to a word for a name that is missing', () => {
+    assert.equal(roomPreview(roomMessage({ authorName: '  ' }), ME), 'Someone: on my way');
+  });
+
+  it('is null for a message carrying nothing it can describe', () => {
+    assert.equal(roomPreview(roomMessage({ body: '' }), ME), null);
   });
 });

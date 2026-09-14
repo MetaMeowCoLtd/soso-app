@@ -1,10 +1,12 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
+  ROOM_NAME,
+  ROOM_SUBTITLE,
   MESSAGE_IMAGE_MIME_TYPES,
   MESSAGE_VIDEO_MIME_TYPES,
   type CategoryConfig,
@@ -26,6 +28,7 @@ import { useMediaAttachment } from "./useMediaAttachment";
 import { useLongPress } from "./useLongPress";
 import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import { useChatScroll } from "./useChatScroll";
+import { useRefetchOnForeground } from "./useRefetchOnForeground";
 import { useSwipeToReply } from "./useSwipeToReply";
 import { useNowSeconds } from "./hooks";
 import { Icon, ICONS } from "./Icon";
@@ -83,6 +86,17 @@ interface ChatPanelProps {
   /** Opens a conversation full-screen; page.tsx owns that surface. */
   onOpenThread: (thread: DmThread) => void;
   /**
+   * A pending request to open the room, from a followed room notification —
+   * the one thing that should push past the list this tab opens on.
+   *
+   * Consumed, not just read: this panel calls `onRoomOpened` once it has
+   * acted, so page.tsx can drop the request and coming back to the tab later
+   * lands on the list like any other visit. See its own note on why the
+   * request cannot live in here.
+   */
+  openRoomRequested: boolean;
+  onRoomOpened: () => void;
+  /**
    * Opens the new-group flow. page.tsx owns it for the same reason it owns a
    * conversation: it covers the whole screen, and it needs the friends list
    * that usePresence already holds up there.
@@ -90,8 +104,14 @@ interface ChatPanelProps {
   onNewGroup: () => void;
   /** Passed through to the inbox — see DmInbox's own note on why it exists. */
   refreshToken: number;
-  /** Unread totals, counted in page.tsx so they survive this tab unmounting. */
-  unreadDm: number;
+  /**
+   * The room's unread count, counted in page.tsx so it survives this tab
+   * unmounting. Rendered on the room's row in the inbox.
+   *
+   * There is no `unreadDm` counterpart any more: it existed to badge the
+   * "Chats" half of a segmented control that no longer exists, and every
+   * thread in the list already carries its own count.
+   */
   unreadRoom: number;
   /**
    * Reports the newest room message this view has actually shown, which is
@@ -153,19 +173,35 @@ export default function ChatPanel({
   onOpenPost,
   myId,
   onOpenThread,
+  openRoomRequested,
+  onRoomOpened,
   onNewGroup,
   refreshToken,
-  unreadDm,
   unreadRoom,
   onRoomSeen,
   roomSeenAt,
 }: ChatPanelProps) {
-  // Two things live under one tab: the single global room this app started
-  // with, and direct messages. They are the same activity from the user's
-  // side ("talking to people") and splitting them into a fifth tab would
-  // have made the nav bar longer to say something the segmented control
-  // says in one line.
-  const [view, setView] = useState<"room" | "direct">("room");
+  // ONE LIST, THEN ONE CONVERSATION — the same shape every messaging app
+  // uses, and no longer a segmented control asking which KIND of
+  // conversation you want first.
+  //
+  // That control had to go because the question it asked was about this
+  // app's schema rather than about anything the person wanted: "Room" is a
+  // row in `chat_messages`, "Chats" are rows in `dm_threads`, and nobody
+  // opening a chat app is thinking in tables. The room is now the first row
+  // of the inbox (see DmInbox), so the whole tab is one list you pick from
+  // — and `view` is just which of the two screens is showing, the way
+  // `dmThread` in page.tsx decides whether a DM is open over the tab.
+  const [view, setView] = useState<"inbox" | "room">("inbox");
+  // The inbox is where this tab opens, always. A followed room notification
+  // is the one thing allowed to push past it, and it is consumed here so that
+  // coming back to the tab later is an ordinary visit to the list.
+  useEffect(() => {
+    if (!openRoomRequested) return;
+    setView("room");
+    onRoomOpened();
+  }, [openRoomRequested, onRoomOpened]);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
@@ -182,7 +218,7 @@ export default function ChatPanel({
   // one minted — see MessageMediaLightbox.
   const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia } | null>(null);
 
-  async function reload() {
+  const reload = useCallback(async () => {
     try {
       const recent = await gateway.listRecentChatMessages();
       setMessages(recent);
@@ -193,7 +229,7 @@ export default function ChatPanel({
     } finally {
       setLoaded(true);
     }
-  }
+  }, [gateway]);
 
   useEffect(() => {
     void reload();
@@ -203,6 +239,13 @@ export default function ChatPanel({
     // changes (see resolveGateway in page.tsx).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // See the hook's own doc comment: the realtime subscription above can go
+  // silently stale while this tab sits backgrounded, so coming back to it —
+  // whether by tapping a notification or just switching back — is
+  // backstopped with an explicit refetch rather than trusting the socket
+  // noticed whatever arrived while it was away.
+  useRefetchOnForeground(reload);
 
   /**
    * The cursor as it stood the last time the room was SHOWN.
@@ -233,7 +276,7 @@ export default function ChatPanel({
     return messages.find((m) => !m.mine && m.createdAt > roomAnchorAt)?.id ?? null;
   }, [messages, roomAnchorAt]);
 
-  // `view` as the reset key: switching to Direct unmounts the room list, so
+  // `view` as the reset key: leaving for the inbox unmounts the room list, so
   // coming back is an open, not a continuation. See useChatScroll.
   const { jumpTo } = useChatScroll(listRef, messages, firstUnreadId, view);
   /**
@@ -409,58 +452,58 @@ export default function ChatPanel({
 
   return (
     <div className="chat-tab" role="tabpanel" aria-label="Chat">
-      <header className="chat-tab-header">
-        <a className="brand" href="#top" aria-label="SoSo home">
-          <span>So</span>So
-        </a>
-        <h1>Chat</h1>
-      </header>
+      {/* The room borrows .dm-thread-head wholesale rather than approximating
+          it: it is a conversation now, opened from a list, and one that
+          looked subtly unlike every other conversation opened from that same
+          list would read as a different kind of thing than it is.
 
-      <div className="chat-switch" role="tablist" aria-label="Chat view">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === "room"}
-          className={`chat-switch-option${view === "room" ? " active" : ""}`}
-          onClick={() => setView("room")}
-        >
-          Room
-          {/* Only on the side you are not looking at. A count on the view
-              already open is noise: it is about to be zero, and while you
-              sit there it would flicker up and straight back down on every
-              arriving message. */}
-          {view !== "room" && unreadRoom > 0 && (
-            <span className="chat-switch-badge">{unreadRoom > 9 ? "9+" : unreadRoom}</span>
-          )}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === "direct"}
-          className={`chat-switch-option${view === "direct" ? " active" : ""}`}
-          onClick={() => setView("direct")}
-        >
-          {/* "Direct" stopped being the whole truth when groups landed in
-              the same inbox (migration 0047) — the view holds every
-              conversation that is not the global room. */}
-          Chats
-          {/* Shown even while the inbox is open, unlike the room's: this
-              total is the sum of per-thread counts that only clear when you
-              open each thread, so it stays truthful while you look at the
-              list rather than resetting merely because you glanced at it. */}
-          {unreadDm > 0 && (
-            <span className="chat-switch-badge">{unreadDm > 9 ? "9+" : unreadDm}</span>
-          )}
-        </button>
-      </div>
+          It stays INSIDE .chat-tab rather than covering the screen the way
+          DmThreadView does, which is the one deliberate difference. The tab
+          bar stays reachable underneath because the room is where this tab
+          lands by default for most people — a destination, not something
+          pushed on top of one — and .chat-tab's own bottom padding already
+          keeps the composer clear of it. */}
+      {view === "room" ? (
+        <header className="dm-thread-head">
+          <button
+            type="button"
+            className="dm-thread-back"
+            onClick={() => setView("inbox")}
+            aria-label="Back to chats"
+          >
+            <Icon src={ICONS.chevronLeft} size={17} />
+          </button>
+          <span className="dm-room-icon small" aria-hidden="true">
+            <Icon src={ICONS.place} size={17} />
+          </span>
+          <div className="dm-thread-who">
+            <strong>{ROOM_NAME}</strong>
+            {/* The header is the one place with room to say it in full, and
+                the place somebody is looking immediately before they type. */}
+            <span>{ROOM_SUBTITLE}</span>
+          </div>
+        </header>
+      ) : (
+        <header className="chat-tab-header">
+          <a className="brand" href="#top" aria-label="SoSo home">
+            <span>So</span>So
+          </a>
+          <h1>Chat</h1>
+        </header>
+      )}
 
-      {view === "direct" ? (
+      {view === "inbox" ? (
         <div className="chat-thread dm-inbox-scroll">
           <DmInbox
             gateway={gateway}
             myId={myId}
             demoMode={demoMode}
             onOpenThread={onOpenThread}
+            onOpenRoom={() => setView("room")}
+            // The room's own list, which this component already holds — see
+            // the prop's note on why the inbox does not fetch it again.
+            roomLastMessage={messages.length > 0 ? messages[messages.length - 1]! : null}
+            unreadRoom={unreadRoom}
             onNewGroup={onNewGroup}
             refreshToken={refreshToken}
           />

@@ -596,7 +596,18 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 
 /* Full-screen viewer. Deliberately plain: one image, one way out, no
    controls competing with the picture. */
-.message-lightbox { position:fixed; z-index:40; inset:0; display:grid; place-items:center; padding:24px; background:rgba(8,20,17,.92); }
+/* padding-top is deliberately its own value, not the general 24px every
+   other edge gets. `place-items:center` sizes the image against this
+   padded box, so its top edge is exactly where this padding ends — for a
+   tall enough image (a screenshot, a receipt, anything narrower than
+   roughly 2.3:1 on a typical phone viewport) that IS the image's actual
+   top edge, not a margin above it. 24px left that edge well inside where
+   .message-lightbox-actions floats (top:max(14px,safe-area) to +36px for
+   the button height), so the close (and save) button rendered visibly on
+   top of the picture, and on a bright region of it the white "x" all but
+   disappeared. This reserves a strip tall enough that no image, at any
+   aspect ratio, can ever reach the button. */
+.message-lightbox { position:fixed; z-index:40; inset:0; display:grid; place-items:center; padding:24px; padding-top:calc(max(14px, env(safe-area-inset-top)) + 36px + 14px); background:rgba(8,20,17,.92); }
 .message-lightbox img { max-width:100%; max-height:100%; border-radius:10px; }
 /* Save and close together, top-right, rather than close alone — a viewer
    with one control in the corner and another somewhere else is two places
@@ -627,6 +638,19 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .chat-attach:disabled { opacity:.45; }
 
 .chat-compose { flex-shrink:0; display:flex; align-items:center; gap:8px; padding:9px 10px; padding-bottom:max(9px, env(safe-area-inset-bottom)); margin-bottom:var(--keyboard-inset, 0px); background:#fff; border-top:1px solid var(--hairline); }
+/* .chat-tab (the room) already reserves clearance for the floating .tab-bar
+   in its OWN padding-bottom, which folds in the safe-area itself
+   (`calc(64px + env(safe-area-inset-bottom))`) — the composer sits in flow
+   above that reserved gap, with nothing of the physical screen edge left
+   for it to protect against. .chat-compose's base rule bakes in the same
+   safe-area padding a second time, for the surfaces that actually need it:
+   .dm-thread and .thought-thread have no tab bar and no reservation of
+   their own, so their composer sits flush against the true screen edge and
+   genuinely has to clear the home indicator itself. Without this override
+   the room's input row floated with a needless extra safe-area's worth of
+   blank space beneath it on top of the tab-bar clearance it already had —
+   visibly higher and differently spaced than the same composer in a DM. */
+.chat-tab .chat-compose { padding-bottom: 9px; }
 .chat-input { flex:1; min-width:0; border:1px solid transparent; border-radius:999px; padding:9px 15px; background:#f0f2f5; color:var(--ink); font-size:1rem; font-family:inherit; transition:border-color .16s, background .16s; }
 .chat-input:focus { outline:none; border-color:var(--teal); background:#fff; }
 .chat-send { flex-shrink:0; display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:var(--teal); color:#fff; transition:background .16s, transform .16s, opacity .16s; }
@@ -773,16 +797,10 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .avatar-dot { position:absolute; right:0; bottom:0; width:12px; height:12px; border-radius:50%; border:2.5px solid #fff; background:#c3ccc8; }
 .avatar-dot.online { background:#34d399; }
 
-/* --------------------------------------------------- direct messages --- */
-/* The Room/Direct switch at the top of the Chat tab. Segmented rather than
-   a second row of tabs in the nav bar: the two are one activity. */
-.chat-switch { flex-shrink:0; display:flex; gap:4px; margin:10px clamp(12px,3vw,20px) 2px; padding:3px; border-radius:999px; background:#f0f2f5; }
-.chat-switch-option { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:8px 10px; border:0; border-radius:999px; background:transparent; color:var(--muted); font-size:.875rem; font-weight:750; transition:background .16s, color .16s; }
-.chat-switch-option.active { background:#fff; color:var(--deep); box-shadow:0 1px 3px rgba(16,44,37,.12); }
-/* Inline with the label rather than floating over it: this control is a
-   segmented switch, not an icon, so there is no glyph to pin a corner badge
-   to and a floating one would collide with the pill's own rounded edge. */
-.chat-switch-badge { display:grid; place-items:center; min-width:18px; height:18px; padding:0 5px; border-radius:999px; background:var(--hot); color:#fff; font-size:.69rem; font-weight:850; font-variant-numeric:tabular-nums; }
+/* ------------------------------------------------------ conversations --- */
+/* The Room/Chats segmented switch that used to sit at the top of this tab is
+   gone: the room is the first row of the one list now (see DmInbox), so there
+   is no longer a choice to make before opening anything. */
 
 .dm-inbox-scroll { padding:6px 0 14px; }
 
@@ -802,6 +820,33 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .dm-row-you { color:var(--muted); font-weight:600; }
 .dm-unread { flex-shrink:0; display:grid; place-items:center; min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:var(--teal); color:#fff; font-size:.75rem; font-weight:800; }
 .dm-blank { margin-top:34px; }
+
+/* The shared room, pinned above every private conversation.
+   -------------------------------------------------------------------------
+   The tint is the point, not decoration. Everything below this row is
+   private to the people in it and this one is readable by every account in
+   the app, so it has to be distinguishable at a glance rather than only once
+   opened — the row is the last surface before somebody types into it.
+
+   Teal at low alpha rather than a new hue: it is the same accent the tab bar
+   marks its active tab with (rgba(0,167,143,.13)) and the same one the new-
+   group button's disc uses, so "this row is special" is said in a colour the
+   rest of the app has already established rather than in a fifth one. */
+.dm-room-row { position:relative; background:linear-gradient(135deg, rgba(0,167,143,.11), rgba(0,167,143,.035)); }
+.dm-room-row:hover { background:linear-gradient(135deg, rgba(0,167,143,.16), rgba(0,167,143,.06)); }
+/* Not a border: a hairline under the row alone reads as a divider between two
+   list sections, which is exactly what it is. */
+.dm-room-row::after { content:""; position:absolute; left:0; right:0; bottom:0; height:1px; background:var(--hairline); }
+
+/* Square-ish rather than a circle, and a glyph rather than initials — a place
+   is not a person, and a round avatar in a column of round avatars would say
+   it was. */
+.dm-room-icon { flex-shrink:0; display:grid; place-items:center; width:46px; height:46px; border-radius:15px; background:linear-gradient(140deg, var(--teal), var(--deep)); color:#fff; }
+/* The thread header's copy, sized to sit beside a 32px avatar. */
+.dm-room-icon.small { width:32px; height:32px; border-radius:11px; }
+
+.dm-room-row .dm-row-name { display:inline-flex; align-items:center; gap:7px; color:var(--deep); font-weight:800; }
+.dm-room-tag { flex-shrink:0; padding:1px 7px; border-radius:999px; background:rgba(0,167,143,.16); color:#0d7d6c; font-size:.63rem; font-weight:850; letter-spacing:.04em; text-transform:uppercase; }
 
 /* The conversation itself: full-screen and above the tab bar, like the
    thread and board views — z-index 20 matches .thought-thread. */

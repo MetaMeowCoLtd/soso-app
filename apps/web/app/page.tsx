@@ -512,6 +512,40 @@ function Map({
   // is: it covers the whole screen, and it needs the friends list usePresence
   // already holds at this level.
   const [newGroupOpen, setNewGroupOpen] = useState(false);
+  /**
+   * A pending request to open the room, set by following a room notification.
+   *
+   * A REQUEST THAT ChatPanel CLEARS, rather than a flag or a counter it reads,
+   * and the distinction is the whole of why this lives up here. ChatPanel
+   * unmounts whenever you leave the Chat tab, so it cannot remember for itself
+   * whether a given notification has already been acted on: a counter it
+   * compared against its own initial state would miss the commonest case
+   * outright (a cold start, where the panel mounts with the value ALREADY
+   * bumped and therefore sees no change), and a plain boolean it only read
+   * would re-open the room every time you came back to the tab.
+   *
+   * Setting it here and having the panel call `onRoomOpened` covers both: the
+   * request outlives the mount, and it is consumed exactly once.
+   */
+  const [roomRequested, setRoomRequested] = useState(false);
+  const clearRoomRequest = useCallback(() => setRoomRequested(false), []);
+
+  /**
+   * Following a room notification: open the Chat tab AND the room itself.
+   *
+   * Both halves are needed. The tab switch alone used to be enough, back when
+   * the Chat tab opened straight onto the room — it opens onto the
+   * conversation list now, so without the second half a room notification
+   * would land one tap short of the thing it was announcing.
+   *
+   * A plain function, like `switchTab` beside it: it only ever calls state
+   * setters, so the mount-once effect below capturing one render's copy of it
+   * does the same thing as capturing any other.
+   */
+  function openRoomFromNotification() {
+    switchTab("chat");
+    setRoomRequested(true);
+  }
   const [dmError, setDmError] = useState<string | null>(null);
   // Bumped when a conversation closes, so the inbox behind it re-reads its
   // unread counts. Reading a thread writes to dm_threads, which is not in
@@ -965,7 +999,7 @@ function Map({
       openProfile(profileParam);
     }
     if (chatParam) {
-      switchTab("chat");
+      openRoomFromNotification();
     }
     if (postId || dmSenderId || threadParam || profileParam || chatParam) {
       // Stripped immediately rather than left in the address bar —
@@ -996,7 +1030,7 @@ function Map({
         openProfile(event.data.handle);
       }
       if (event.data?.type === "open-chat") {
-        switchTab("chat");
+        openRoomFromNotification();
       }
     }
     navigator.serviceWorker?.addEventListener("message", onMessage);
@@ -1373,9 +1407,10 @@ function Map({
           demoMode={mode !== "supabase"}
           myId={presence.me?.id ?? null}
           onOpenThread={setDmThread}
+          openRoomRequested={roomRequested}
+          onRoomOpened={clearRoomRequest}
           onNewGroup={() => setNewGroupOpen(true)}
           refreshToken={dmRefresh}
-          unreadDm={unread.dm}
           unreadRoom={unread.room}
           onRoomSeen={unread.markRoomSeen}
           roomSeenAt={unread.roomSeenAt}
@@ -1539,6 +1574,7 @@ function Map({
           gateway={gateway}
           friends={presence.friends}
           myId={presence.me.id}
+          myAvatarPath={myAvatarPath}
           categories={categories}
           onOpenPost={(postId) => void openPostById(postId)}
           // A rename, a new photo or a membership change comes back as the

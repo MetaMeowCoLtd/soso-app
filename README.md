@@ -1171,6 +1171,35 @@ consequences that used to not hold:
 One global room, not scoped to an area — see migration 0015's own comment
 on why that is a deliberate departure from the hyperlocal model.
 
+### It is the first row of the inbox, not a tab
+
+The Chat tab used to open on a Room/Chats segmented control, and picking a
+side was the first thing anyone had to do. That control is gone: the room is
+now pinned at the top of the same list the private conversations are in, and
+opening it pushes a conversation exactly the way opening a DM does.
+
+The reason the split had to go is that the question it asked was about the
+schema rather than about anything a person wants. "Room" is `chat_messages`,
+"Chats" are `dm_threads`, and nobody opening a chat app is thinking in
+tables — they are looking for a conversation, and there is now one list of
+them.
+
+**It is called "Everyone", and deliberately not "Local Area".**
+`chat_messages` has no location column, no cell scoping, and a read policy of
+`using (true)`: every signed-in account, anywhere, reads every message in it.
+A label promising an area would be a privacy claim this schema does not keep,
+and somebody writing into a row marked "Local Area" would reasonably believe
+they were speaking to the people around them. The row also carries a
+**Public** tag and a teal tint that nothing else in the list has, because it
+is the one conversation there that is not private to the people in it — that
+difference has to be legible before it is opened, not after.
+
+Making the room genuinely area-scoped is a schema change (a room id or cell
+column on `chat_messages`, plus scoping every read and the realtime
+subscription), not a rename. `ROOM_NAME`, `ROOM_SUBTITLE` and `ROOM_TAGLINE`
+in `packages/core/src/domain/conversation.ts` are the whole of what the
+client would change if it lands.
+
 Everything you can do to a single message — react, reply, copy, delete —
 lives behind a press-and-hold on the message itself (right-click, or a
 hover-revealed "⋯", on desktop). Delete in particular is *only* there: a
@@ -1193,8 +1222,8 @@ reaction arrives the same way their message does.
 
 Private conversations between mutual follows — private from other users,
 not from the server; see [What the server can read](#what-the-server-can-read).
-Started from a friend's row in the Friends tab; read in the Chat tab's
-**Direct** view. Schema and RPCs in
+Started from a friend's row in the Friends tab; read in the Chat tab's one
+conversation list, below the shared room. Schema and RPCs in
 `supabase/migrations/20260907000026_direct_messages.sql`, with encryption
 removed in `20260910000039_dm_plaintext.sql`.
 
@@ -1447,7 +1476,7 @@ relying on them.
 ## Group chats
 
 Pick some friends, name the thing, give it a picture, talk. Instagram's and
-LINE's model, in the Chat tab's **Chats** view alongside one-to-one
+LINE's model, in the Chat tab's one conversation list alongside one-to-one
 conversations. Schema and RPCs in
 `supabase/migrations/20260914000047_group_chats.sql`.
 

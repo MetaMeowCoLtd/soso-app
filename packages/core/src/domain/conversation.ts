@@ -17,7 +17,7 @@
  * off-by-one in it that is invisible in a component and obvious in a test.
  */
 
-import type { DmMessage, DmThread, DmThreadMember } from './types';
+import type { ChatMessage, DmMessage, DmThread, DmThreadMember } from './types';
 
 /**
  * The most people a conversation may hold, counting yourself.
@@ -172,6 +172,73 @@ export function threadPreview(thread: DmThread, myId: string | null): string | n
     return `${thread.lastSenderName}: ${body}`;
   }
   return body;
+}
+
+/**
+ * WHAT THE SHARED ROOM IS CALLED, AND WHY IT IS NOT "LOCAL AREA".
+ *
+ * `chat_messages` has no location column, no cell scoping, and a read policy
+ * of `using (true)` — every signed-in account, anywhere, reads every message
+ * in it. Migration 0015 says so in its own first paragraph, and says it was a
+ * deliberate departure from this app's hyperlocal model rather than an
+ * oversight.
+ *
+ * So a label promising an area would be a privacy claim this schema does not
+ * keep: somebody writing to a row labelled "Local Area" would reasonably
+ * believe they were speaking to the people around them, and they would be
+ * speaking to everybody. This app has form on refusing exactly that — the DM
+ * view deleted its end-to-end-encryption banner outright when migration 0039
+ * made it untrue, rather than softening the wording.
+ *
+ * Making the room genuinely area-scoped is a schema change (a room id or a
+ * cell column on `chat_messages`, plus scoping every read and the realtime
+ * subscription), not a rename. These three strings are the whole of what the
+ * client would have to change if it lands — they are here, in core, rather
+ * than in a component because the inbox row and the room's own header must
+ * never disagree about what the room is.
+ */
+export const ROOM_NAME = 'Everyone';
+
+/** The room's header line, where there is space to say it in full. */
+export const ROOM_SUBTITLE = 'Public — everyone on SoSo';
+
+/** Shown in the inbox in place of a preview, before anybody has said anything. */
+export const ROOM_TAGLINE = 'Open to everyone on SoSo';
+
+/**
+ * The inbox preview line for the shared room, which is not a thread.
+ *
+ * Its own function rather than a branch inside `threadPreview` because it
+ * takes a different thing entirely: the room has no `DmThread` row to carry
+ * `last*` fields on (`chat_messages` is its own table with no membership —
+ * migration 0015), so the inbox is handed the newest `ChatMessage` itself and
+ * builds the line from that.
+ *
+ * ALWAYS NAMES THE SPEAKER, the way a group does and a direct thread does not.
+ * The room is the widest audience in the app, so "who said this" is the part
+ * of a one-line preview that carries the most: a row that just read "on my
+ * way" would say nothing about which of several hundred people is on theirs.
+ */
+export function roomPreview(message: ChatMessage | null, myId: string | null): string | null {
+  if (!message) return null;
+
+  const body =
+    message.body ||
+    (message.media
+      ? message.media.kind === 'video'
+        ? 'Video'
+        : 'Photo'
+      : message.sharedPost
+        ? 'Shared a pin'
+        : null);
+
+  if (body === null) return null;
+
+  // `mine` is computed server-side, but the room's own list is also where a
+  // message you just sent is appended locally, so the id comparison is the
+  // one that holds in both cases.
+  const who = message.authorId === myId ? 'You' : message.authorName.trim() || 'Someone';
+  return `${who}: ${body}`;
 }
 
 /** The shared phrasing behind `describeThreadEvent` and `threadPreview`. */

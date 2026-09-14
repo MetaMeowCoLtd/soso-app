@@ -34,6 +34,7 @@ import { useMediaAttachment } from "./useMediaAttachment";
 import { useLongPress } from "./useLongPress";
 import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import { useChatScroll } from "./useChatScroll";
+import { useRefetchOnForeground } from "./useRefetchOnForeground";
 import { useSwipeToReply } from "./useSwipeToReply";
 import { useNowSeconds } from "./hooks";
 
@@ -79,6 +80,8 @@ interface DmThreadViewProps {
   onThreadChanged: (thread: DmThread) => void;
   /** Whose messages render as "mine" — and who a reply quote belongs to. */
   myId: string;
+  /** The signed-in user's own picture — passed through to the group detail sheet's "You" row. */
+  myAvatarPath: string | null;
   /** Boot-time config, for a shared pin's category label. */
   categories: CategoryConfig[];
   /**
@@ -113,6 +116,7 @@ export default function DmThreadView({
   gateway,
   friends,
   myId,
+  myAvatarPath,
   categories,
   onOpenPost,
   onThreadChanged,
@@ -187,6 +191,17 @@ export default function DmThreadView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.id]);
+
+  // See the hook's own doc comment: the subscription above can go silently
+  // stale while this conversation sits backgrounded, so coming back to it —
+  // whether by tapping a notification or just switching back — is
+  // backstopped with an explicit refetch rather than trusting the socket
+  // noticed whatever arrived while it was away.
+  useRefetchOnForeground(
+    useCallback(() => {
+      void reload().then(() => gateway.markDmRead(thread.id).catch(() => {}));
+    }, [reload, gateway, thread.id]),
+  );
 
   /**
    * How many messages were unread when this thread opened.
@@ -730,6 +745,7 @@ export default function DmThreadView({
           gateway={gateway}
           friends={friends}
           myId={myId}
+          myAvatarPath={myAvatarPath}
           onChanged={onThreadChanged}
           onLeft={() => {
             // The conversation no longer exists for this account, so there is

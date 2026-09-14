@@ -47,6 +47,16 @@ interface GroupDetailsSheetProps {
   /** Mutual follows, for the add-people list. */
   friends: Friend[];
   myId: string;
+  /**
+   * The signed-in user's own picture, for the "You" row in the member list.
+   *
+   * `soso.dm_members_json` deliberately excludes the viewer (every screen
+   * that renders it already knows who they are), which is why "You" is a
+   * row this component builds by hand rather than one it finds in
+   * `members` — and why it needs this passed in rather than being able to
+   * read it off that list the way every other member's picture is.
+   */
+  myAvatarPath: string | null;
   /** Hands back the thread as the server now reports it, so the header behind this updates. */
   onChanged: (thread: DmThread) => void;
   /** You left. The conversation is gone from under you, so the caller closes it entirely. */
@@ -59,6 +69,7 @@ export default function GroupDetailsSheet({
   gateway,
   friends,
   myId,
+  myAvatarPath,
   onChanged,
   onLeft,
   onClose,
@@ -390,7 +401,10 @@ export default function GroupDetailsSheet({
         <ul className="group-members">
           <li>
             <span className="group-member-row">
-              <Avatar name="You" seed={myId} size={40} />
+              {/* `src` was missing entirely here — the viewer's own row
+                  always showed the fallback initial, never the picture on
+                  their own profile, regardless of whether one was set. */}
+              <Avatar name="You" seed={myId} src={gateway.avatarUrl(myAvatarPath)} size={40} />
               <span className="group-picker-who">
                 <strong>You</strong>
                 <span>{isOwner ? "Created this group" : "Member"}</span>
@@ -412,11 +426,17 @@ export default function GroupDetailsSheet({
                     {/* A blocked member is marked rather than hidden: their
                         messages are already filtered out server-side, and a
                         name in this list whose messages silently never appear
-                        is more confusing than saying why. */}
+                        is more confusing than saying why.
+
+                        The owner's role label used to REPLACE their @handle
+                        rather than sit next to it, which was fine as long as
+                        a display name was unique enough to place — it isn't:
+                        two people named "Alex" in the same group left no way
+                        to tell which one created it. Both now show. */}
                     {member.blocked
                       ? "Blocked — you don't see their messages"
                       : member.role === "owner"
-                        ? "Created this group"
+                        ? `Created this group · @${member.handle}`
                         : `@${member.handle}`}
                   </span>
                 </span>
