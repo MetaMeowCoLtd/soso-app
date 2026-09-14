@@ -177,8 +177,16 @@ const AUDIO_TIMEOUT_MS = 15_000;
  * camera original is 400 MB of JavaScript heap on a device that may have
  * little to spare — and an out-of-memory kill takes the tab, not just the
  * audio. A silent video that sends beats a tab that dies.
+ *
+ * 256 MB rather than something more cautious, because the cautious number
+ * was wrong in a way that mattered: a 60-second 1080p iPhone clip is around
+ * 130 MB, so a ceiling below that would have dropped the sound from most
+ * real recordings while looking fine on the small test files this was
+ * written against. A 4K original still exceeds it, and still loses its
+ * audio — which is the honest trade, not a silent one: `soundDropped` below
+ * carries it back to the composer.
  */
-const AUDIO_MAX_INPUT_BYTES = 96 * 1024 * 1024;
+const AUDIO_MAX_INPUT_BYTES = 256 * 1024 * 1024;
 
 export interface PreparedVideo {
   /** The MP4 to upload — the re-encoded result, or the original when it was already fine. */
@@ -190,6 +198,15 @@ export interface PreparedVideo {
   durationMs: number;
   /** False when the original was passed through untouched. Useful for logging, not for the UI. */
   reencoded: boolean;
+  /**
+   * True when the clip was sent without its soundtrack.
+   *
+   * Reached when the file is too large to buffer for decoding, or the
+   * platform cannot decode its audio. Surfaced rather than swallowed: a
+   * video that arrives silent is a surprise worth one sentence, and the
+   * person can still decide to send a shorter clip instead.
+   */
+  soundDropped: boolean;
 }
 
 /** Whether this browser can re-encode at all. */
@@ -198,25 +215,69 @@ export function canEncodeVideo(): boolean {
 }
 
 /**
- * Loads the file into a <video> element far enough to know its shape.
+ * Loads the file into a <video> element far enough that frames can be SEEKED
+ * TO AND DRAWN — which on iOS is considerably further than it sounds.
  *
- * `preload="metadata"` is not enough for `requestVideoFrameCallback` later,
- * so this waits for `loadeddata` — the point at which a first frame actually
- * exists and can be drawn.
+ * WHY THIS IS NOT JUST "WAIT FOR loadeddata"
+ * ---------------------------------------------------------------------
+ * It was, and that is precisely what broke on iPhone. Two iOS Safari
+ * behaviours combine badly here, and neither has an error event:
+ *
+ *   1. iOS defers loading media DATA until playback is initiated, to save
+ *      cellular data. `preload = "auto"` is a hint it is free to ignore, and
+ *      does. `loadedmetadata` fires — duration and dimensions arrive — but
+ *      `loadeddata` may never fire at all. Waiting on it is waiting forever,
+ *      which is the "Opening video…" that never advanced.
+ *
+ *   2. Even once seeking works, `drawImage(video)` on iOS yields blank
+ *      pixels for a video that has never played. The frame is decoded for
+ *      display, and nothing has asked it to display anything.
+ *
+ * So the element is PRIMED: played muted and inline for a moment, then
+ * paused and returned to the start. That single play is what makes iOS load
+ * the data and warm the decoder, and it is allowed without a user gesture
+ * precisely because it is muted and inline.
+ *
+ * The element also goes into the DOM. A detached media element is the case
+ * iOS optimises hardest, and an off-screen 1x1 at near-zero opacity is still
+ * "rendered" as far as the decoder is concerned. `prepareVideo`'s own
+ * `finally` removes it.
  */
-function loadVideoElement(url: string): Promise<HTMLVideoElement> {
-  return new Promise<HTMLVideoElement>((resolve, reject) => {
-    const el = document.createElement("video");
-    el.preload = "auto";
-    el.muted = true;
-    // Required on iOS or `play()` is refused outside a fullscreen player,
-    // which would stop the frame pump before it started.
-    el.playsInline = true;
-    el.crossOrigin = "anonymous";
-    el.onloadeddata = () => resolve(el);
+async function loadVideoElement(url: string): Promise<HTMLVideoElement> {
+  const el = document.createElement("video");
+  el.preload = "auto";
+  el.muted = true;
+  // Both are required on iOS: without `muted` the play below is refused
+  // without a gesture, and without `playsInline` it is handed to the
+  // fullscreen system player.
+  el.playsInline = true;
+  el.crossOrigin = "anonymous";
+  el.setAttribute("aria-hidden", "true");
+  el.style.cssText =
+    "position:fixed;right:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1";
+  document.body.appendChild(el);
+  el.src = url;
+
+  // Metadata is the part iOS WILL give up without playing: duration and
+  // dimensions, which is everything needed to validate and size the output.
+  await new Promise<void>((resolve, reject) => {
+    el.onloadedmetadata = () => resolve();
     el.onerror = () => reject(new VideoEncodeError("undecodable"));
-    el.src = url;
   });
+
+  // The priming play. Deliberately tolerant: a platform that refuses it, or
+  // one that needed no priming in the first place, should not fail the
+  // encode — the seek loop is what actually has to work, and it reports its
+  // own failure through the zero-frame check.
+  try {
+    await el.play();
+    el.pause();
+    el.currentTime = 0;
+  } catch {
+    console.warn("[soso] could not prime video playback; frames may not decode on iOS");
+  }
+
+  return el;
 }
 
 /**
@@ -289,6 +350,20 @@ interface DecodedAudio {
 }
 
 /**
+ * Why there is no audio, as well as whether there is any.
+ *
+ * `dropped` is true only when a soundtrack existed and this code chose not
+ * to carry it — too large to buffer, too slow to decode, or in a format the
+ * encoder refused. A file that was silent to begin with reports
+ * `dropped: false`, so the composer does not announce a loss that never
+ * happened.
+ */
+interface AudioOutcome {
+  audio: DecodedAudio | null;
+  dropped: boolean;
+}
+
+/**
  * Decodes the original's soundtrack, and confirms this platform can re-encode
  * it, WITHOUT writing anything yet.
  *
@@ -303,14 +378,14 @@ interface DecodedAudio {
  * decode it, or when there is no `AudioEncoder` — a video that arrives silent
  * is a far better outcome than one that fails to send.
  */
-async function decodeAudio(file: Blob): Promise<DecodedAudio | null> {
+async function decodeAudio(file: Blob): Promise<AudioOutcome> {
   if (typeof globalThis.AudioEncoder !== "function" || typeof globalThis.AudioData !== "function") {
-    return null;
+    return { audio: null, dropped: true };
   }
 
   if (file.size > AUDIO_MAX_INPUT_BYTES) {
     console.warn("[soso] skipping audio: file too large to buffer for decoding", file.size);
-    return null;
+    return { audio: null, dropped: true };
   }
 
   let buffer: AudioBuffer | null;
@@ -323,16 +398,25 @@ async function decodeAudio(file: Blob): Promise<DecodedAudio | null> {
     // for a codec it cannot handle, but some platforms simply never settle
     // on a container they half-recognise. Losing the soundtrack is the right
     // way to be wrong here.
+    let timedOut = false;
     buffer = await withTimeout(ctx.decodeAudioData(await file.arrayBuffer()), AUDIO_TIMEOUT_MS, () => {
       console.warn("[soso] audio decode timed out; sending without sound");
+      timedOut = true;
       return null;
     });
     void ctx.close();
+    if (!buffer) return { audio: null, dropped: timedOut };
   } catch {
-    return null;
+    // Reached both by a file with NO audio track and by one whose audio this
+    // platform cannot decode, and the two are not reliably distinguishable
+    // here. Treated as "silent to begin with" rather than "we lost your
+    // sound", because the first is far and away the common case — a screen
+    // recording, a clip already stripped — and telling someone their audio
+    // was dropped when there never was any is worse than saying nothing.
+    return { audio: null, dropped: false };
   }
-  if (!buffer) return null;
-  if (buffer.numberOfChannels === 0 || buffer.length === 0) return null;
+  // Decoded to nothing: a track that exists but is empty. Nothing to lose.
+  if (buffer.numberOfChannels === 0 || buffer.length === 0) return { audio: null, dropped: false };
 
   const config: AudioEncoderConfig = {
     codec: "mp4a.40.2",
@@ -341,9 +425,11 @@ async function decodeAudio(file: Blob): Promise<DecodedAudio | null> {
     bitrate: MESSAGE_VIDEO_AUDIO_BITRATE,
   };
   const support = await globalThis.AudioEncoder.isConfigSupported(config).catch(() => null);
-  if (!support?.supported) return null;
+  // Decoded fine but cannot be re-encoded: there WAS sound and it is being
+  // lost, which is exactly the case worth naming.
+  if (!support?.supported) return { audio: null, dropped: true };
 
-  return { buffer, config };
+  return { audio: { buffer, config }, dropped: false };
 }
 
 /** Feeds an already-decoded soundtrack through AAC into a muxer that expects it. */
@@ -443,21 +529,41 @@ export async function prepareVideo(
     // picture slightly worse.
     if (!videoNeedsReencode({ type: file.type, size: file.size, ...natural })) {
       onProgress?.(1);
-      return { blob: file, poster, width: natural.width, height: natural.height, durationMs, reencoded: false };
+      // Untouched, so whatever soundtrack it arrived with is still there.
+      return {
+        blob: file,
+        poster,
+        width: natural.width,
+        height: natural.height,
+        durationMs,
+        reencoded: false,
+        soundDropped: false,
+      };
     }
 
     if (!canEncodeVideo()) throw new VideoEncodeError("unsupported");
 
-    const blob = await reencode(source, target, file, onProgress, onStage);
-    if (blob.size > MESSAGE_VIDEO_MAX_OUTPUT_BYTES) {
+    const encoded = await reencode(source, target, file, onProgress, onStage);
+    if (encoded.blob.size > MESSAGE_VIDEO_MAX_OUTPUT_BYTES) {
       throw new VideoEncodeError("encode_too_large");
     }
-    return { blob, poster, width: target.width, height: target.height, durationMs, reencoded: true };
+    return {
+      blob: encoded.blob,
+      poster,
+      width: target.width,
+      height: target.height,
+      durationMs,
+      reencoded: true,
+      soundDropped: encoded.soundDropped,
+    };
   } finally {
     if (source) {
       source.pause();
       source.removeAttribute("src");
       source.load();
+      // Appended by loadVideoElement — see its note on why iOS needs the
+      // element in the document at all.
+      source.remove();
     }
     URL.revokeObjectURL(url);
   }
@@ -469,11 +575,11 @@ async function reencode(
   originalFile: Blob,
   onProgress?: (fraction: number) => void,
   onStage?: (stage: PrepareStage) => void,
-): Promise<Blob> {
+): Promise<{ blob: Blob; soundDropped: boolean }> {
   // Decoded FIRST, because the muxer below has to be told at construction
   // time whether an audio track exists and at what rate.
   onStage?.("audio");
-  const audio = await decodeAudio(originalFile);
+  const { audio, dropped: soundDropped } = await decodeAudio(originalFile);
 
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
@@ -497,17 +603,29 @@ async function reencode(
 
   if (audio) await encodeAudio(audio, muxer);
 
-  const config: VideoEncoderConfig = {
-    // Baseline profile, level 3.1 — the widest-playing H.264 there is, which
-    // matters because the result is served as one file to every device.
-    codec: "avc1.42001f",
-    width: target.width,
-    height: target.height,
-    bitrate: MESSAGE_VIDEO_BITRATE,
-    framerate: MESSAGE_VIDEO_MAX_FPS,
-  };
-  const support = await globalThis.VideoEncoder.isConfigSupported(config).catch(() => null);
-  if (!support?.supported) throw new VideoEncodeError("unsupported");
+  // Baseline 3.1 first — the widest-playing H.264 there is, which matters
+  // because the result is served as one file to every device. The others are
+  // fallbacks rather than preferences: Safari's encoder accepts a narrower
+  // set of profile strings than Chrome's, and refusing to encode at all
+  // because the most compatible profile was declined would be the wrong way
+  // round.
+  const CODECS = ["avc1.42001f", "avc1.4d0028", "avc1.640028"];
+  let config: VideoEncoderConfig | null = null;
+  for (const codec of CODECS) {
+    const candidate: VideoEncoderConfig = {
+      codec,
+      width: target.width,
+      height: target.height,
+      bitrate: MESSAGE_VIDEO_BITRATE,
+      framerate: MESSAGE_VIDEO_MAX_FPS,
+    };
+    const support = await globalThis.VideoEncoder.isConfigSupported(candidate).catch(() => null);
+    if (support?.supported) {
+      config = candidate;
+      break;
+    }
+  }
+  if (!config) throw new VideoEncodeError("unsupported");
 
   const encoder = new globalThis.VideoEncoder({
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
@@ -574,5 +692,8 @@ async function reencode(
   muxer.finalize();
   onProgress?.(1);
 
-  return new Blob([(muxer.target as ArrayBufferTarget).buffer], { type: MESSAGE_VIDEO_OUTPUT_MIME });
+  return {
+    blob: new Blob([(muxer.target as ArrayBufferTarget).buffer], { type: MESSAGE_VIDEO_OUTPUT_MIME }),
+    soundDropped,
+  };
 }

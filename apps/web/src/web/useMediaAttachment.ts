@@ -69,6 +69,7 @@ export function useMediaAttachment(
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [stage, setStage] = useState<PrepareStage | null>(null);
+  const [soundDropped, setSoundDropped] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Identifies the CURRENT pick, so a slow upload for a photo that has since
@@ -98,6 +99,7 @@ export function useMediaAttachment(
     setBusy(false);
     setProgress(null);
     setStage(null);
+    setSoundDropped(false);
     setError(null);
   }, [releasePreview]);
 
@@ -142,6 +144,7 @@ export function useMediaAttachment(
               },
             );
             if (seq !== pickSeq.current) return;
+            setSoundDropped(prepared.soundDropped);
 
             // Two objects, uploaded in order. The poster goes first and is
             // cheap; if the clip then fails, the orphan left behind is a
@@ -256,7 +259,12 @@ export function useMediaAttachment(
             : busy
               ? "Uploading…"
               : media !== null
-                ? "Ready to send"
+                ? // Named rather than left for the recipient to discover. This
+                  // happens for a 4K original, which is too large to buffer
+                  // for audio decoding — see AUDIO_MAX_INPUT_BYTES.
+                  soundDropped
+                  ? "Ready to send — without sound"
+                  : "Ready to send"
                 : null;
 
   return { media, previewUrl, busy, statusText, error, pick, clear };
