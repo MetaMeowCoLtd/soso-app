@@ -605,11 +605,70 @@ function SafeAreaResizeFix() {
   return null;
 }
 
+/**
+ * Flies to a point, refusing to do so on a map that has no size.
+ *
+ * THE CRASH THIS EXISTS TO PREVENT
+ * ---------------------------------------------------------------------
+ * `map.flyTo()` is not safe to call on a map whose container is
+ * `display:none`. Leaflet parameterises the flight path by the container's
+ * own dimensions — internally `w0 = Math.max(size.x, size.y)`, used as a
+ * DIVISOR — so a 0x0 container makes every interpolated point `NaN` and the
+ * first `unproject()` of one throws `Invalid LatLng object: (NaN, NaN)`.
+ * That throw happens inside a React effect, so it takes the whole app down
+ * with it: a white screen, not a missed animation.
+ *
+ * Reaching it needs nothing exotic. Opening a post from a tab that is not
+ * the map — a shared pin tapped in a conversation, a push notification's
+ * deep link — sets the focus point and switches to the map tab in the same
+ * update, and `<main className="map-app">` is `display:none` for every other
+ * tab. Whether the container has been laid out by the time the effect runs
+ * is a race, which is why this looked intermittent and why it survived local
+ * testing before being hit in production.
+ *
+ * WHY invalidateSize() IS THE FIX AND NOT JUST A GUARD
+ * ---------------------------------------------------------------------
+ * Leaflet caches its container size and re-reads it only when told to. A tab
+ * switch leaves that cache holding the 0x0 it recorded while hidden, so even
+ * a container that is visible and laid out can report zero. Asking it to
+ * re-measure first is what turns that stale zero back into the real box —
+ * and because the re-measure reads `clientWidth`, it also flushes any layout
+ * still pending from the same update that revealed the container. In every
+ * path that actually wants a flight, this is what makes the flight happen.
+ *
+ * What the size check then catches is the genuine case: the map really is
+ * hidden, and there is nothing to animate. That happens for a board opened
+ * from a conversation, which sets a focus point without switching tabs. The
+ * cost is that the map is not pre-centred if you later open the map tab
+ * yourself; the alternative, which is what shipped, was the app dying.
+ *
+ * A ResizeObserver was tried here as a way to complete the flight later,
+ * when the container does get a box. It is not in the code because it did
+ * not fire in testing on this element, and a safety net that has never been
+ * seen to catch anything is worse than none: it reads as covered.
+ */
+function flyWhenSized(
+  map: L.Map,
+  at: Coordinates,
+  minZoom: number,
+  duration: number,
+): void {
+  // A non-finite coordinate reaches the same NaN crash by a different route,
+  // and is equally not worth taking the app down for.
+  if (!Number.isFinite(at.latitude) || !Number.isFinite(at.longitude)) return;
+
+  map.invalidateSize();
+  const size = map.getSize();
+  if (size.x <= 0 || size.y <= 0) return;
+
+  map.flyTo([at.latitude, at.longitude], Math.max(map.getZoom(), minZoom), { duration });
+}
+
 function FlyToDraft({ at }: { at: Coordinates | null }) {
   const map = useMap();
   useEffect(() => {
     if (!at) return;
-    map.flyTo([at.latitude, at.longitude], Math.max(map.getZoom(), 15), { duration: 0.4 });
+    flyWhenSized(map, at, 15, 0.4);
   }, [map, at]);
   return null;
 }
@@ -628,7 +687,10 @@ function FlyToSignal({ signal }: { signal: { at: Coordinates; id: number } | nul
   useEffect(() => {
     if (!signal || signal.id === lastId.current) return;
     lastId.current = signal.id;
-    map.flyTo([signal.at.latitude, signal.at.longitude], Math.max(map.getZoom(), 16), { duration: 0.6 });
+    // Same zero-size hazard as FlyToDraft: "jump to current location" is a
+    // map-tab button, but the quiet auto-centre on the first location fix
+    // can land while another tab is open.
+    flyWhenSized(map, signal.at, 16, 0.6);
   }, [map, signal]);
   return null;
 }
