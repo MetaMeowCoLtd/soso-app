@@ -541,9 +541,20 @@ export default function ChatPanel({
                     // doing nothing at all. The sheet closes on tap, so
                     // there is no sheet left to report into; the composer's
                     // own error line is where the person is already looking.
-                    void saveMessageImage(gateway, image).catch(() => {
-                      setError("Couldn't save that image.");
-                    });
+                    void saveMessageImage(gateway, image)
+                      .then((outcome) => {
+                        // "opened" means the bytes could not be read (see
+                        // saveMessageImage) and the image was handed to a new
+                        // tab instead. Nothing was saved, so saying nothing
+                        // would leave someone hunting for a file that is not
+                        // there.
+                        if (outcome === "opened") {
+                          setError("Opened it in a new tab — save it from there.");
+                        }
+                      })
+                      .catch(() => {
+                        setError("Couldn't save that image.");
+                      });
                   }
                 : undefined
             }

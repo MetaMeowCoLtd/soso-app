@@ -1376,10 +1376,29 @@ anchor so the save still happens; anything else is a real error.
 
 The bytes are fetched into a blob either way — `download` is ignored for
 cross-origin URLs and `canShare` needs a real `File`, and every one of
-these is a presigned R2 URL on another origin. That read needs no new
-bucket configuration: board tiles already load through
-`img.crossOrigin = "anonymous"`, which only succeeds against a CORS-enabled
-response.
+these is a presigned R2 URL on another origin.
+
+**That read requires a CORS rule on the bucket allowing `GET` from the
+app's origin, and this was got wrong once already.** An earlier version of
+this section claimed no new configuration was needed, reasoning that board
+tiles load through `img.crossOrigin = "anonymous"` and so CORS must already
+be enabled. That inference was wrong in the way that mattered: a bucket
+policy lists methods, and a policy allowing `PUT` (which uploads need, and
+which a preflight makes visible immediately if it is missing) says nothing
+about `GET`. The result was a deployment where sending images worked
+perfectly and saving them failed every time, with `No
+'Access-Control-Allow-Origin' header is present` in the console — because
+**displaying an image is not a CORS request and reading its bytes is**.
+`<img src>` renders another origin's picture happily; `fetch` on the same
+URL does not. See the R2 setup section for the policy itself.
+
+When the read fails anyway, `saveMessageImage` opens the presigned URL in a
+new tab rather than reporting a dead end. The browser is not bound by the
+restriction that stopped us — top-level navigation to another origin needs
+no CORS — so the image opens, and Ctrl/Cmd-S on a desktop or press-and-hold
+→ "Add to Photos" on iOS still gets it saved. That path reports itself
+("Opened it in a new tab — save it from there"), because silently opening a
+tab and calling it a save would be worse than the failure.
 
 **Safari's own long-press "Add to Photos" is NOT available inside a
 bubble**, and it is worth knowing why rather than rediscovering it:
@@ -1899,19 +1918,45 @@ merely assumed to match because the code looks similar.
 None of the following occurs automatically from a `git push`.
 
 1. **A Cloudflare R2 bucket and API token**, scoped to that bucket.
-2. **Secrets:**
+2. **A CORS policy on the bucket.** R2 → your bucket → Settings → CORS
+   policy. This is bucket-wide, so it covers board tiles and message
+   images together:
+   ```json
+   [
+     {
+       "AllowedOrigins": [
+         "https://<your-github-username>.github.io",
+         "http://localhost:3000"
+       ],
+       "AllowedMethods": ["GET", "PUT", "HEAD"],
+       "AllowedHeaders": ["*"],
+       "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+   **`GET` is as load-bearing as `PUT`, and it is the one that gets
+   forgotten.** A policy with only `PUT` looks completely healthy from the
+   app: uploads succeed, boards accept strokes, and every image in every
+   conversation displays correctly — because `<img src>` is not a CORS
+   request. What breaks is anything that reads the bytes into JavaScript,
+   which is saving an image (`fetch`) and loading an existing board tile
+   (`img.crossOrigin = "anonymous"`, which opts that load *into* CORS).
+   The origin is exact-match, so the Pages origin and `localhost` are
+   listed separately and a custom domain needs its own entry.
+3. **Secrets:**
    ```
    supabase secrets set R2_ACCOUNT_ID=<cloudflare account id>
    supabase secrets set R2_ACCESS_KEY_ID=<R2 token access key>
    supabase secrets set R2_SECRET_ACCESS_KEY=<R2 token secret>
    supabase secrets set R2_BUCKET=<bucket name>
    ```
-3. **Deploy the function, verifying the JWT (the default — do not pass
+4. **Deploy the function, verifying the JWT (the default — do not pass
    `--no-verify-jwt`, unlike `notify-new-pin`):**
    ```
    supabase functions deploy board-tile-urls
    ```
-4. **Flip the category on** once the rest of the plan's build order is
+5. **Flip the category on** once the rest of the plan's build order is
    complete: `update post_categories set is_enabled = true where key =
    'board';`
 

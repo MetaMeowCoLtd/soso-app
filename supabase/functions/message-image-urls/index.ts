@@ -54,6 +54,13 @@
 //        supabase secrets set R2_BUCKET=<bucket name>
 //   2. supabase functions deploy message-image-urls
 //      (no --no-verify-jwt — see above)
+//   3. A CORS policy on the BUCKET that allows GET from the app's origin,
+//      not only PUT. This one is easy to believe is already done, because a
+//      PUT-only policy leaves uploads working and every image displaying
+//      correctly — `<img src>` is not a CORS request. Only reading the bytes
+//      back into JavaScript is, which is what saving an image does, and that
+//      failed in production for exactly this reason. The README's R2 setup
+//      section has the policy.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "npm:@aws-sdk/client-s3@3";

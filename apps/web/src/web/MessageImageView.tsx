@@ -164,7 +164,34 @@ export class MessageImageSaveError extends Error {}
  * failure. Pressing Cancel on a share sheet is not an error and must not
  * produce an error message.
  */
-export type SaveOutcome = "shared" | "downloaded" | "cancelled";
+export type SaveOutcome = "shared" | "downloaded" | "cancelled" | "opened";
+
+/**
+ * The last resort: hand the presigned URL to the browser itself.
+ *
+ * Reached when the bytes cannot be read into JavaScript at all — which in
+ * practice means the bucket's CORS policy does not allow this origin to GET
+ * (see the R2 setup section in the README; that is a bucket configuration
+ * problem, not something this code can fix), or the network failed.
+ *
+ * It is a genuinely useful fallback rather than a consolation prize,
+ * because the browser is not subject to the restriction that stopped us:
+ * `<img>` and top-level navigation to another origin need no CORS at all.
+ * On a desktop the image opens in a tab and Ctrl/Cmd-S saves it; on iOS it
+ * opens in Safari's own image view, where press-and-hold offers "Add to
+ * Photos" — the one place in this app where that works, since the
+ * `-webkit-touch-callout: none` on `.chat-bubble` does not apply here.
+ *
+ * Returns false when the browser blocked the new tab. Safari in particular
+ * only allows `window.open` inside a user gesture, and the `await` above it
+ * can outlast that window — the same constraint that makes `share()` fail
+ * with NotAllowedError. A blocked popup has to surface as an error, because
+ * from the person's side nothing happened at all.
+ */
+function openInNewTab(url: string): boolean {
+  const win = window.open(url, "_blank", "noopener,noreferrer");
+  return win !== null;
+}
 
 /**
  * The `<a download>` route. Same-origin blob URL only — see `saveMessageImage`.
@@ -223,9 +250,33 @@ export async function saveMessageImage(
   const url = await messageImageUrlNow(gateway, image.path);
   if (!url) throw new MessageImageSaveError("no url");
 
-  const res = await fetch(url);
-  if (!res.ok) throw new MessageImageSaveError(`fetch ${res.status}`);
-  const blob = await res.blob();
+  // CORS lives or dies here, and this is the single line that has ever
+  // failed in production. Reading another origin's bytes into JavaScript
+  // requires that origin to say we may; DISPLAYING them does not, which is
+  // exactly why images have always rendered fine while saving them did
+  // not — `<img src>` is not a CORS request and `fetch` is. A bucket with
+  // no matching CORS rule rejects this as a TypeError with no status, so
+  // the failure is caught rather than checked for.
+  let blob: Blob;
+  try {
+    const res = await fetch(url);
+    // A RESPONSE that says no is a different thing from no response at all,
+    // and only the second one is worth opening a tab for. A 403 here means
+    // the presigned URL is expired or wrong, and handing that URL to the
+    // browser would replace an error message with a page of S3 error XML —
+    // which looks like a crash and tells the person nothing.
+    if (!res.ok) throw new MessageImageSaveError(`fetch ${res.status}`);
+    blob = await res.blob();
+  } catch (err) {
+    if (err instanceof MessageImageSaveError) throw err;
+    // Everything else is a fetch that never completed: a CORS policy with no
+    // rule for this origin (the production cause), or a dropped network.
+    // Logged because those two are indistinguishable on screen and only one
+    // of them is worth retrying.
+    console.warn("[soso] could not read image bytes for saving:", { path: image.path, error: err });
+    if (openInNewTab(url)) return "opened";
+    throw new MessageImageSaveError("bytes unreadable and popup blocked");
+  }
   const file = new File([blob], downloadName(image), { type: blob.type || "image/jpeg" });
 
   const canShare =
@@ -349,10 +400,14 @@ export function MessageImageLightbox({
     setSaving(true);
     setError(null);
     try {
-      // The outcome is deliberately ignored on success: "shared" and
-      // "downloaded" both mean it worked, and which one happened is the
-      // platform's business, not something to narrate back.
-      await onSave();
+      // "shared" and "downloaded" both mean it worked, and which one
+      // happened is the platform's business, not something to narrate back.
+      // "opened" is the exception worth a word: nothing was saved, a tab
+      // was opened instead, and someone who does not know that is left
+      // wondering where their file went.
+      if ((await onSave()) === "opened") {
+        setError("Opened it in a new tab — save it from there.");
+      }
     } catch {
       // Not "press and hold the image instead", which is what this used to
       // say and was simply untrue here: `.chat-bubble` sets
