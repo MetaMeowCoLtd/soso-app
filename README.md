@@ -49,7 +49,8 @@ Supabase.
 | Local demo mode (no backend required) | Implemented |
 | Polls | Modeled, disabled. Requires separate options/votes tables. |
 | Local news and official notices | Modeled, disabled |
-| Topic groups | Not implemented |
+| Group chats | Implemented, not verified against a live database. Up to 32 people, any member can add their own mutual follows. See [Group chats](#group-chats). |
+| Topic groups | Not implemented. Distinct from [Group chats](#group-chats) above, which are private and invite-only by construction; a topic group would be public and joinable, which is a different membership model and a different moderation problem. |
 | Presence and mutual-follow contacts | Implemented. Its own People tab; opt-in, off by default; see [Presence and people](#presence-and-people). |
 | Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
 | Profile pictures (avatar upload) | Implemented. Storage layer not verified against a real bucket. See [Profile pictures](#profile-pictures). |
@@ -1442,6 +1443,223 @@ so `supabase db reset` could not be executed. The TypeScript, the
 cryptography, and the browser-side key handling are all tested; the SQL is
 reviewed but unexecuted. Run the migrations against a local stack before
 relying on them.
+
+## Group chats
+
+Pick some friends, name the thing, give it a picture, talk. Instagram's and
+LINE's model, in the Chat tab's **Chats** view alongside one-to-one
+conversations. Schema and RPCs in
+`supabase/migrations/20260914000047_group_chats.sql`.
+
+### One conversation table, not two
+
+A group chat is not a different kind of conversation, it is a conversation
+with a different number of people in it. `dm_threads` therefore grew a
+`kind`, and a group is a thread with more than two members — there is no
+`group_threads` table and no `group_messages` table.
+
+That decision is the reason this feature is as small as it is. Everything a
+DM already does, a group does identically and without new code: replies,
+reactions, photo and video attachments, shared pins, reports, unsends, read
+cursors, the realtime signal, the R2 object-key shape, and the
+`message-image-urls` Edge Function that mints URLs for it. The only thing
+that had to learn about groups on the attachment path was the membership
+test inside `may_read_dm_thread`. A parallel table set would have forked
+every one of those, and each fork is a place the two drift.
+
+Membership moved out of the thread row into `dm_thread_members` — for
+**both** kinds, including the direct threads that already existed. Leaving
+direct threads on `user_low`/`user_high` and groups on the new table would
+have put a `CASE` in every read path and given "who is in this conversation"
+two answers that have to agree forever. The pair columns stay for exactly
+one job: the `UNIQUE (user_low, user_high)` constraint that makes "one
+direct thread per pair" a database guarantee. They are null on a group, and
+Postgres treats nulls as distinct in a unique index, so any number of groups
+coexist under it. `low_read_at`/`high_read_at` had no second job and are
+gone; `dm_thread_members.last_read_at` is the one cursor now.
+
+### Who can be in a group, and what that costs
+
+Migration 0026 bought a strong property — nobody who is not a mutual follow
+can put text in front of you, which is why this app has no message-request
+folder. A group necessarily weakens it, and that is stated here rather than
+glossed over.
+
+**What is kept: you can only add people you are mutual follows with.**
+`soso.dm_can_message` is re-checked per person on every add, against the
+person doing the adding — the same predicate, applied the same way, as
+opening a DM. Any member may add, not only the creator, and the check is
+against *that* member. There is no path by which a stranger adds you to
+anything.
+
+**What is given up: once you are in a group, you see messages from members
+you are not friends with**, because that is what a group conversation is.
+The mitigations are the ones that matter in practice:
+
+- **A block still wins.** Messages from someone you have blocked, or who has
+  blocked you, are filtered out of your view of the group per message — in
+  the row-level security policy, so a realtime subscriber gets the same
+  answer as a reader. The group is not torn down for everyone else. A direct
+  thread still disappears wholesale, unchanged.
+- **Leaving is always available**, to anyone, with no owner's permission,
+  and re-adding someone who left needs a member who is mutual follows with
+  them.
+- **The cap is 32**, matching Instagram's, so a group cannot become a
+  broadcast channel with an audience the sender never had.
+- **Creating groups is rate limited** to 10 an hour per account — far above
+  any real use, far below anything that could spray an account with
+  conversations it has to leave one at a time.
+
+A join-request flow would close the gap completely and is deliberately not
+built: it would make the ordinary case — three friends starting a chat — a
+three-step negotiation, which is precisely the friction this feature exists
+to remove.
+
+**History is not gated on when you joined.** Somebody added to a group can
+read what was said before they arrived, which is Instagram's behaviour and
+not WhatsApp's or Signal's. The argument for gating is real, and two things
+decided against it: a reply quote would leak an older message the moment
+anyone replied to it (closing *that* needs per-viewer reply previews, at
+which point a conversation renders differently for each member), and a group
+that visibly begins mid-conversation, where an ordinary reply points at
+nothing, reads as broken rather than as private.
+
+### Who may do what
+
+| | Rename | Change photo | Add | Remove someone | Leave |
+| --- | --- | --- | --- | --- | --- |
+| Creator (`owner`) | yes | yes | yes | yes | yes |
+| Any other member | yes | yes | yes | no | yes |
+
+Renaming and re-photographing are open to everyone because a group where
+only the founder can fix a typo in the name is a group with a permanent typo
+in its name. Removing is the one power `owner` buys.
+
+Two pieces of housekeeping the obvious implementation forgets, both handled
+server-side so no client needs to know them: **the owner leaving promotes
+the longest-standing remaining member** (otherwise a group whose creator
+leaves can never remove anyone again), and **the last member leaving deletes
+the thread** along with its messages, since an empty conversation is
+unreachable by construction.
+
+### System messages
+
+"Ana added Sam", "Ana named the group Tuesday Football". These are rows in
+`dm_messages` with an `event_kind` and an empty body, not a side table, for
+the same reason groups live in `dm_threads`: they order among the messages,
+page with the messages, arrive over the same realtime signal, and move
+`last_message_at` — so a group you were just added to surfaces in your inbox
+instead of sitting invisibly at the bottom with nothing in it.
+
+They carry no text. The **words** are composed on the client by
+`describeThreadEvent`, from the event kind plus the actor and target, because
+a sentence frozen into a row at write time cannot be translated and goes
+stale the moment somebody changes their display name. The one exception is a
+rename, which stores the name it set: the thread's `title` column holds only
+the *current* name, so building the sentence from it would relabel every
+historical rename with the newest name — a history that rewrites itself.
+
+### Naming a group nobody named
+
+Most groups are never given a name, so the unnamed case is the normal one.
+`conversationTitle` renders it from its members instead — "Ana & Bo", "Ana,
+Bo & Chi", "Ana, Bo, Chi, Dee & 5 others" — and the new-group screen shows
+that generated name as the name field's *placeholder*, so leaving it blank
+visibly produces something rather than "Untitled".
+
+The generated name is never stored. Storing it would freeze it against the
+member list it was generated from, which is wrong the first time anyone
+joins or leaves.
+
+The inbox carries at most four members per row (`soso.dm_members_json`),
+which is enough for the avatar stack and for "& 5 others" given
+`member_count`; the group detail screen fetches the whole list separately.
+
+### Selecting one person opens the DM
+
+The new-group picker's primary button says **Message** rather than **Next**
+when exactly one friend is selected, and opens the one-to-one thread. A
+two-person "group" would leave that pair with two separate conversations,
+two unread badges, and no way to tell them apart in the inbox.
+`create_group_thread` refuses fewer than two others server-side as well, so
+a client that forgets cannot create the mess.
+
+### Group photos need no new infrastructure
+
+A group's picture is an ordinary object in the same public `avatars` bucket
+profile pictures use, uploaded through the unchanged `uploadAvatar` path by
+whichever member chose it, into **that member's own folder** — so the
+existing `(storage.foldername(name))[1] = auth.uid()` insert policy already
+authorizes it, and the public bucket means every member can display it
+regardless of who put it there. No second bucket, no second policy, no
+server-side copy.
+
+The cost, stated rather than buried: the object outlives the uploader's
+membership. Someone who sets a group photo and then leaves has left a file
+behind that the group still points at. The alternative fixes a leak whose
+entire cost is one 40 KB file.
+
+### Read receipts become faces
+
+`MessageReceipt` has always been one component behind a discriminated
+`receipt` with a form per surface — a sentence ("Seen 1h ago") for a DM,
+where the only thing left to say is when; a count ("Seen by 12") for the
+global room, which has no membership and whose readers are strangers. A
+group gets the third form, a row of small avatars, because there the
+identities are the whole content.
+
+`dm_thread_read_state` replaced `dm_other_read_at` to feed it: the old call
+returned a single timestamp because a thread could only hold two people. A
+direct thread is now the one-element case of the same list, so the client's
+"which of my messages has this person reached" logic runs unchanged over a
+list of length 1 or 17.
+
+While wiring this up, a pre-existing gap turned up and is fixed here:
+`DmThreadView` computed a DM read receipt and threaded it all the way down
+to a prop that **nothing rendered**. Migration 0045's receipts existed in the
+data and never on screen for direct messages.
+
+### Notifications
+
+A group push fans out to every member except the sender, re-checking blocks
+per recipient so a notification never arrives about a message its recipient
+will not be shown. The body names the group as well as the sender
+("Ana · Tuesday Football: on my way"), because "Ana: on my way" from a group
+is ambiguous in a way it never is from a DM.
+
+A group deep-links by **thread** (`?thread=`), where a DM deep-links by
+**sender** (`?dm=`) — following a group notification through the sender
+would open a one-to-one conversation with whoever spoke. DMs keep the sender
+form so the tap still works on a service worker that has not updated.
+
+Of the six system events, only **added** is ever pushed, and only to the
+person added: being put in a group is the one thing that can happen to you in
+a conversation you have never seen, and if nobody then speaks there is no
+other notification coming. Renames and departures are housekeeping the inbox
+already reflects; pushing every one to every member turns an active group
+into a notification faucet.
+
+### Not verified end-to-end
+
+Migration 0047 has **not been run against a live database** — this
+workspace has neither the Supabase CLI nor a running Docker daemon, so
+`supabase db reset` could not be executed. The TypeScript is type-checked and
+the naming and event-sentence logic is unit-tested (`conversation.test.ts`);
+the SQL is reviewed but unexecuted, and the screens were verified against
+fixture data rather than a real backend.
+
+`supabase/tests/group_chats.sql` exists for exactly this gap: it creates four
+accounts and exercises creating, sending, replying, reacting, adding,
+renaming, removing, leaving, ownership hand-off, thread deletion, the member
+cap, refusal of a one-person group, what a non-member can reach, and the
+row-level security policies as the `authenticated` role. Run it against a
+local stack before relying on any of the above:
+
+```bash
+supabase db reset && psql "$(supabase status -o env | grep DB_URL | cut -d= -f2- | tr -d '"')" -v ON_ERROR_STOP=1 -f supabase/tests/group_chats.sql
+```
+
+A clean run ends with `OK - every assertion passed`.
 
 ## Presence and people
 

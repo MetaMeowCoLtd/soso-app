@@ -89,8 +89,8 @@ class FakeGateway implements SosoGateway {
     return {} as never;
   }
   async markChatRoomRead() {}
-  async dmOtherReadAt() {
-    return null;
+  async dmReadState() {
+    return [];
   }
   async listRecentChatMessages() {
     return [];
@@ -100,6 +100,25 @@ class FakeGateway implements SosoGateway {
   async toggleChatReaction() {}
   async openDmThread() {
     return {} as never;
+  }
+  async createGroupThread() {
+    return {} as never;
+  }
+  async addGroupMembers() {
+    return {} as never;
+  }
+  async removeGroupMember() {
+    return {} as never;
+  }
+  async leaveGroupThread() {}
+  async renameGroupThread() {
+    return {} as never;
+  }
+  async setGroupThreadPhoto() {
+    return {} as never;
+  }
+  async listDmThreadMembers() {
+    return [];
   }
   async listDmThreads() {
     return [];

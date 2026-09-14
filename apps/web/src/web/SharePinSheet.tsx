@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ERROR_MESSAGES_EN, type DmThread, type SosoGateway } from "soso-core";
-import { Avatar } from "./Avatar";
+import {
+  conversationSubtitle,
+  conversationTitle,
+  ERROR_MESSAGES_EN,
+  type DmThread,
+  type SosoGateway,
+} from "soso-core";
+import { ConversationAvatar } from "./ConversationAvatar";
 import { Icon, ICONS } from "./Icon";
 import { sharePostLink } from "./sharePostLink";
 
@@ -125,7 +131,7 @@ export default function SharePinSheet({
     setSending({ kind: "dm", threadId: thread.id });
     try {
       await gateway.sendDm(thread.id, "", null, null, postId);
-      setSentTo(thread.otherName);
+      setSentTo(conversationTitle(thread));
     } catch (err) {
       report(err);
     } finally {
@@ -206,15 +212,15 @@ export default function SharePinSheet({
 
           {demoMode ? (
             <p className="share-sheet-empty">
-              Direct messages need a backend and two accounts that follow each other — demo mode has
+              Messaging needs a backend and accounts that follow each other — demo mode has
               neither. The chat room above and the link below both work.
             </p>
           ) : !loadedThreads ? (
             <p className="share-sheet-empty">Loading conversations…</p>
           ) : threads.length === 0 ? (
             <p className="share-sheet-empty">
-              No conversations yet. Open a friend&rsquo;s row in Friends and choose Message to start
-              one.
+              No conversations yet. Open a friend&rsquo;s row in Friends and choose Message, or
+              start a group from the Chat tab.
             </p>
           ) : (
             threads.map((thread) => (
@@ -225,15 +231,17 @@ export default function SharePinSheet({
                 onClick={() => void shareToThread(thread)}
                 disabled={sending !== null}
               >
-                <Avatar
-                  name={thread.otherName}
-                  seed={thread.otherHandle}
-                  src={gateway.avatarUrl(thread.otherAvatarPath)}
-                  size={36}
-                />
+                {/* Groups appear here too, and for free: `list_dm_threads`
+                    returns both kinds and `send_dm` takes a thread id without
+                    caring how many people are behind it. A pin shared to a
+                    group is audience-checked per recipient by
+                    soso.shared_post_card, so five members with five different
+                    relationships to its author each see the card or a
+                    placeholder as their own access decides. */}
+                <ConversationAvatar thread={thread} gateway={gateway} size={36} />
                 <span className="share-sheet-row-main">
-                  <span className="share-sheet-row-name">{thread.otherName}</span>
-                  <span className="share-sheet-row-sub">@{thread.otherHandle}</span>
+                  <span className="share-sheet-row-name">{conversationTitle(thread)}</span>
+                  <span className="share-sheet-row-sub">{conversationSubtitle(thread)}</span>
                 </span>
                 {sending?.kind === "dm" && sending.threadId === thread.id && (
                   <span className="share-sheet-row-busy">Sending…</span>

@@ -8,11 +8,14 @@ import type { SosoGateway } from "soso-core";
  *
  * TWO SOURCES, TRACKED DIFFERENTLY, AND NOT BY ACCIDENT
  * ---------------------------------------------------------------------
- * Direct messages already have a real read cursor on the server:
- * `dm_thread_members.last_read_at` (migration 0026), moved by `markDmRead`
+ * Conversations already have a real read cursor on the server:
+ * `dm_thread_members.last_read_at` (migration 0047, which moved it off the
+ * pair columns `dm_threads` had carried since 0026), moved by `markDmRead`
  * when a thread is opened, with `list_dm_threads` returning the resulting
  * `unread` per thread. That count is authoritative, survives a reinstall,
  * and agrees across every device you sign in on, so this hook just sums it.
+ * Groups need nothing extra here: they are threads, so they are already in
+ * that sum.
  *
  * The shared room has no equivalent, because it has no membership: it is one
  * global room (migration 0015) with no per-user row to hang a cursor on.

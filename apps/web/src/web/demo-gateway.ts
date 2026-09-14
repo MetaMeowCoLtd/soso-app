@@ -67,7 +67,9 @@ import type {
   Connection,
   ConnectionsPage,
   DmMessage,
+  DmReadReceipt,
   DmThread,
+  DmThreadMember,
   FeedPostsPage,
   FeedQuery,
   FlushedBoardTile,
@@ -1802,13 +1804,6 @@ export function createDemoGateway(): SosoGateway {
       writeJSON(ROOM_READS_KEY, reads);
     },
 
-    async dmOtherReadAt(): Promise<string | null> {
-      // Demo mode has no DM threads at all, so there is no other side whose
-      // cursor could be reported. Null is the same "never read" this returns
-      // for a real thread nobody has opened.
-      return null;
-    },
-
     async listRecentChatMessages(before?: string, limit?: number): Promise<ChatMessage[]> {
       const me = getMe();
       const reads = loadRoomReads();
@@ -1906,6 +1901,43 @@ export function createDemoGateway(): SosoGateway {
 
     async sendDm(): Promise<DmMessage> {
       throw new SosoError("soso/thread_not_found");
+    },
+
+    // Groups reject for the same reason one-to-one threads do, and more
+    // bluntly: a group needs at least two OTHER accounts, and demo mode has
+    // none at all. Returning a fabricated group would produce a conversation
+    // whose members do not exist and whose messages reach nobody.
+    async createGroupThread(): Promise<DmThread> {
+      throw new SosoError("soso/group_too_small");
+    },
+
+    async addGroupMembers(): Promise<DmThread> {
+      throw new SosoError("soso/thread_not_found");
+    },
+
+    async removeGroupMember(): Promise<DmThread> {
+      throw new SosoError("soso/thread_not_found");
+    },
+
+    async leaveGroupThread(): Promise<void> {},
+
+    async renameGroupThread(): Promise<DmThread> {
+      throw new SosoError("soso/thread_not_found");
+    },
+
+    async setGroupThreadPhoto(): Promise<DmThread> {
+      throw new SosoError("soso/thread_not_found");
+    },
+
+    async listDmThreadMembers(): Promise<DmThreadMember[]> {
+      return [];
+    },
+
+    async dmReadState(): Promise<DmReadReceipt[]> {
+      // Demo mode has no threads at all, so there is nobody whose cursor could
+      // be reported. An empty list is the same "nobody has read this" a real
+      // thread nobody has opened returns.
+      return [];
     },
 
     async markDmRead(): Promise<void> {},

@@ -6,6 +6,7 @@ export * from './feed';
 export * from './duration';
 export * from './validity';
 export * from './chat';
+export * from './conversation';
 export * from './phone';
 export * from './profile';
 export * from './avatar';

@@ -1216,19 +1216,86 @@ export function decodeFeedPostsPage(w: WireFeedPostsPage): FeedPostsPage {
 // ---------------------------------------------------------------------------
 
 /**
- * A thread, with the last message's text for the inbox preview.
+ * Which kind of conversation a thread is.
  *
- * That preview used to be `lastCiphertext`/`lastIv`, because the server held
- * no plaintext to build one from and the inbox had to decrypt each thread's
- * newest message itself before it could draw a row. Migration 0039 ended
- * that; see its header for what was traded for it.
+ * A group is not a different sort of object from a DM in this schema, only a
+ * thread with more than two people in it — see migration 0047 for why that is
+ * one table rather than two.
+ */
+export type ThreadKind = 'direct' | 'group';
+
+/** What a member may do. Only `owner` may remove somebody else; see migration 0047. */
+export type ThreadRole = 'owner' | 'member';
+
+/**
+ * One person in a conversation, as every group surface wants them.
+ *
+ * Never includes the signed-in user: every screen that renders this list
+ * already knows who they are, and none of them draw the viewer into it.
+ */
+export interface DmThreadMember {
+  id: string;
+  handle: string;
+  displayName: string;
+  avatarPath: AvatarPath;
+  role: ThreadRole;
+  /**
+   * You have blocked this person, or they have blocked you.
+   *
+   * Their messages are already filtered out of the conversation server-side,
+   * so this exists to stop the member list disagreeing with it: a name in the
+   * list whose messages silently never appear is more confusing than a name
+   * marked as blocked.
+   */
+  blocked: boolean;
+}
+
+/**
+ * Something that happened TO a conversation rather than something said in it.
+ *
+ * Stored as a message with an empty body (migration 0047) so it sorts, pages
+ * and arrives over realtime with everything else. The sentence is composed on
+ * the client — see `describeThreadEvent` — because a sentence frozen into a
+ * row at write time cannot be translated and goes stale when somebody renames
+ * themselves.
+ */
+export type DmEventKind = 'created' | 'added' | 'removed' | 'left' | 'renamed' | 'photo';
+
+/**
+ * A conversation: two people, or up to 32.
+ *
+ * `otherId`/`otherHandle`/`otherName`/`otherAvatarPath` describe THE OTHER
+ * PERSON and are therefore null on a group, where there is no such thing.
+ * They are kept rather than folded into `members` because every direct-thread
+ * surface already reads them and a group has `title` and `members` instead.
+ * `conversationTitle` is the one function that resolves the two cases into a
+ * label; prefer it over branching on `kind` at each call site.
  */
 export interface DmThread {
   id: string;
-  otherId: string;
-  otherHandle: string;
-  otherName: string;
+  kind: ThreadKind;
+  /** A group's name, or null for a group nobody has named. Always null on a direct thread. */
+  title: string | null;
+  /** A group's picture. Null for no picture, and always null on a direct thread. */
+  photoPath: AvatarPath;
+  createdBy: string | null;
+  /** The signed-in user's own role in this thread. */
+  myRole: ThreadRole;
+  /** Null on a group. */
+  otherId: string | null;
+  /** Null on a group. */
+  otherHandle: string | null;
+  /** Null on a group. */
+  otherName: string | null;
   otherAvatarPath: AvatarPath;
+  /**
+   * Up to four other members, for the avatar stack and the generated title of
+   * an unnamed group. `memberCount` is the real total — use that for "and 5
+   * others", never `members.length`.
+   */
+  members: DmThreadMember[];
+  /** Everyone, the signed-in user included. */
+  memberCount: number;
   lastMessageAt: string | null;
   /** The last message's text, for the inbox preview. Null on a thread with no messages yet. */
   lastBody: string | null;
@@ -1239,39 +1306,138 @@ export interface DmThread {
   /** What `lastHasImage` was, so the inbox can say "Video" rather than "Photo". */
   lastMediaKind: MediaKind;
   lastSenderId: string | null;
+  /** Who sent the last message, for a group's "Ana: on my way" preview. Null on a direct thread. */
+  lastSenderName: string | null;
+  /** Set when the newest thing in the thread was an event rather than a message. */
+  lastEventKind: DmEventKind | null;
+  lastEventTargetName: string | null;
+  /** The name set by a `renamed` event. Null on every other kind. */
+  lastEventText: string | null;
   unread: number;
+}
+
+export interface WireDmThreadMember {
+  id: string;
+  handle: string;
+  name: string;
+  avatar?: string | null;
+  role?: string | null;
+  blocked?: boolean | null;
+}
+
+export function decodeDmThreadMember(w: WireDmThreadMember): DmThreadMember {
+  return {
+    id: w.id,
+    handle: w.handle,
+    displayName: w.name,
+    avatarPath: w.avatar ?? null,
+    role: w.role === 'owner' ? 'owner' : 'member',
+    blocked: Boolean(w.blocked),
+  };
 }
 
 export interface WireDmThread {
   id: string;
-  other_id: string;
-  other_handle: string;
-  other_name: string;
+  kind?: string | null;
+  title?: string | null;
+  photo_path?: string | null;
+  created_by?: string | null;
+  my_role?: string | null;
+  other_id?: string | null;
+  other_handle?: string | null;
+  other_name?: string | null;
   other_avatar?: string | null;
+  members?: WireDmThreadMember[] | null;
+  member_count?: number | string | null;
   last_message_at: string | null;
   last_body?: string | null;
   last_has_image?: boolean | null;
   last_has_post?: boolean | null;
   last_media_kind?: string | null;
   last_sender_id?: string | null;
+  last_sender_name?: string | null;
+  last_event_kind?: string | null;
+  last_event_target_name?: string | null;
+  last_event_text?: string | null;
   unread: number | string;
 }
 
+const DM_EVENT_KINDS: readonly string[] = ['created', 'added', 'removed', 'left', 'renamed', 'photo'];
+
+function decodeEventKind(raw: string | null | undefined): DmEventKind | null {
+  // Anything unrecognised is treated as no event at all rather than rendered
+  // as a blank line: a server that learns a seventh event kind before this
+  // client does should produce a message that is skipped, not one that shows
+  // an empty bubble.
+  return raw && DM_EVENT_KINDS.includes(raw) ? (raw as DmEventKind) : null;
+}
+
 export function decodeDmThread(w: WireDmThread): DmThread {
+  // Absent entirely from a server that has not run migration 0047, where
+  // every thread is a direct one — which is exactly what the column's own
+  // default says.
+  const kind: ThreadKind = w.kind === 'group' ? 'group' : 'direct';
   return {
     id: w.id,
-    otherId: w.other_id,
-    otherHandle: w.other_handle,
-    otherName: w.other_name,
+    kind,
+    title: w.title ?? null,
+    photoPath: w.photo_path ?? null,
+    createdBy: w.created_by ?? null,
+    myRole: w.my_role === 'owner' ? 'owner' : 'member',
+    otherId: w.other_id ?? null,
+    otherHandle: w.other_handle ?? null,
+    otherName: w.other_name ?? null,
     otherAvatarPath: w.other_avatar ?? null,
+    members: (w.members ?? []).map(decodeDmThreadMember),
+    // Falls back to two rather than to zero: a thread with no count at all is
+    // a pre-0047 direct thread, and "0 members" would render as an empty
+    // group everywhere the count is shown.
+    memberCount: Number(w.member_count) || 2,
     lastMessageAt: w.last_message_at ?? null,
     lastBody: w.last_body ?? null,
     lastHasImage: Boolean(w.last_has_image),
     lastHasPost: Boolean(w.last_has_post),
     lastMediaKind: w.last_media_kind === 'video' ? 'video' : 'image',
     lastSenderId: w.last_sender_id ?? null,
+    lastSenderName: w.last_sender_name ?? null,
+    lastEventKind: decodeEventKind(w.last_event_kind),
+    lastEventTargetName: w.last_event_target_name ?? null,
+    lastEventText: w.last_event_text ?? null,
     // `count(*)` comes back as a string from PostgREST for bigint columns.
     unread: Number(w.unread) || 0,
+  };
+}
+
+/**
+ * How far one other member has read.
+ *
+ * Replaces the single timestamp `dmOtherReadAt` returned, which could only
+ * describe a two-person thread. A direct thread is now the one-element case
+ * of this list rather than a different shape.
+ */
+export interface DmReadReceipt {
+  userId: string;
+  displayName: string;
+  handle: string;
+  avatarPath: AvatarPath;
+  readAt: string;
+}
+
+export interface WireDmReadReceipt {
+  user_id: string;
+  name: string;
+  handle: string;
+  avatar?: string | null;
+  read_at: string;
+}
+
+export function decodeDmReadReceipt(w: WireDmReadReceipt): DmReadReceipt {
+  return {
+    userId: w.user_id,
+    displayName: w.name,
+    handle: w.handle,
+    avatarPath: w.avatar ?? null,
+    readAt: w.read_at,
   };
 }
 
@@ -1287,6 +1453,15 @@ export interface DmReplyPreview {
   id: string;
   body: string;
   senderId: string;
+  /**
+   * Who is being quoted.
+   *
+   * A direct thread could manage without it — two people, so comparing
+   * `senderId` against your own id decided which of two names you already had
+   * to print. A group has up to 32, and the quote is the only place that name
+   * appears, so it travels with the preview rather than being looked up.
+   */
+  senderName: string;
   /** Non-null when the quoted message carried a photo or a clip; such a quote is otherwise blank. */
   media: MessageMedia | null;
   /** The quoted message shared a pin. A flag, not a card — the card itself is a few bubbles up. */
@@ -1314,6 +1489,17 @@ export interface DmMessage {
   id: string;
   threadId: string;
   senderId: string;
+  /**
+   * The sender's own identity, carried per message.
+   *
+   * The room's `ChatMessage` has always done this; a DM did not need to,
+   * because a two-person thread could name both people once in its header. A
+   * group cannot, so these arrive with the row — which is also what lets the
+   * two surfaces render a bubble the same way.
+   */
+  senderHandle: string;
+  senderName: string;
+  senderAvatarPath: AvatarPath;
   body: string;
   createdAt: string;
   mine: boolean;
@@ -1324,23 +1510,57 @@ export interface DmMessage {
   media: MessageMedia | null;
   /** Null unless a post was shared. `body` may be empty when this is set. */
   sharedPost: SharedPost | null;
+  /**
+   * Non-null when this is not a message at all but a record of something that
+   * happened to the conversation — somebody added, removed, leaving, a rename.
+   * `body` is empty on these, and `senderId` is the person who DID it.
+   *
+   * Render with `describeThreadEvent` rather than a bubble: these have no
+   * author side, no reactions and no reply.
+   */
+  eventKind: DmEventKind | null;
+  /** Who an `added` or `removed` event is about. Null on the others. */
+  eventTargetId: string | null;
+  eventTargetName: string | null;
+  /**
+   * The name set by a `renamed` event, or null where one was cleared. Null on
+   * every other kind.
+   *
+   * Stored on the row rather than read from the thread's current title, which
+   * would relabel every past rename with the newest name — see the column's
+   * own comment in migration 0047.
+   */
+  eventText: string | null;
 }
 
 export interface WireDmMessage {
   id: string;
   thread_id: string;
   sender_id: string;
+  sender_handle?: string | null;
+  sender_name?: string | null;
+  sender_avatar?: string | null;
   body: string;
   created_at: string;
   mine: boolean;
   reply_to?:
-    | ({ id: string; body: string; sender_id: string; has_post?: boolean | null } & WireMessageMedia)
+    | ({
+        id: string;
+        body: string;
+        sender_id: string;
+        sender_name?: string | null;
+        has_post?: boolean | null;
+      } & WireMessageMedia)
     | null;
   reactions?: { emoji: string; count: number | string; mine: boolean }[] | null;
   image_path?: string | null;
   image_width?: number | string | null;
   image_height?: number | string | null;
   shared_post?: WireSharedPost | null;
+  event_kind?: string | null;
+  event_target_id?: string | null;
+  event_target_name?: string | null;
+  event_text?: string | null;
 }
 
 export function decodeDmMessage(w: WireDmMessage): DmMessage {
@@ -1348,6 +1568,13 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
     id: w.id,
     threadId: w.thread_id,
     senderId: w.sender_id,
+    senderHandle: w.sender_handle ?? '',
+    // Empty rather than a guess when a pre-0047 server omits it. Every
+    // surface that shows a name in a DM has the thread's own `otherName` to
+    // fall back on, and inventing "Unknown" here would put that word on
+    // screen in the one case where the real name is available elsewhere.
+    senderName: w.sender_name ?? '',
+    senderAvatarPath: w.sender_avatar ?? null,
     body: w.body,
     createdAt: w.created_at,
     mine: w.mine,
@@ -1356,6 +1583,7 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
           id: w.reply_to.id,
           body: w.reply_to.body,
           senderId: w.reply_to.sender_id,
+          senderName: w.reply_to.sender_name ?? '',
           media: decodeMessageMedia(w.reply_to),
           hasPost: Boolean(w.reply_to.has_post),
         }
@@ -1367,5 +1595,9 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
     })),
     media: decodeMessageMedia(w),
     sharedPost: decodeSharedPost(w.shared_post),
+    eventKind: decodeEventKind(w.event_kind),
+    eventTargetId: w.event_target_id ?? null,
+    eventTargetName: w.event_target_name ?? null,
+    eventText: w.event_text ?? null,
   };
 }

@@ -4,16 +4,23 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { createPortal } from "react-dom";
 import {
   applyReactionToggle,
+  conversationSubtitle,
+  conversationTitle,
+  describeThreadEvent,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
   MESSAGE_VIDEO_MIME_TYPES,
   type CategoryConfig,
+  type DmReadReceipt,
+  type Friend,
   type MessageMedia,
   type DmMessage,
   type DmThread,
   type SosoGateway,
 } from "soso-core";
 import { Avatar } from "./Avatar";
+import { ConversationAvatar } from "./ConversationAvatar";
+import GroupDetailsSheet from "./GroupDetailsSheet";
 import { Icon, ICONS } from "./Icon";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
 import {
@@ -39,7 +46,18 @@ import { useNowSeconds } from "./hooks";
  * `useSwipeToReply` hook, and — since migration 0039 — the reaction
  * bookkeeping the same `applyReactionToggle` from core.
  *
- * That last one is new, and it is the visible end of a much larger change.
+ * IT RENDERS BOTH KINDS OF CONVERSATION. A group is a `dm_threads` row with
+ * more members (migration 0047), so this is the same component with four
+ * differences, each of which is a small branch rather than a parallel
+ * implementation: the header names the group and opens its detail sheet, a
+ * bubble carries its sender's own name and face instead of the thread's,
+ * system rows ("Ana added Sam") render as a centred pill rather than a
+ * bubble, and the read receipt becomes faces rather than a sentence.
+ *
+ * That this cost four branches rather than a second file is the whole payoff
+ * of one thread table — see the migration's own header.
+ *
+ * The reaction sharing below is the visible end of a much larger change.
  * This component used to hold an entire decryption layer: a `decryptAll`
  * that opened every message, every reply quote and every reaction with a
  * key derived from both user ids; a `DecryptedMessage` shape where each of
@@ -55,6 +73,10 @@ import { useNowSeconds } from "./hooks";
 interface DmThreadViewProps {
   thread: DmThread;
   gateway: SosoGateway;
+  /** Mutual follows, for the group detail sheet's add-people list. */
+  friends: Friend[];
+  /** The thread as the server now reports it, after a rename, a photo or a membership change. */
+  onThreadChanged: (thread: DmThread) => void;
   /** Whose messages render as "mine" — and who a reply quote belongs to. */
   myId: string;
   /** Boot-time config, for a shared pin's category label. */
@@ -89,9 +111,11 @@ const REPORT_REASONS = [
 export default function DmThreadView({
   thread,
   gateway,
+  friends,
   myId,
   categories,
   onOpenPost,
+  onThreadChanged,
   onClose,
 }: DmThreadViewProps) {
   const [messages, setMessages] = useState<DmMessage[]>([]);
@@ -110,8 +134,10 @@ export default function DmThreadView({
   const fileInput = useRef<HTMLInputElement>(null);
   const attachment = useMediaAttachment(gateway, { kind: "dm", threadId: thread.id });
   const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia } | null>(null);
-  /** How far the other person has read. Null until fetched, or if never. */
-  const [otherReadAt, setOtherReadAt] = useState<string | null>(null);
+  /** How far each other member has read. Empty until fetched, and for anyone who never has. */
+  const [readState, setReadState] = useState<DmReadReceipt[]>([]);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const isGroup = thread.kind === "group";
 
   const reload = useCallback(async () => {
     // Fetched alongside the messages rather than on its own schedule: the
@@ -122,8 +148,8 @@ export default function DmThreadView({
     // hidden: their "Seen" appears on the next refresh here, not the instant
     // they open the thread.
     void gateway
-      .dmOtherReadAt(thread.id)
-      .then(setOtherReadAt)
+      .dmReadState(thread.id)
+      .then(setReadState)
       .catch(() => {
         // A missing receipt renders as no receipt, which is also what an
         // honestly-unread message looks like. Nothing to report.
@@ -219,21 +245,35 @@ export default function DmThreadView({
   const nowSeconds = useNowSeconds();
 
   /**
-   * The newest message of mine the other person has actually read.
+   * Which of my messages each reader's receipt belongs under.
    *
-   * Not simply my last message: if I have sent three since they last looked,
-   * the receipt belongs under the one their cursor reached, with the two
-   * they have not seen below it. That placement is the whole information
-   * content of a read receipt in a two-person thread.
+   * Not simply my last message: if I have sent three since somebody last
+   * looked, their receipt belongs under the one their cursor reached, with the
+   * two they have not seen below it. That placement is the whole information
+   * content of a read receipt, and it is what makes a group's faces useful —
+   * five people at different depths produce five marks at different heights,
+   * which is exactly the picture of "who is caught up".
+   *
+   * A map from message id to the readers who stopped there, so the render pass
+   * is a lookup per row rather than a scan per reader per row.
    */
-  const receiptMessageId = useMemo(() => {
-    if (!otherReadAt) return null;
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const m = messages[i]!;
-      if (m.mine && m.createdAt <= otherReadAt) return m.id;
+  const receiptsByMessage = useMemo(() => {
+    const map = new Map<string, DmReadReceipt[]>();
+    for (const reader of readState) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i]!;
+        // Events are skipped: "Ana added Sam" is not a message anybody sent,
+        // so hanging a receipt under it would attribute it to the actor.
+        if (m.mine && !m.eventKind && m.createdAt <= reader.readAt) {
+          const at = map.get(m.id);
+          if (at) at.push(reader);
+          else map.set(m.id, [reader]);
+          break;
+        }
+      }
     }
-    return null;
-  }, [messages, otherReadAt]);
+    return map;
+  }, [messages, readState]);
 
   async function send() {
     const body = input.trim();
@@ -331,21 +371,34 @@ export default function DmThreadView({
   }
 
   return (
-    <div className="dm-thread" role="dialog" aria-modal="true" aria-label={`Messages with ${thread.otherName}`}>
+    <div
+      className="dm-thread"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Messages in ${conversationTitle(thread)}`}
+    >
       <header className="dm-thread-head">
         <button type="button" className="dm-thread-back" onClick={onClose} aria-label="Back">
           <Icon src={ICONS.chevronLeft} size={17} />
         </button>
-        <Avatar
-          name={thread.otherName}
-          seed={thread.otherHandle}
-          src={gateway.avatarUrl(thread.otherAvatarPath)}
-          size={32}
-        />
-        <div className="dm-thread-who">
-          <strong>{thread.otherName}</strong>
-          <span>@{thread.otherHandle}</span>
-        </div>
+        {/* The whole identity block is the way into a group's settings, which
+            is where every chat app puts it and therefore the only place people
+            look. A direct thread has nothing behind it, so it stays inert
+            rather than becoming a button that does nothing. */}
+        <button
+          type="button"
+          className={`dm-thread-identity${isGroup ? " tappable" : ""}`}
+          onClick={isGroup ? () => setDetailsOpen(true) : undefined}
+          disabled={!isGroup}
+          aria-label={isGroup ? "Group details" : undefined}
+        >
+          <ConversationAvatar thread={thread} gateway={gateway} size={32} />
+          <span className="dm-thread-who">
+            <strong>{conversationTitle(thread)}</strong>
+            <span>{conversationSubtitle(thread)}</span>
+          </span>
+          {isGroup && <Icon src={ICONS.chevronLeft} size={13} className="dm-thread-chevron" />}
+        </button>
       </header>
 
       {/* This used to promise end-to-end encryption. It is deleted rather
@@ -366,8 +419,37 @@ export default function DmThreadView({
         ) : null}
 
         {messages.map((message, i) => {
+          // "Ana added Sam" is not a message anybody sent: no author side, no
+          // reactions, no reply, no long-press. It gets a centred pill and
+          // breaks the run around it, which is also why this returns before
+          // any of the bubble's own bookkeeping.
+          if (message.eventKind) {
+            const sentence = describeThreadEvent(message, myId);
+            return sentence ? (
+              // `data-mid` even though nothing can reply to an event: the
+              // unread count includes system rows, so the message the
+              // conversation opens scrolled to can BE one -- and useChatScroll
+              // finds its anchor by this attribute. Without it that case falls
+              // through to the hook's "not on this page" fallback and opens at
+              // the bottom instead.
+              <p className="chat-event" key={message.id} data-mid={message.id}>
+                {sentence}
+              </p>
+            ) : null;
+          }
+
+          const previous = i > 0 ? messages[i - 1] : undefined;
           const next = i + 1 < messages.length ? messages[i + 1] : undefined;
-          const endsRun = next?.mine !== message.mine;
+          // A run ends when the next row is somebody else's — or is an event,
+          // which visually separates what is above it from what is below.
+          const endsRun = next?.senderId !== message.senderId || Boolean(next?.eventKind);
+          // Only a group needs a name over the bubble, and only at the top of
+          // a run: repeating it on every line of a five-message burst is
+          // noise, and a two-person thread already names the person in its
+          // header.
+          const startsRun =
+            previous?.senderId !== message.senderId || Boolean(previous?.eventKind);
+          const readers = receiptsByMessage.get(message.id);
           return (
             <Fragment key={message.id}>
               <DmBubble
@@ -376,9 +458,14 @@ export default function DmThreadView({
                 gateway={gateway}
                 showAvatar={endsRun && !message.mine}
                 endsRun={endsRun}
-                otherName={thread.otherName}
-                otherAvatarSrc={gateway.avatarUrl(thread.otherAvatarPath)}
-                otherHandle={thread.otherHandle}
+                showSenderName={isGroup && startsRun && !message.mine}
+                // The thread's own other-person fields, as a fallback for a
+                // server that predates migration 0047 and sends no per-message
+                // sender. Null on a group, where there is no such person — and
+                // a group can only come from a server that has the columns.
+                fallbackName={thread.otherName ?? ""}
+                fallbackHandle={thread.otherHandle ?? ""}
+                fallbackAvatarPath={thread.otherAvatarPath}
                 pressed={menu?.message.id === message.id}
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onSwipeReply={() => startReply(message)}
@@ -387,9 +474,21 @@ export default function DmThreadView({
                 categories={categories}
                 onOpenPost={onOpenPost}
                 receipt={
-                  message.id === receiptMessageId && otherReadAt
-                    ? { kind: "seen-at", readAt: otherReadAt }
-                    : null
+                  !readers || readers.length === 0
+                    ? null
+                    : isGroup
+                      ? {
+                          kind: "people",
+                          readers: readers.map((r) => ({
+                            id: r.userId,
+                            name: r.displayName,
+                            handle: r.handle,
+                            src: gateway.avatarUrl(r.avatarPath),
+                          })),
+                        }
+                      : // One other person, so when they read says more than
+                        // a single face would.
+                        { kind: "seen-at", readAt: readers[0]!.readAt }
                 }
                 nowSeconds={nowSeconds}
                 flash={message.id === flashId}
@@ -407,7 +506,9 @@ export default function DmThreadView({
         <div className="chat-reply-bar">
           <div className="chat-reply-bar-body">
             <span className="chat-reply-bar-label">
-              Replying to {replyingTo.mine ? "yourself" : thread.otherName}
+              {/* The sender's own name, which is the only workable answer in a
+                  group and the same answer as before in a DM. */}
+              Replying to {replyingTo.mine ? "yourself" : replyingTo.senderName || conversationTitle(thread)}
             </span>
             <span className="chat-reply-bar-text">
               {replyingTo.body || (replyingTo.media ? attachmentWord(replyingTo.media) : "")}
@@ -536,7 +637,10 @@ export default function DmThreadView({
             quotedText={
               menu.message.replyTo
                 ? {
-                    authorLabel: menu.message.replyTo.senderId === myId ? "You" : thread.otherName,
+                    authorLabel:
+                      menu.message.replyTo.senderId === myId
+                        ? "You"
+                        : menu.message.replyTo.senderName || conversationTitle(thread),
                     text: menu.message.replyTo.body,
                   }
                 : null
@@ -596,8 +700,8 @@ export default function DmThreadView({
             <div className="people-sheet-scrim" />
             <div className="people-sheet-panel" onClick={(e) => e.stopPropagation()}>
               <p className="people-sheet-warning">
-                Reporting sends this message&rsquo;s text to moderators. It has to: the server cannot
-                read your conversation, so nothing reaches them unless you send it.
+                Reporting sends this message&rsquo;s text to moderators, along with a record of what
+                you were looking at when you reported it.
               </p>
               {REPORT_REASONS.map((reason) => (
                 <button
@@ -616,6 +720,31 @@ export default function DmThreadView({
           </div>,
           document.body,
         )}
+
+      {/* Over this whole view rather than beside it, like the conversation
+          itself is over the tab bar: group settings are an exclusive surface,
+          not a panel on top of a conversation you can still read. */}
+      {detailsOpen && isGroup && (
+        <GroupDetailsSheet
+          thread={thread}
+          gateway={gateway}
+          friends={friends}
+          myId={myId}
+          onChanged={onThreadChanged}
+          onLeft={() => {
+            // The conversation no longer exists for this account, so there is
+            // nothing to return to behind the sheet.
+            setDetailsOpen(false);
+            onClose();
+          }}
+          onClose={() => {
+            setDetailsOpen(false);
+            // Somebody may have been added or removed while it was open, and
+            // each of those wrote a system row this view has not seen.
+            void reload();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -626,9 +755,10 @@ function DmBubble({
   gateway,
   showAvatar,
   endsRun,
-  otherName,
-  otherHandle,
-  otherAvatarSrc,
+  showSenderName,
+  fallbackName,
+  fallbackHandle,
+  fallbackAvatarPath,
   pressed,
   onOpenMenu,
   onSwipeReply,
@@ -648,15 +778,24 @@ function DmBubble({
   gateway: SosoGateway;
   showAvatar: boolean;
   endsRun: boolean;
-  otherName: string;
-  otherHandle: string;
   /**
-   * Already resolved to a URL by the caller, which has the gateway; a
-   * stored `AvatarPath` would be useless here. Every bubble in a thread
-   * shows the same person, so this is passed down rather than looked up
-   * per row.
+   * Puts the sender's name over the bubble — a group, at the top of a run.
+   *
+   * A two-person thread never wants it: the header already names the one
+   * person whose bubbles appear on that side.
    */
-  otherAvatarSrc: string | null;
+  showSenderName: boolean;
+  /**
+   * What to show when the message carries no sender of its own.
+   *
+   * Only reachable against a server predating migration 0047, where a DM's
+   * messages did not need to name their sender because the thread already
+   * did. The fallback is that thread's other person, which in a two-person
+   * conversation is exactly who any non-`mine` message is from.
+   */
+  fallbackName: string;
+  fallbackHandle: string;
+  fallbackAvatarPath: string | null;
   pressed: boolean;
   onOpenMenu: (rect: DOMRect) => void;
   onSwipeReply: () => void;
@@ -672,6 +811,13 @@ function DmBubble({
   /** Jumps to the message this one is replying to. Null when it has no quote. */
   onJumpToReply: (() => void) | null;
 }) {
+  // The sender, per message rather than per thread, which is what a group
+  // needs and what the room's own ChatMessageRow has always done. The
+  // fallbacks cover a pre-0047 server; see the props' own comment.
+  const senderName = message.senderName || fallbackName;
+  const senderHandle = message.senderHandle || fallbackHandle;
+  const senderAvatarSrc = gateway.avatarUrl(message.senderAvatarPath ?? fallbackAvatarPath);
+
   const bubbleRef = useRef<HTMLDivElement>(null);
   // The node useSwipeToReply actually moves — see ChatPanel's own
   // ChatMessageRow (the room's twin of this component) for why this is
@@ -764,11 +910,12 @@ function DmBubble({
     >
       {!message.mine &&
         (showAvatar ? (
-          <Avatar name={otherName} seed={otherHandle} src={otherAvatarSrc} size={26} />
+          <Avatar name={senderName} seed={senderHandle} src={senderAvatarSrc} size={26} />
         ) : (
           <div className="chat-row-avatar" aria-hidden="true" />
         ))}
       <div className="chat-row-stack">
+        {showSenderName && <span className="chat-row-author">{senderName}</span>}
         <div className="chat-row-bubble-line">
           <div className="chat-bubble-drag-zone">
             <span ref={swipe.indicatorRef} className="chat-swipe-indicator" aria-hidden="true">
@@ -805,7 +952,9 @@ function DmBubble({
                     aria-label="Go to the message this replies to"
                   >
                     <span className="chat-quote-author">
-                      {message.replyTo.senderId === myId ? "You" : otherName}
+                      {message.replyTo.senderId === myId
+                        ? "You"
+                        : message.replyTo.senderName || fallbackName}
                     </span>
                     {message.replyTo.media && (
                       <MessageMediaView
@@ -869,6 +1018,18 @@ function DmBubble({
             <Icon src={ICONS.more} size={14} />
           </button>
         </div>
+
+        {/* Outside the drag zone and below the bubble line, so it sits under
+            the message the way a caption does and does not slide away with a
+            swipe-to-reply. Placed to match the room's own ChatMessageRow.
+            The caller decides which messages carry one — see
+            `receiptsByMessage`.
+
+            This render was missing entirely until group chats arrived:
+            migration 0045 added DM read receipts and this component computed
+            one and threaded it all the way down to this prop, which nothing
+            then drew. The receipt existed in the data and never on screen. */}
+        {receipt && <MessageReceipt receipt={receipt} nowSeconds={nowSeconds} />}
       </div>
     </div>
   );

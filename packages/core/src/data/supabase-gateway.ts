@@ -21,6 +21,8 @@ import {
   decodeChatMessage,
   decodeDmMessage,
   decodeDmThread,
+  decodeDmThreadMember,
+  decodeDmReadReceipt,
   type CategoryConfig,
   type CellCount,
   type FeedDelta,
@@ -42,8 +44,12 @@ import {
   type ChatMessage,
   type DmMessage,
   type DmThread,
+  type DmThreadMember,
+  type DmReadReceipt,
   type WireDmMessage,
   type WireDmThread,
+  type WireDmThreadMember,
+  type WireDmReadReceipt,
   type WireChatMessage,
   type AvatarPath,
   decodeBoard,
@@ -767,6 +773,69 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return decodeDmThread(data as WireDmThread);
     },
 
+    async createGroupThread(input: {
+      title?: string | null;
+      memberIds: readonly string[];
+      photoPath?: string | null;
+    }): Promise<DmThread> {
+      const { data, error } = await client.rpc('create_group_thread', {
+        p_title: input.title ?? null,
+        p_member_ids: [...input.memberIds],
+        p_photo_path: input.photoPath ?? null,
+      });
+      if (error) throw toSosoError(error);
+      return decodeDmThread(data as WireDmThread);
+    },
+
+    async addGroupMembers(threadId: string, userIds: readonly string[]): Promise<DmThread> {
+      const { data, error } = await client.rpc('add_group_members', {
+        p_thread_id: threadId,
+        p_user_ids: [...userIds],
+      });
+      if (error) throw toSosoError(error);
+      return decodeDmThread(data as WireDmThread);
+    },
+
+    async removeGroupMember(threadId: string, userId: string): Promise<DmThread> {
+      const { data, error } = await client.rpc('remove_group_member', {
+        p_thread_id: threadId,
+        p_user_id: userId,
+      });
+      if (error) throw toSosoError(error);
+      return decodeDmThread(data as WireDmThread);
+    },
+
+    async leaveGroupThread(threadId: string): Promise<void> {
+      const { error } = await client.rpc('leave_group_thread', { p_thread_id: threadId });
+      if (error) throw toSosoError(error);
+    },
+
+    async renameGroupThread(threadId: string, title: string | null): Promise<DmThread> {
+      const { data, error } = await client.rpc('rename_group_thread', {
+        p_thread_id: threadId,
+        p_title: title,
+      });
+      if (error) throw toSosoError(error);
+      return decodeDmThread(data as WireDmThread);
+    },
+
+    async setGroupThreadPhoto(threadId: string, photoPath: string | null): Promise<DmThread> {
+      const { data, error } = await client.rpc('set_group_thread_photo', {
+        p_thread_id: threadId,
+        p_photo_path: photoPath,
+      });
+      if (error) throw toSosoError(error);
+      return decodeDmThread(data as WireDmThread);
+    },
+
+    async listDmThreadMembers(threadId: string): Promise<DmThreadMember[]> {
+      const { data, error } = await client.rpc('list_dm_thread_members', {
+        p_thread_id: threadId,
+      });
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WireDmThreadMember[]).map(decodeDmThreadMember);
+    },
+
     async listDmThreads(): Promise<DmThread[]> {
       const { data, error } = await client.rpc('list_dm_threads');
       if (error) throw toSosoError(error);
@@ -806,10 +875,10 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return decodeDmMessage(data as WireDmMessage);
     },
 
-    async dmOtherReadAt(threadId: string): Promise<string | null> {
-      const { data, error } = await client.rpc('dm_other_read_at', { p_thread_id: threadId });
+    async dmReadState(threadId: string): Promise<DmReadReceipt[]> {
+      const { data, error } = await client.rpc('dm_thread_read_state', { p_thread_id: threadId });
       if (error) throw toSosoError(error);
-      return typeof data === 'string' ? data : null;
+      return ((data ?? []) as WireDmReadReceipt[]).map(decodeDmReadReceipt);
     },
 
     async markDmRead(threadId: string): Promise<void> {
@@ -850,6 +919,14 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'dm_message_reactions' },
+          () => onChange(),
+        )
+        // Membership, so being added to or removed from a group reaches the
+        // inbox. Nothing of the recipient's own changes when somebody adds
+        // them, so without this there is no signal at all.
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'dm_thread_members' },
           () => onChange(),
         )
         .subscribe();

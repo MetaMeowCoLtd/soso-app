@@ -66,6 +66,12 @@ export const SOSO_ERROR_CODES = [
   'soso/invalid_avatar_path',
   'soso/invalid_avatar_image',
   'soso/avatar_upload_failed',
+  // Group chats (migration 0047).
+  'soso/group_too_small',
+  'soso/group_too_large',
+  'soso/invalid_group_title',
+  'soso/not_group_thread',
+  'soso/owner_only',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -165,5 +171,10 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/invalid_avatar_path': "That photo couldn't be saved. Try picking it again.",
   'soso/invalid_avatar_image': 'Pick a JPEG, PNG or WebP image under 12 MB.',
   'soso/avatar_upload_failed': "Couldn't upload that photo. Check your connection and try again.",
+  'soso/group_too_small': 'Pick at least two friends to start a group.',
+  'soso/group_too_large': 'A group can hold 32 people, and this one is full.',
+  'soso/invalid_group_title': 'That group name is too long.',
+  'soso/not_group_thread': "That's a direct message, not a group.",
+  'soso/owner_only': 'Only the person who made the group can remove someone.',
   'soso/unknown': 'Something went wrong. Try again.',
 };

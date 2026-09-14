@@ -78,10 +78,16 @@ interface ChatPanelProps {
   /** Opens a shared pin. page.tsx owns that surface, the same as it does for a notification deep link. */
   onOpenPost: (postId: string) => void;
 
-  /** Null until the profile loads (and always, in demo mode) — DMs need it to derive keys. */
+  /** Null until the profile loads, and always in demo mode. */
   myId: string | null;
   /** Opens a conversation full-screen; page.tsx owns that surface. */
   onOpenThread: (thread: DmThread) => void;
+  /**
+   * Opens the new-group flow. page.tsx owns it for the same reason it owns a
+   * conversation: it covers the whole screen, and it needs the friends list
+   * that usePresence already holds up there.
+   */
+  onNewGroup: () => void;
   /** Passed through to the inbox — see DmInbox's own note on why it exists. */
   refreshToken: number;
   /** Unread totals, counted in page.tsx so they survive this tab unmounting. */
@@ -147,6 +153,7 @@ export default function ChatPanel({
   onOpenPost,
   myId,
   onOpenThread,
+  onNewGroup,
   refreshToken,
   unreadDm,
   unreadRoom,
@@ -433,7 +440,10 @@ export default function ChatPanel({
           className={`chat-switch-option${view === "direct" ? " active" : ""}`}
           onClick={() => setView("direct")}
         >
-          Direct
+          {/* "Direct" stopped being the whole truth when groups landed in
+              the same inbox (migration 0047) — the view holds every
+              conversation that is not the global room. */}
+          Chats
           {/* Shown even while the inbox is open, unlike the room's: this
               total is the sum of per-thread counts that only clear when you
               open each thread, so it stays truthful while you look at the
@@ -451,6 +461,7 @@ export default function ChatPanel({
             myId={myId}
             demoMode={demoMode}
             onOpenThread={onOpenThread}
+            onNewGroup={onNewGroup}
             refreshToken={refreshToken}
           />
         </div>

@@ -1504,3 +1504,128 @@ button.profile-view-stat:active { transform:scale(.97); filter:brightness(.97); 
 .share-sheet-done { display:flex; flex-direction:column; align-items:center; gap:10px; padding:30px 20px 22px; color:var(--deep); }
 .share-sheet-done strong { font-size:.94rem; font-weight:800; }
 .share-sheet-close { padding:9px 22px; border-radius:999px; background:var(--teal); color:#fff; font-size:.84rem; font-weight:750; }
+
+
+/* ---------------------------------------------------------------------------
+   Group chats (migration 0047)
+   ---------------------------------------------------------------------------
+   The sheets sit at z-index 22: above .dm-thread (20), because group settings
+   replace the conversation rather than float over it, and below .cropper (30),
+   because picking a photo has to cover the sheet that opened it.
+   --------------------------------------------------------------------------- */
+
+/* Two overlapping discs for a group with no photo. The slots are positioned
+   inline (both offsets are functions of the size, which varies per surface);
+   this only establishes the box they are positioned against. */
+.convo-stack { position:relative; flex-shrink:0; display:block; }
+.convo-stack-slot { position:absolute; display:block; border-radius:50%; }
+/* The ring is the only thing separating two similar hues where they overlap. */
+.convo-stack-slot.front { box-shadow:0 0 0 2px #fff; }
+
+.dm-inbox-actions { display:flex; padding:2px clamp(12px,3vw,20px) 8px; }
+.dm-new-group { display:inline-flex; align-items:center; gap:8px; padding:7px 14px 7px 7px; border:0; border-radius:999px; background:#f0f4f2; color:var(--deep); font-size:.83rem; font-weight:750; transition:background .14s; }
+.dm-new-group:hover { background:#e5ebe8; }
+.dm-new-group-icon { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:var(--teal); color:#fff; }
+
+/* The conversation identity block in the thread header, which doubles as the
+   way into a group's settings. A direct thread renders the same block
+   disabled, so both headers keep one shape and nothing shifts between them. */
+.dm-thread-identity { min-width:0; flex:1; display:flex; align-items:center; gap:10px; padding:4px 6px 4px 4px; border:0; border-radius:12px; background:transparent; text-align:left; transition:background .14s; }
+.dm-thread-identity:disabled { cursor:default; }
+.dm-thread-identity.tappable:hover { background:#f2f5f3; }
+.dm-thread-chevron { flex-shrink:0; margin-left:auto; color:var(--muted); transform:rotate(180deg); }
+
+/* A system row: "Ana added Sam". Centred, quiet, and deliberately not a
+   bubble -- it is nobody's message and must not read as one. */
+.chat-event { align-self:center; max-width:min(80%, 340px); margin:10px 0; padding:5px 12px; border-radius:999px; background:#f2f5f3; color:var(--muted); font-size:.75rem; font-weight:650; line-height:1.4; text-align:center; }
+
+/* Receipts as faces, for a group. `display:flex` overrides .message-receipt's
+   own `display:block`. */
+.message-receipt.faces { display:flex; align-items:center; margin-top:4px; }
+.chat-row.mine .message-receipt.faces { justify-content:flex-end; }
+.message-receipt.faces .avatar { box-shadow:0 0 0 1.5px #fff; }
+.message-receipt.faces .avatar + .avatar { margin-left:-5px; }
+.message-receipt-more { margin-left:5px; color:var(--muted); font-size:.7rem; font-weight:750; }
+
+/* The new-group and group-detail screens share one shell. */
+.group-sheet { position:fixed; z-index:22; inset:0; display:flex; flex-direction:column; background:#fff; }
+.group-sheet-head { flex-shrink:0; display:flex; align-items:center; gap:8px; padding:10px clamp(10px,3vw,16px); padding-top:max(10px, env(safe-area-inset-top)); background:rgba(255,255,255,.94); backdrop-filter:blur(20px) saturate(180%); border-bottom:1px solid var(--hairline); }
+.group-sheet-head h2 { flex:1; min-width:0; margin:0; color:var(--deep); font-size:1rem; font-weight:800; text-align:center; }
+.group-sheet-next { flex-shrink:0; min-width:64px; padding:7px 14px; border:0; border-radius:999px; background:var(--teal); color:#fff; font-size:.83rem; font-weight:800; transition:opacity .14s; }
+.group-sheet-next:disabled { opacity:.36; }
+/* Balances the back button so the centred title is actually centred. */
+.group-sheet-next.placeholder { background:transparent; pointer-events:none; }
+
+.group-sheet-search { flex-shrink:0; display:flex; align-items:center; gap:8px; margin:10px clamp(12px,3vw,20px) 4px; padding:9px 13px; border-radius:12px; background:#f2f5f3; color:var(--muted); }
+.group-sheet-search input { flex:1; min-width:0; border:0; background:transparent; color:var(--ink); font-size:.9rem; outline:none; }
+
+.group-sheet-note { margin:6px clamp(12px,3vw,20px); color:var(--muted); font-size:.76rem; line-height:1.5; }
+.group-sheet-list { flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-bottom:calc(20px + env(safe-area-inset-bottom)); }
+
+/* The current selection, visible as a whole even when the people in it have
+   been filtered out of the list below. Each chip is its own remove button. */
+.group-chips { display:flex; gap:7px; margin:6px 0; padding:0 clamp(12px,3vw,20px); overflow-x:auto; list-style:none; -webkit-overflow-scrolling:touch; }
+.group-chips::-webkit-scrollbar { display:none; }
+.group-chips.wrapped { flex-wrap:wrap; overflow:visible; margin-top:22px; justify-content:center; }
+.group-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px 4px 4px; border:0; border-radius:999px; background:#eef3f1; color:var(--deep); font-size:.79rem; font-weight:700; white-space:nowrap; transition:background .14s; }
+.group-chip:hover { background:#e2eae7; }
+.group-chip.static { cursor:default; }
+.group-chip .icon { color:var(--muted); }
+
+.group-picker { list-style:none; margin:0; padding:0; }
+.group-picker-row { display:flex; align-items:center; gap:12px; width:100%; padding:8px clamp(12px,3vw,20px); border:0; background:transparent; text-align:left; transition:background .14s; }
+.group-picker-row:hover:not(:disabled) { background:rgba(20,50,43,.03); }
+.group-picker-row:disabled { opacity:.4; }
+.group-picker-who { min-width:0; flex:1; display:flex; flex-direction:column; gap:1px; }
+.group-picker-who strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--deep); font-size:.92rem; font-weight:750; }
+.group-picker-who span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:.77rem; }
+.group-check { flex-shrink:0; display:grid; place-items:center; width:22px; height:22px; border:1.6px solid var(--line); border-radius:50%; color:#fff; transition:background .14s, border-color .14s; }
+.group-check.on { border-color:var(--teal); background:var(--teal); }
+
+/* Step two of the new-group flow: photo, name, and who is in it. */
+.group-sheet-about { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; align-items:center; padding:22px clamp(16px,4vw,28px) calc(28px + env(safe-area-inset-bottom)); }
+.group-photo-pick { position:relative; display:block; width:96px; height:96px; padding:0; border:0; border-radius:50%; background:#f0f4f2; }
+.group-photo-pick img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
+.group-photo-empty { display:grid; place-items:center; width:100%; height:100%; border-radius:50%; color:var(--muted); }
+.group-photo-badge { position:absolute; right:-2px; bottom:-2px; display:grid; place-items:center; width:28px; height:28px; border:2.5px solid #fff; border-radius:50%; background:var(--teal); color:#fff; }
+.group-photo-hint { margin:10px 0 0; color:var(--muted); font-size:.79rem; }
+.group-photo-remove { margin-top:4px; padding:4px 10px; border:0; border-radius:999px; background:transparent; color:var(--hot); font-size:.78rem; font-weight:700; }
+
+.group-name-field { display:flex; flex-direction:column; gap:6px; width:100%; max-width:420px; margin-top:22px; }
+.group-name-field > span { color:var(--muted); font-size:.74rem; font-weight:750; letter-spacing:.03em; text-transform:uppercase; }
+.group-name-field input { width:100%; padding:12px 14px; border:1px solid var(--line); border-radius:13px; background:#fff; color:var(--ink); font-size:.95rem; outline:none; transition:border-color .14s; }
+.group-name-field input:focus { border-color:var(--teal); }
+.group-name-hint { max-width:420px; margin:9px 0 0; color:var(--muted); font-size:.77rem; line-height:1.5; text-align:center; }
+.group-name-hint strong { color:var(--deep); font-weight:750; }
+
+/* The group detail screen. */
+.group-hero { display:flex; flex-direction:column; align-items:center; gap:10px; padding:24px 20px 20px; border-bottom:1px solid var(--hairline); }
+.group-hero-photo { position:relative; display:block; padding:0; border:0; background:transparent; }
+/* Pushed clear of the disc. On a group with no photo the circle is an avatar
+   STACK whose front disc already occupies the bottom-right corner, so a badge
+   flush against the edge lands on somebody's face. */
+.group-hero-photo .group-photo-badge { right:-6px; bottom:-6px; }
+.group-hero-name { display:flex; flex-direction:column; align-items:center; gap:3px; max-width:100%; padding:6px 14px; border:0; border-radius:14px; background:transparent; transition:background .14s; }
+.group-hero-name:hover { background:#f2f5f3; }
+.group-hero-name strong { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--deep); font-size:1.12rem; font-weight:850; }
+.group-hero-name span { color:var(--muted); font-size:.78rem; }
+.group-hero-rename { display:flex; align-items:center; gap:8px; width:min(100%, 340px); }
+.group-hero-rename input { flex:1; min-width:0; padding:10px 13px; border:1px solid var(--teal); border-radius:12px; background:#fff; color:var(--ink); font-size:1rem; font-weight:700; text-align:center; outline:none; }
+.group-hero-rename button { flex-shrink:0; display:grid; place-items:center; width:38px; height:38px; border:0; border-radius:50%; background:var(--teal); color:#fff; }
+
+.group-action { display:flex; align-items:center; gap:11px; width:100%; padding:14px clamp(14px,3vw,20px); border:0; background:transparent; color:var(--deep); font-size:.91rem; font-weight:700; text-align:left; transition:background .14s; }
+.group-action:hover:not(:disabled) { background:rgba(20,50,43,.03); }
+.group-action:disabled { color:var(--muted); }
+.group-action .icon { color:var(--teal); }
+.group-action.danger { color:var(--hot); }
+.group-action.danger .icon { color:var(--hot); }
+
+.group-section { margin:12px clamp(14px,3vw,20px) 4px; color:var(--muted); font-size:.74rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
+.group-members { list-style:none; margin:0; padding:0; }
+.group-member-row { display:flex; align-items:center; gap:12px; padding:7px clamp(14px,3vw,20px); }
+.group-member-remove { flex-shrink:0; display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:50%; background:transparent; color:var(--muted); transition:background .14s, color .14s; }
+.group-member-remove:hover:not(:disabled) { background:rgba(255,91,124,.12); color:var(--hot); }
+
+.group-leave-confirm { margin:10px clamp(14px,3vw,20px); padding:14px 16px; border-radius:16px; background:#fff5f7; }
+.group-leave-confirm p { margin:0 0 8px; color:var(--ink); font-size:.83rem; line-height:1.5; }
+.group-leave-confirm .group-action { padding:10px 0; }

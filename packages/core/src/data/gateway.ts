@@ -26,7 +26,9 @@ import type {
   ChatMessage,
   ConnectionsPage,
   DmMessage,
+  DmReadReceipt,
   DmThread,
+  DmThreadMember,
   FeedPostsPage,
   MessageMedia,
   FlushedBoardTile,
@@ -493,6 +495,77 @@ export interface SosoGateway {
   /** Opens (or returns) the single thread with a friend. Throws soso/not_friends if you are not mutual follows. */
   openDmThread(userId: string): Promise<DmThread>;
 
+  /**
+   * Starts a group conversation and returns it.
+   *
+   * AT LEAST TWO other people, or `soso/group_too_small`: one friend selected
+   * means "message this person", and answering that with a two-person group
+   * would split a pair's messages across two threads with two unread badges.
+   * Callers should open the DM in that case rather than treating the error as
+   * a failure — see `GROUP_MIN_OTHERS`.
+   *
+   * Every id must be a mutual follow OF THE CALLER, re-checked server-side per
+   * person, which is what keeps migration 0026's guarantee alive at the one
+   * boundary where a conversation can widen: nobody is ever placed in a
+   * conversation by a stranger.
+   *
+   * `title` is optional — an unnamed group renders from its members' names
+   * (see `conversationTitle`). `photoPath` is an object path from
+   * `uploadAvatar`, NOT a URL, and may be omitted.
+   *
+   * Every call creates a NEW conversation. There is deliberately no "return
+   * the existing group with these people" behaviour the way `openDmThread`
+   * has: the same five friends may want two different groups.
+   */
+  createGroupThread(input: {
+    title?: string | null;
+    memberIds: readonly string[];
+    photoPath?: string | null;
+  }): Promise<DmThread>;
+
+  /**
+   * Adds people to a group, returning the thread as it now stands.
+   *
+   * Any member may add, and each person added must be a mutual follow of the
+   * CALLER rather than of the group's creator. Silently skips anyone already
+   * in the group rather than failing, so two members adding the same person at
+   * once produces one join.
+   */
+  addGroupMembers(threadId: string, userIds: readonly string[]): Promise<DmThread>;
+
+  /** Removes somebody else. Owner only — anyone else gets `soso/owner_only`. */
+  removeGroupMember(threadId: string, userId: string): Promise<DmThread>;
+
+  /**
+   * Leaves a group. Always available, to anyone, with nobody's permission.
+   *
+   * The owner leaving hands ownership to the longest-standing remaining
+   * member, and the last member leaving deletes the conversation outright —
+   * both server-side, so a client need not know either rule.
+   */
+  leaveGroupThread(threadId: string): Promise<void>;
+
+  /** Renames a group, or clears the name when passed null. Any member may. */
+  renameGroupThread(threadId: string, title: string | null): Promise<DmThread>;
+
+  /**
+   * Sets the group's picture to an object path from `uploadAvatar`, or clears
+   * it with null. Any member may.
+   *
+   * Takes a PATH, like `updateProfile` and unlike anything that takes bytes:
+   * the upload is its own step, so a photo picked and then abandoned leaves
+   * the group unchanged.
+   */
+  setGroupThreadPhoto(threadId: string, photoPath: string | null): Promise<DmThread>;
+
+  /**
+   * Everyone in a conversation except you.
+   *
+   * The whole list, where `DmThread.members` carries only the first few for an
+   * avatar stack — this is what the group's detail screen reads.
+   */
+  listDmThreadMembers(threadId: string): Promise<DmThreadMember[]>;
+
   /** Your inbox, newest first, each thread carrying its newest message for the preview line. */
   listDmThreads(): Promise<DmThread[]>;
 
@@ -517,13 +590,19 @@ export interface SosoGateway {
   markDmRead(threadId: string): Promise<void>;
 
   /**
-   * How far the OTHER person has read in this thread, or null if never.
+   * How far each OTHER member has read, newest cursor first. Members who have
+   * never read are omitted.
    *
-   * Its own call rather than a field on `DmMessage`, because it is one value
-   * for the whole conversation and hanging it off every message would be
-   * thread state smuggled through a message. See migration 0045.
+   * Its own call rather than a field on `DmMessage`, because it is thread
+   * state and hanging it off every message would smuggle it through one. See
+   * migration 0045.
+   *
+   * Replaces the single timestamp this returned while a thread could only ever
+   * hold two people: a direct thread is now the one-element case of the same
+   * list rather than a different shape, so the client's "which of my messages
+   * has this person reached" logic runs unchanged over a list of 1 or of 17.
    */
-  dmOtherReadAt(threadId: string): Promise<string | null>;
+  dmReadState(threadId: string): Promise<DmReadReceipt[]>;
 
   /** Unsends your own message — for both sides, since there is only one copy. */
   deleteDmMessage(messageId: string): Promise<void>;
@@ -547,7 +626,15 @@ export interface SosoGateway {
    */
   toggleDmReaction(messageId: string, emoji: string): Promise<void>;
 
-  /** Fires when any dm_messages or dm_message_reactions row you can see changes. Payload-free, like every other subscribe*. */
+  /**
+   * Fires when any dm_messages, dm_message_reactions or dm_thread_members row
+   * you can see changes. Payload-free, like every other subscribe*.
+   *
+   * Membership is in there because being added to a group is something that
+   * happens TO you, with nothing of yours to trigger a refetch — without it, a
+   * group you were just added to would not appear until something else
+   * happened to reload the inbox.
+   */
   subscribeDmMessagesChanged(onChange: () => void): () => void;
 
   // --- Drawing boards --------------------------------------------------

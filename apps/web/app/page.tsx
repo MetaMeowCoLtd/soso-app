@@ -13,6 +13,7 @@ import ReportForm from "@/src/web/ReportForm";
 import ReportList from "@/src/web/ReportList";
 import PeopleTab from "@/src/web/PeopleTab";
 import DmThreadView from "@/src/web/DmThreadView";
+import NewGroupSheet from "@/src/web/NewGroupSheet";
 import ChatPanel from "@/src/web/ChatPanel";
 import SharePinSheet from "@/src/web/SharePinSheet";
 import ProfileSettings from "@/src/web/ProfileSettings";
@@ -507,6 +508,10 @@ function Map({
   // whole screen either way — the same reasoning ThoughtThread's placement
   // already follows.
   const [dmThread, setDmThread] = useState<DmThread | null>(null);
+  // The new-group flow, held here for the same two reasons the conversation
+  // is: it covers the whole screen, and it needs the friends list usePresence
+  // already holds at this level.
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [dmError, setDmError] = useState<string | null>(null);
   // Bumped when a conversation closes, so the inbox behind it re-reads its
   // unread counts. Reading a thread writes to dm_threads, which is not in
@@ -685,6 +690,31 @@ function Map({
    * block checks are the server's — `open_dm_thread` rejects anything else
    * — so this only has to turn the refusal into something readable.
    */
+  /**
+   * Opens a conversation by its own id, which is how a GROUP push deep-links.
+   *
+   * `openDm` cannot serve that case: it takes a person and finds the single
+   * thread with them, and a group has no single other person -- following a
+   * group notification through it would open a one-to-one DM with whoever
+   * spoke. There is no fetch-one-thread call, so this reads the inbox and
+   * picks the row out of it. That is a list bounded by how many conversations
+   * one account has, fetched once per notification tap, which is cheaper than
+   * an RPC added for this.
+   */
+  async function openThreadById(threadId: string) {
+    setDmError(null);
+    try {
+      const thread = (await gateway.listDmThreads()).find((t) => t.id === threadId);
+      // Gone, or left, between the notification being sent and it being
+      // tapped. Opening nothing is the honest outcome; the inbox behind it
+      // already shows the truth.
+      if (thread) setDmThread(thread);
+    } catch {
+      // Same handling a stale post deep link gets: an old notification
+      // should not fail the app on load, it should open nothing.
+    }
+  }
+
   async function openDm(userId: string) {
     setDmError(null);
     // Can genuinely be null here: this is also the landing point for a
@@ -913,6 +943,9 @@ function Map({
     // People does, so this deep link reuses that verbatim rather than
     // needing its own thread-by-id path.
     const dmSenderId = params.get("dm");
+    // A GROUP push carries the thread rather than a sender -- see
+    // `openThreadById` for why the two cannot share one parameter.
+    const threadParam = params.get("thread");
     // A new-follower notification deep-links here: the follower's handle, so
     // the recipient lands on their profile and can follow back in one tap.
     const profileParam = params.get("profile");
@@ -925,19 +958,23 @@ function Map({
     if (dmSenderId) {
       void openDm(dmSenderId);
     }
+    if (threadParam) {
+      void openThreadById(threadParam);
+    }
     if (profileParam) {
       openProfile(profileParam);
     }
     if (chatParam) {
       switchTab("chat");
     }
-    if (postId || dmSenderId || profileParam || chatParam) {
+    if (postId || dmSenderId || threadParam || profileParam || chatParam) {
       // Stripped immediately rather than left in the address bar —
       // otherwise reloading the page (or sharing the URL) would keep
       // reopening the same post, thread, or profile indefinitely.
       const url = new URL(window.location.href);
       url.searchParams.delete("post");
       url.searchParams.delete("dm");
+      url.searchParams.delete("thread");
       url.searchParams.delete("profile");
       url.searchParams.delete("chat");
       window.history.replaceState({}, "", url.toString());
@@ -951,6 +988,9 @@ function Map({
       }
       if (event.data?.type === "open-dm" && typeof event.data.dmSenderId === "string") {
         void openDm(event.data.dmSenderId);
+      }
+      if (event.data?.type === "open-thread" && typeof event.data.dmThreadId === "string") {
+        void openThreadById(event.data.dmThreadId);
       }
       if (event.data?.type === "open-profile" && typeof event.data.handle === "string") {
         openProfile(event.data.handle);
@@ -1333,6 +1373,7 @@ function Map({
           demoMode={mode !== "supabase"}
           myId={presence.me?.id ?? null}
           onOpenThread={setDmThread}
+          onNewGroup={() => setNewGroupOpen(true)}
           refreshToken={dmRefresh}
           unreadDm={unread.dm}
           unreadRoom={unread.room}
@@ -1475,14 +1516,35 @@ function Map({
           a conversation is an exclusive surface, not a panel over one. */}
       {dmError && <DmErrorToast message={dmError} onDismiss={() => setDmError(null)} />}
 
+      {newGroupOpen && presence.me && (
+        <NewGroupSheet
+          gateway={gateway}
+          friends={presence.friends}
+          onCreated={(thread) => {
+            setNewGroupOpen(false);
+            // Straight into the conversation that was just made, which is
+            // where every chat app lands you and the only place the group's
+            // creation is visible as anything other than a new inbox row.
+            setDmThread(thread);
+          }}
+          onOpenDirect={(userId) => void openDm(userId)}
+          onClose={() => setNewGroupOpen(false)}
+        />
+      )}
+
       {dmThread && presence.me && (
         <DmThreadView
           key={dmThread.id}
           thread={dmThread}
           gateway={gateway}
+          friends={presence.friends}
           myId={presence.me.id}
           categories={categories}
           onOpenPost={(postId) => void openPostById(postId)}
+          // A rename, a new photo or a membership change comes back as the
+          // whole thread, so the header above the conversation updates without
+          // a refetch — and the inbox behind it re-reads when this closes.
+          onThreadChanged={setDmThread}
           onClose={() => {
             setDmThread(null);
             setDmRefresh((n) => n + 1);

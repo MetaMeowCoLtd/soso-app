@@ -34,6 +34,11 @@ async function handlePush(event) {
     body: "Something new nearby.",
     postId: null,
     dmSenderId: null,
+    // A GROUP push carries the thread instead of the sender. It has to: a
+    // group has no single other person, so "open the conversation with
+    // whoever sent this" would open a one-to-one DM with them rather than
+    // the group the notification came from.
+    dmThreadId: null,
     // A new-follower push carries the follower's handle; tapping it opens
     // their profile so you can follow back.
     profileHandle: null,
@@ -62,6 +67,7 @@ async function handlePush(event) {
     data: {
       postId: payload.postId,
       dmSenderId: payload.dmSenderId,
+      dmThreadId: payload.dmThreadId,
       profileHandle: payload.profileHandle,
       chat: payload.chat === true,
     },
@@ -75,6 +81,7 @@ self.addEventListener("notificationclick", (event) => {
   // of these in their payload's `data` field (never more than one).
   const postId = event.notification.data?.postId ?? null;
   const dmSenderId = event.notification.data?.dmSenderId ?? null;
+  const dmThreadId = event.notification.data?.dmThreadId ?? null;
   const profileHandle = event.notification.data?.profileHandle ?? null;
   const chat = event.notification.data?.chat === true;
 
@@ -88,6 +95,7 @@ self.addEventListener("notificationclick", (event) => {
           // this; see page.tsx's serviceWorker message handler.
           if (postId) client.postMessage({ type: "open-post", postId });
           if (dmSenderId) client.postMessage({ type: "open-dm", dmSenderId });
+          if (dmThreadId) client.postMessage({ type: "open-thread", dmThreadId });
           if (profileHandle) client.postMessage({ type: "open-profile", handle: profileHandle });
           if (chat) client.postMessage({ type: "open-chat" });
           return client.focus();
@@ -101,11 +109,13 @@ self.addEventListener("notificationclick", (event) => {
           ? `./?post=${encodeURIComponent(postId)}`
           : dmSenderId
             ? `./?dm=${encodeURIComponent(dmSenderId)}`
-            : profileHandle
-              ? `./?profile=${encodeURIComponent(profileHandle)}`
-              : chat
-                ? "./?chat=1"
-                : "./";
+            : dmThreadId
+              ? `./?thread=${encodeURIComponent(dmThreadId)}`
+              : profileHandle
+                ? `./?profile=${encodeURIComponent(profileHandle)}`
+                : chat
+                  ? "./?chat=1"
+                  : "./";
         return self.clients.openWindow(url);
       }
     }),

@@ -193,6 +193,9 @@ interface DmMessagePayload {
   body: string;
   has_image: boolean;
   has_post: boolean;
+  /** Set when the row records something that happened to the conversation rather than a message. */
+  event_kind: string | null;
+  event_target_id: string | null;
 }
 
 /**
@@ -222,6 +225,10 @@ function parseDmMessagePayload(value: unknown): DmMessagePayload | null {
     // payload: reading the object needs a presigned URL, and minting one is
     // per-viewer work this function has no reason to do for a notification.
     has_image: typeof r.image_path === "string" && r.image_path.length > 0,
+    // Non-null on a system row -- "Ana added Sam" (migration 0047). Only one
+    // of the six kinds is ever notified; see handleDmMessage.
+    event_kind: typeof r.event_kind === "string" ? r.event_kind : null,
+    event_target_id: typeof r.event_target_id === "string" ? r.event_target_id : null,
     // Same reasoning, one step further: not only is the post id unnecessary
     // here, whether this particular recipient may see the post is decided
     // per read by soso.shared_post_card, and a push payload is the wrong
@@ -374,7 +381,7 @@ async function handleDmMessage(
 
   const { data: thread, error: threadError } = await supabase
     .from("dm_threads")
-    .select("user_low, user_high")
+    .select("kind, title")
     .eq("id", payload.thread_id)
     .maybeSingle();
 
@@ -386,11 +393,42 @@ async function handleDmMessage(
     return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
   }
 
-  const recipientId = thread.user_low === payload.sender_id ? thread.user_high : thread.user_low;
-  // Cannot currently happen — send_dm never inserts a message whose sender
-  // isn't one side of its own thread — but costs one comparison and avoids
-  // ever notifying the sender about their own message if that ever changed.
-  if (recipientId === payload.sender_id) {
+  const isGroup = thread.kind === "group";
+
+  // MEMBERSHIP, NOT THE PAIR COLUMNS. Before migration 0047 the recipient was
+  // whichever of `user_low`/`user_high` was not the sender; a group has any
+  // number of them, so both kinds are now read the same way from
+  // `dm_thread_members` -- a direct thread is simply the case where the query
+  // returns one row.
+  const { data: memberRows, error: membersError } = await supabase
+    .from("dm_thread_members")
+    .select("user_id")
+    .eq("thread_id", payload.thread_id)
+    .neq("user_id", payload.sender_id);
+
+  if (membersError) {
+    console.error("[notify-new-pin] dm_thread_members query failed:", membersError);
+    return new Response("Internal error", { status: 500 });
+  }
+
+  let recipientIds = (memberRows ?? []).map((r) => r.user_id as string);
+
+  // A SYSTEM EVENT NOTIFIES ONLY THE PERSON IT IS ABOUT, and only when it is
+  // an addition. Being put in a group is worth a notification -- it is the
+  // one thing that can happen to you in a conversation you have never seen,
+  // and if nobody then speaks there is no other push coming. "Ana left" and
+  // "Ana renamed the group" are not: they are housekeeping the inbox already
+  // reflects, and pushing every one of them to every member turns an active
+  // group into a notification faucet.
+  if (payload.event_kind !== null) {
+    if (payload.event_kind !== "added" || !payload.event_target_id) {
+      return new Response(JSON.stringify({ sent: 0, reason: "event not notifiable" }), { status: 200 });
+    }
+    const target = payload.event_target_id;
+    recipientIds = recipientIds.filter((id) => id === target);
+  }
+
+  if (recipientIds.length === 0) {
     return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
   }
 
@@ -399,26 +437,41 @@ async function handleDmMessage(
   // insert this webhook fired for and this function actually running, and a
   // push notification is exactly the kind of contact a block exists to end
   // immediately, not just new messages arriving in the thread view.
-  const { data: blockRow, error: blockError } = await supabase
+  //
+  // In a group this is per recipient rather than a single yes/no, and it is
+  // what keeps the notification agreeing with the conversation: the read
+  // policy already hides a blocked sender's messages per message, so a push
+  // about a message somebody will never be shown would be a notification with
+  // nothing behind it.
+  const { data: blockRows, error: blockError } = await supabase
     .from("blocks")
-    .select("blocker_id")
+    .select("blocker_id, blocked_id")
     .or(
-      `and(blocker_id.eq.${recipientId},blocked_id.eq.${payload.sender_id}),` +
-        `and(blocker_id.eq.${payload.sender_id},blocked_id.eq.${recipientId})`,
-    )
-    .maybeSingle();
+      `and(blocker_id.eq.${payload.sender_id},blocked_id.in.(${recipientIds.join(",")})),` +
+        `and(blocked_id.eq.${payload.sender_id},blocker_id.in.(${recipientIds.join(",")}))`,
+    );
 
   if (blockError) {
     console.error("[notify-new-pin] blocks lookup failed:", blockError);
     return new Response("Internal error", { status: 500 });
   }
-  if (blockRow) {
+
+  const blocked = new Set<string>();
+  for (const row of blockRows ?? []) {
+    blocked.add(row.blocker_id === payload.sender_id ? (row.blocked_id as string) : (row.blocker_id as string));
+  }
+  recipientIds = recipientIds.filter((id) => !blocked.has(id));
+
+  if (recipientIds.length === 0) {
     return new Response(JSON.stringify({ sent: 0, reason: "blocked" }), { status: 200 });
   }
 
-  const [{ data: sender }, { data: endpoints, error: endpointsError }] = await Promise.all([
+  const [{ data: sender }, { data: target }, { data: endpoints, error: endpointsError }] = await Promise.all([
     supabase.from("profiles").select("display_name").eq("id", payload.sender_id).maybeSingle(),
-    supabase.from("push_endpoints").select("endpoint, p256dh, auth").eq("user_id", recipientId),
+    payload.event_target_id
+      ? supabase.from("profiles").select("display_name").eq("id", payload.event_target_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase.from("push_endpoints").select("endpoint, p256dh, auth").in("user_id", recipientIds),
   ]);
 
   if (endpointsError) {
@@ -428,30 +481,45 @@ async function handleDmMessage(
 
   const senderName = sender?.display_name ?? "Someone";
 
-  // Naming the sender discloses nothing new: DMs only exist between mutual
-  // follows, and the inbox shows this exact name the instant it loads.
+  // Naming the sender discloses nothing new: you can only be in a conversation
+  // with people a mutual follow of yours put you there with, and the inbox
+  // shows this exact name the instant it loads.
   //
-  // There used to be two bodies here — a generic "X sent you a message", and
-  // a "rich" one carrying ciphertext for the service worker to open locally,
-  // chosen between by whether the sender had a published key and whether the
-  // encrypted payload fitted under Web Push's ~4KB ceiling. Both of those
-  // conditions failed often, so the generic body was what most people
-  // actually saw. One body now, with the text in it.
+  // A GROUP ALSO NAMES ITSELF, because "Ana: on my way" from a group is
+  // ambiguous in a way it never is from a DM -- there is no way to tell which
+  // of five conversations it belongs to without opening one. An unnamed group
+  // has no name to give, so it falls back to the plain form rather than
+  // inventing one: the member-name title the app renders ("Ana, Bo & Chi") is
+  // built from a member list this function has not fetched, and fetching one
+  // to decorate a notification is not work a push should be doing.
+  const groupName = isGroup ? (thread.title as string | null) : null;
+
   const notificationBody = JSON.stringify({
     title: "SoSo",
-    body: messageNotificationBody(
-      senderName,
-      payload.body,
-      payload.has_image,
-      payload.has_post,
-      DM_PREVIEW_LIMIT,
-    ),
-    dmSenderId: payload.sender_id,
+    body:
+      payload.event_kind === "added"
+        ? groupName
+          ? `${senderName} added you to ${groupName}`
+          : `${senderName} added you to a group`
+        : messageNotificationBody(
+            groupName ? `${senderName} · ${groupName}` : senderName,
+            payload.body,
+            payload.has_image,
+            payload.has_post,
+            DM_PREVIEW_LIMIT,
+          ),
+    // A group is deep-linked by THREAD; a direct message by SENDER, which is
+    // what every deployed service worker already understands. Sending the
+    // thread id for a DM as well would be tidier and would break the tap on
+    // any client that has not updated.
+    ...(isGroup ? { dmThreadId: payload.thread_id } : { dmSenderId: payload.sender_id }),
   });
 
   const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
   console.log("[notify-new-pin] dm notification complete", {
     threadId: payload.thread_id,
+    kind: thread.kind,
+    recipients: recipientIds.length,
     ...result,
   });
   return new Response(JSON.stringify(result), { status: 200 });
