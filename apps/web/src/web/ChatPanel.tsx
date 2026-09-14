@@ -781,6 +781,35 @@ function ChatMessageRow({
   // Merges both hooks' handlers onto the one element they share. Each event
   // name here belongs to both gestures, so both get a look at every event —
   // there is no shared state between the two hooks for this to corrupt.
+  /**
+   * Tapping anywhere on a reply jumps to what it is replying to.
+   *
+   * On the whole bubble rather than only on the quote strip, because the
+   * quote is a thin band at the top of the bubble and the thing people
+   * actually aim at is the message. The quote stays a real <button> anyway —
+   * see the JSX — so this is an extra tap target rather than the only one,
+   * and a keyboard can still reach it.
+   *
+   * Three things have to not trigger it, and each is a real gesture on this
+   * bubble rather than a hypothetical:
+   *
+   *   - A LONG PRESS, which opens the action sheet. `didLongPress` exists
+   *     for precisely this; without it, releasing the sheet-opening press
+   *     would also scroll the list out from under the sheet.
+   *   - A tap on a CONTROL INSIDE the bubble: the photo, the play button on
+   *     a clip, a shared pin's card, the quote itself. Those are buttons, so
+   *     one `closest` call covers all of them and any added later.
+   *   - A SWIPE to reply. Not checked explicitly, because a horizontal drag
+   *     past the trigger distance does not produce a click on touch — and
+   *     the long-press hook's own 12px drift tolerance means a drag cannot
+   *     have been a press either.
+   */
+  function onBubbleClick(e: React.MouseEvent) {
+    if (!onJumpToReply || longPress.didLongPress()) return;
+    if ((e.target as HTMLElement).closest("button")) return;
+    onJumpToReply();
+  }
+
   const bubbleHandlers = {
     onTouchStart: (e: React.TouchEvent) => {
       swipe.handlers.onTouchStart(e);
@@ -874,8 +903,9 @@ function ChatMessageRow({
                   (message.media || message.sharedPost) && !message.body
                     ? " chat-bubble-image-only"
                     : ""
-                }`}
+                }${onJumpToReply ? " chat-bubble-linked" : ""}`}
                 {...bubbleHandlers}
+                onClick={onBubbleClick}
               >
                 {message.replyTo && (
                   <button

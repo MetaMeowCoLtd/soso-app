@@ -358,6 +358,10 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    action sheet the same gesture is opening. */
 .chat-bubble { min-width:0; padding:8px 13px; border-radius:20px; background:#f0f2f5; color:var(--ink); font-size:.94rem; line-height:1.4; word-break:break-word; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; transition:transform .12s; }
 .chat-bubble:active { transform:scale(.98); }
+/* A reply's whole bubble is a tap target — see onBubbleClick. Only the
+   cursor says so; a hover tint would fight the bubble's own colour and read
+   as a selection state rather than a link. */
+.chat-bubble-linked { cursor:pointer; }
 .chat-row.mine .chat-bubble { background:var(--teal); color:#fff; }
 /* Square off the corner nearest the speaker, but only on the run's last
    bubble — the "tail" that tells you where a run ends without drawing one. */
