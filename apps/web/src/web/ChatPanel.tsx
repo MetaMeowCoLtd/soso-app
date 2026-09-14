@@ -27,6 +27,7 @@ import SharedPostCard from "./SharedPostCard";
 import { useMediaAttachment } from "./useMediaAttachment";
 import { useLongPress } from "./useLongPress";
 import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
+import { ChatTextarea } from "./ChatTextarea";
 import { useChatScroll } from "./useChatScroll";
 import { useRefetchOnForeground } from "./useRefetchOnForeground";
 import { useSwipeToReply } from "./useSwipeToReply";
@@ -210,7 +211,7 @@ export default function ChatPanel({
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachment = useMediaAttachment(gateway, { kind: "room" });
   // The URL of the image currently open full-screen, or null. Holds the URL
@@ -660,12 +661,11 @@ export default function ChatPanel({
         >
           <Icon src={ICONS.image} size={18} />
         </button>
-        <input
+        <ChatTextarea
           ref={inputRef}
-          className="chat-input"
-          type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={setInput}
+          onSubmit={() => void send()}
           placeholder={
             attachment.previewUrl
               ? "Add a caption…"
@@ -676,7 +676,7 @@ export default function ChatPanel({
                   : "Message…"
           }
           maxLength={500}
-          aria-label="Message"
+          ariaLabel="Message"
         />
         <button
           className="chat-send"

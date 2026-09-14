@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ERROR_MESSAGES_EN, formatAgoShort, type PostDetail, type PostReply, type ReportReason, type SosoGateway } from "soso-core";
+import { ChatTextarea } from "./ChatTextarea";
 import { Icon, ICONS } from "./Icon";
 import PostMediaView from "./PostMediaView";
 
@@ -364,14 +365,13 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
           void send();
         }}
       >
-        <input
-          className="chat-input"
-          type="text"
+        <ChatTextarea
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={setInput}
+          onSubmit={() => void send()}
           placeholder="Reply…"
           maxLength={REPLY_MAX_LENGTH}
-          aria-label="Reply"
+          ariaLabel="Reply"
         />
         <button className="chat-send" type="submit" disabled={sending || input.trim().length === 0} aria-label="Send">
           <Icon src={ICONS.send} size={16} />

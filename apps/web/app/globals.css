@@ -687,7 +687,9 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .chat-attach:hover:not(:disabled) { background:#eef1f0; color:var(--deep); }
 .chat-attach:disabled { opacity:.45; }
 
-.chat-compose { flex-shrink:0; display:flex; align-items:center; gap:8px; padding:9px 10px; padding-bottom:max(9px, env(safe-area-inset-bottom)); margin-bottom:var(--keyboard-inset, 0px); background:#fff; border-top:1px solid var(--hairline); }
+/* `flex-end`, so the attach and send buttons stay beside the LAST line as
+   the field grows rather than drifting to the middle of a tall box. */
+.chat-compose { flex-shrink:0; display:flex; align-items:flex-end; gap:8px; padding:9px 10px; padding-bottom:max(9px, env(safe-area-inset-bottom)); margin-bottom:var(--keyboard-inset, 0px); background:#fff; border-top:1px solid var(--hairline); }
 /* .chat-tab (the room) already reserves clearance for the floating .tab-bar
    in its OWN padding-bottom, which folds in the safe-area itself
    (`calc(64px + env(safe-area-inset-bottom))`) — the composer sits in flow
@@ -701,7 +703,11 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    blank space beneath it on top of the tab-bar clearance it already had —
    visibly higher and differently spaced than the same composer in a DM. */
 .chat-tab .chat-compose { padding-bottom: 9px; }
-.chat-input { flex:1; min-width:0; border:1px solid transparent; border-radius:999px; padding:9px 15px; background:#f0f2f5; color:var(--ink); font-size:1rem; font-family:inherit; transition:border-color .16s, background .16s; }
+/* A textarea now, not a one-line input — see ChatTextarea on why, and on why
+   its height is set from JS. `resize:none` because the drag handle would sit
+   on top of the send button and fight the automatic sizing; the scroll only
+   engages once it has grown past its cap. */
+.chat-input { flex:1; min-width:0; display:block; resize:none; overflow-y:auto; border:1px solid transparent; border-radius:20px; padding:9px 15px; background:#f0f2f5; color:var(--ink); font-size:1rem; line-height:1.35; font-family:inherit; transition:border-color .16s, background .16s; }
 .chat-input:focus { outline:none; border-color:var(--teal); background:#fff; }
 .chat-send { flex-shrink:0; display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:var(--teal); color:#fff; transition:background .16s, transform .16s, opacity .16s; }
 .chat-send:hover:not(:disabled) { background:#00907c; }

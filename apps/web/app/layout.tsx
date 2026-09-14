@@ -106,13 +106,32 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   // window.innerHeight's CURRENT value as the baseline, only ever the
   // largest one this session has ever actually observed.
   var maxViewportHeight = window.innerHeight;
+  // A keyboard cannot be open when nothing is focused, so this is the gate
+  // on the whole calculation below. Without it the running maximum had no
+  // way back down: shrinking a DESKTOP window is also "the viewport got
+  // shorter", so every drag of the window edge was read as the keyboard
+  // opening further, and the compose bar was pushed up by exactly the
+  // number of pixels the window had lost — a gap under it that grew as you
+  // resized and never went away.
+  function isTyping(){
+    var el = document.activeElement;
+    if (!el) return false;
+    return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true;
+  }
   function setAppOffset(){
     var vv = window.visualViewport;
     var top = vv ? vv.offsetTop : 0;
     var left = vv ? vv.offsetLeft : 0;
     document.documentElement.style.setProperty('--app-top', top + 'px');
     document.documentElement.style.setProperty('--app-left', left + 'px');
-    maxViewportHeight = Math.max(maxViewportHeight, window.innerHeight);
+    var typing = isTyping();
+    // While typing the maximum is held, for the iOS reason above. While NOT
+    // typing it is re-baselined to whatever the window is now, which is by
+    // definition its resting height — that is what lets a resize be
+    // forgotten instead of accumulating.
+    maxViewportHeight = typing
+      ? Math.max(maxViewportHeight, window.innerHeight)
+      : window.innerHeight;
     // How much of the layout viewport's bottom edge the on-screen keyboard
     // currently covers. body itself is deliberately NOT resized for this
     // (see the comment above — that would reintroduce the Home Indicator
@@ -120,7 +139,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     // in CSS, only to the specific fixed-bottom inputs that actually need
     // to stay above the keyboard (.chat-compose) rather than to the shell.
     var visualHeight = vv ? vv.height : window.innerHeight;
-    var keyboardInset = vv ? Math.max(0, maxViewportHeight - visualHeight - top) : 0;
+    var keyboardInset = (vv && typing) ? Math.max(0, maxViewportHeight - visualHeight - top) : 0;
     // A separately-documented iOS quirk (visualViewport.offsetTop sometimes
     // not resetting cleanly to 0 right after the keyboard is dismissed) can
     // otherwise leave a few stray pixels of residual inset behind even with
@@ -137,6 +156,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     window.visualViewport.addEventListener('scroll', setAppOffset);
   }
   window.addEventListener('resize', setAppOffset);
+  // Focus changes decide whether there can be a keyboard at all, so they
+  // have to recompute. focusout fires BEFORE the next element takes focus,
+  // so it is deferred a tick or it would always read "nothing focused" and
+  // clear the inset while tabbing between two fields.
+  window.addEventListener('focusin', setAppOffset);
+  window.addEventListener('focusout', function(){ setTimeout(setAppOffset, 0); });
   window.addEventListener('orientationchange', function(){
     setAppOffset();
     setTimeout(setAppOffset, 300);
