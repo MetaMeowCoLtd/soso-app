@@ -1519,6 +1519,7 @@ function Map({
             busy: pushBusy,
             onToggle: () => void toggleNotifications(),
           }}
+          presence={{ sharing: presence.sharing, onToggle: presence.setSharing }}
           onClose={() => setEditingProfile(false)}
           onSaved={() => {
             // Three separate readers of the same profile, none of which

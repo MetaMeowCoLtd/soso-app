@@ -217,7 +217,7 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
             </div>
             {post.body && <p className="feed-card-text">{post.body}</p>}
             {post.media[0] && (
-              <PostMediaView gateway={gateway} media={post.media[0]} availableWidth={320} />
+              <PostMediaView gateway={gateway} media={post.media[0]} />
             )}
             {/* The same action row FeedTab renders, so a post looks
                 identical whether you are reading it in the list or in its

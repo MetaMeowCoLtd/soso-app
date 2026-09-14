@@ -489,6 +489,21 @@ export default function ChatPanel({
             <span>So</span>So
           </a>
           <h1>Chat</h1>
+          {/* The corner every messaging app puts "start a new conversation"
+              in, and the reason it moved here from the list: sitting between
+              the room and the conversations, it read as a row of the list
+              rather than an action on it, and split the one list this tab
+              exists to present back into two halves. */}
+          <button
+            type="button"
+            className="chat-tab-action"
+            onClick={onNewGroup}
+            disabled={demoMode}
+            aria-label="New group"
+            title="New group"
+          >
+            <Icon src={ICONS.people} size={17} />
+          </button>
         </header>
       )}
 
@@ -504,7 +519,6 @@ export default function ChatPanel({
             // the prop's note on why the inbox does not fetch it again.
             roomLastMessage={messages.length > 0 ? messages[messages.length - 1]! : null}
             unreadRoom={unreadRoom}
-            onNewGroup={onNewGroup}
             refreshToken={refreshToken}
           />
         </div>
@@ -674,13 +688,23 @@ export default function ChatPanel({
         </button>
       </form>
 
-      {lightbox && (
-        <MessageMediaLightbox
-          url={lightbox.url}
-          onSave={() => saveMessageMedia(gateway, lightbox.media)}
-          onClose={() => setLightbox(null)}
-        />
-      )}
+      {/* Portalled to <body>, for the same reason the action sheet below it
+          is — and it is the same trap. A full-screen viewer rendered here is
+          a DESCENDANT of a positioned, z-indexed ancestor, which is a
+          stacking context: its own z-index:40 then counts only against its
+          siblings inside that context, so it still paints under the floating
+          .tab-bar (z-index:6) that sits outside it. Portalling takes it out
+          of that context entirely, which also removes every ancestor whose
+          padding, overflow or backdrop-filter could clip or shift it. */}
+      {lightbox &&
+        createPortal(
+          <MessageMediaLightbox
+            url={lightbox.url}
+            onSave={() => saveMessageMedia(gateway, lightbox.media)}
+            onClose={() => setLightbox(null)}
+          />,
+          document.body,
+        )}
 
       {/*
         Portalled to <body> rather than rendered here. .chat-tab is

@@ -569,8 +569,25 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    The renderer is PostMediaView, a sibling of MessageMediaView rather than a
    reuse of it (see its own comment on why the authorization models differ),
    but the play badge and duration pill are shared with it above. */
-.post-media { position:relative; display:block; overflow:hidden; margin:8px 0 2px; border-radius:14px; background:#eef1f0; }
-.post-media img, .post-media video { display:block; width:100%; height:100%; object-fit:cover; }
+/* The frame is the picture's own shape.
+   -------------------------------------------------------------------------
+   `aspect-ratio` comes from the stored dimensions (inline, per attachment),
+   so the height follows whatever width the card actually gives — no pixel
+   width guessed in JS, which is what used to make these crop: the box was
+   sized from a hardcoded 320px while its width stretched to the real card,
+   and `object-fit: cover` ate the difference.
+
+   `max-height` alone would clamp the height while `width:100%` held the
+   width, breaking the ratio again — so the width is `fit-content` and the
+   cap is allowed to drive both. A portrait shot therefore narrows and
+   centres rather than being cropped, which is what every feed worth copying
+   does with one. */
+.post-media { position:relative; display:block; overflow:hidden; width:fit-content; max-width:100%; margin:8px auto 2px; border-radius:14px; background:#eef1f0; }
+/* `contain`, not `cover`. With a frame that already matches the picture the
+   two are identical — but they stop being identical the moment the stored
+   dimensions are wrong, and then one letterboxes while the other silently
+   crops. Letterboxing is the failure that can be seen and fixed. */
+.post-media img, .post-media video { display:block; width:100%; height:100%; object-fit:contain; }
 .post-media-button { padding:0; border:0; width:100%; cursor:pointer; }
 .post-media-playing { background:#000; }
 .post-media-playing video, .post-media-poster { object-fit:contain; background:#000; }
@@ -607,8 +624,41 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    top of the picture, and on a bright region of it the white "x" all but
    disappeared. This reserves a strip tall enough that no image, at any
    aspect ratio, can ever reach the button. */
-.message-lightbox { position:fixed; z-index:40; inset:0; display:grid; place-items:center; padding:24px; padding-top:calc(max(14px, env(safe-area-inset-top)) + 36px + 14px); background:rgba(8,20,17,.92); }
-.message-lightbox img { max-width:100%; max-height:100%; border-radius:10px; }
+.message-lightbox { position:fixed; z-index:40; inset:0; height:100%; max-height:100svh; display:grid; grid-template-rows:minmax(0, 1fr); grid-template-columns:minmax(0, 1fr); place-items:center; overflow:hidden; padding:24px; padding-top:calc(max(14px, env(safe-area-inset-top)) + 36px + 14px); padding-bottom:max(24px, env(safe-area-inset-bottom)); background:rgba(8,20,17,.92); }
+/* `padding-bottom` has to clear the home indicator, and this is what was
+   actually cutting the bottom off a tall photo on a phone. The top padding
+   has respected `env(safe-area-inset-top)` since the close button needed
+   clearing; the bottom was a flat 24px, which is less than the ~34pt inset
+   an iPhone reserves — so the picture was sized to run about a centimetre
+   into a strip the app's shell does not paint, and the part sitting in it
+   was simply not shown. The error toast a few rules down has always used
+   `max(20px, env(safe-area-inset-bottom))` for its own offset; this is the
+   same allowance, on the box that sizes the image.
+
+   `max-height:100svh` is the mobile half of the same problem. `inset:0`
+   resolves against the LAYOUT viewport, which on iOS is taller than what you
+   can actually see whenever browser chrome is showing — so the overlay, and
+   with it the 1fr track the picture is measured against, ran off the bottom
+   of the screen and the image was cut off with the page's own background
+   showing beneath it. `svh` is the SMALL viewport height: the height with
+   that chrome visible, i.e. the one that is always on screen. Deliberately
+   not `dvh`, which this app has been bitten by before — see layout.tsx on
+   how it resolves on an installed iOS home-screen app.
+
+   `minmax(0, 1fr)` on both tracks above is what makes these percentages mean
+   anything. A bare `place-items:center` grid sizes its single implicit track
+   to its CONTENT, so `max-height:100%` on the image resolved against a track
+   whose height was the image's own — a circular constraint browsers answer
+   by not constraining at all. A tall screenshot then rendered at full natural
+   height and the viewer scrolled instead of fitting, which is exactly what it
+   exists not to do. An explicit 1fr track is definite (the container is
+   `position:fixed; inset:0`), so the percentages resolve against the padded
+   box and the picture is scaled down to fit inside it.
+
+   `width`/`height:auto` keeps the image at its own aspect rather than
+   stretching to the track, so the rounded corners stay on the picture
+   instead of floating around a letterboxed box. */
+.message-lightbox img { display:block; width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; border-radius:10px; }
 /* Save and close together, top-right, rather than close alone — a viewer
    with one control in the corner and another somewhere else is two places
    to look for the same kind of thing. */
@@ -690,18 +740,11 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .people-edit-profile:active { transform:scale(.98); }
 .people-copy:disabled { opacity:.5; }
 
-.people-share { display:flex; align-items:center; gap:14px; margin-top:14px; padding-top:13px; border-top:1px solid var(--hairline); }
-.people-share-text { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
-.people-share-text strong { color:var(--deep); font-size:.85rem; font-weight:750; }
-.people-share-text span { color:var(--muted); font-size:.74rem; line-height:1.4; }
+/* The presence SWITCH moved to profile settings (see .settings-toggle-row);
+   what remains on this tab is the live count it produces. */
 /* A real switch, not the old pill button: an opt-in that discloses your
    presence should look like a setting with an on/off state, not like an
    action you might have already triggered by accident. */
-.people-switch { flex-shrink:0; position:relative; width:48px; height:29px; border:0; border-radius:999px; background:#d3dbd8; transition:background .2s; }
-.people-switch:disabled { opacity:.45; }
-.people-switch-knob { position:absolute; top:3px; left:3px; width:23px; height:23px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(16,44,37,.28); transition:transform .2s cubic-bezier(.32,.72,0,1); }
-.people-switch.on { background:var(--teal); }
-.people-switch.on .people-switch-knob { transform:translateX(19px); }
 
 .people-nearby { display:flex; align-items:center; gap:7px; margin-top:12px; padding-top:11px; border-top:1px solid var(--hairline); color:var(--muted); font-size:.74rem; line-height:1.35; }
 
@@ -724,6 +767,11 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .people-request-dismiss:hover { background:#e5eae7; color:var(--deep); }
 .people-nearby strong { color:var(--deep); font-size:.95rem; font-weight:800; }
 .people-nearby-dot { flex-shrink:0; width:7px; height:7px; border-radius:50%; background:#34d399; box-shadow:0 0 0 3px rgba(52,211,153,.2); }
+/* Sharing off: the same row, as a button to the switch it is describing —
+   and a grey dot, because a green one would claim a presence there isn't. */
+.people-nearby-off { width:100%; border:0; background:transparent; text-align:left; }
+.people-nearby-off:hover { color:var(--deep); }
+.people-nearby-off .people-nearby-dot { background:#c3ccc8; box-shadow:0 0 0 3px rgba(195,204,200,.24); }
 
 .people-add { margin:12px clamp(12px,3vw,20px) 0; padding:13px 14px; border-radius:18px; background:rgba(0,167,143,.07); border:1px solid rgba(0,167,143,.22); }
 .people-add-row { display:flex; gap:7px; }
@@ -1567,10 +1615,21 @@ button.profile-view-stat:active { transform:scale(.97); filter:brightness(.97); 
 /* The ring is the only thing separating two similar hues where they overlap. */
 .convo-stack-slot.front { box-shadow:0 0 0 2px #fff; }
 
-.dm-inbox-actions { display:flex; padding:2px clamp(12px,3vw,20px) 8px; }
-.dm-new-group { display:inline-flex; align-items:center; gap:8px; padding:7px 14px 7px 7px; border:0; border-radius:999px; background:#f0f4f2; color:var(--deep); font-size:.83rem; font-weight:750; transition:background .14s; }
-.dm-new-group:hover { background:#e5ebe8; }
-.dm-new-group-icon { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:var(--teal); color:#fff; }
+/* "New group", in the Chat header's top-right corner.
+   -------------------------------------------------------------------------
+   Deliberately identical to .people-add-toggle, which is the same kind of
+   thing one tab over — a single "start something new" action in the corner
+   of a list's header. Two tab headers whose corner buttons were different
+   sizes or colours would read as two different controls doing unrelated
+   things.
+
+   It used to be a labelled pill between the room and the conversations,
+   which put an ACTION inside a list of CONVERSATIONS: it read as a row,
+   and it broke the single list this tab exists to present into two halves. */
+.chat-tab-action { flex-shrink:0; margin-left:auto; display:grid; place-items:center; width:36px; height:36px; border:0; border-radius:50%; background:#f0f2f5; color:var(--deep); transition:background .16s, color .16s, transform .16s; }
+.chat-tab-action:hover:not(:disabled) { background:#e6eae8; }
+.chat-tab-action:active:not(:disabled) { transform:scale(.94); }
+.chat-tab-action:disabled { opacity:.4; }
 
 /* The conversation identity block in the thread header, which doubles as the
    way into a group's settings. A direct thread renders the same block

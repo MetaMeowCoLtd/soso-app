@@ -324,7 +324,7 @@ export function FeedCard({
             `post_media` models many (it has an `ord`), so a carousel is a
             composer and a renderer away rather than a migration. */}
         {post.media[0] && (
-              <PostMediaView gateway={gateway} media={post.media[0]} availableWidth={320} />
+              <PostMediaView gateway={gateway} media={post.media[0]} />
             )}
         {/*
           An icon row, not the old "👍 3 / 💬 1" text pair. Two icons, not

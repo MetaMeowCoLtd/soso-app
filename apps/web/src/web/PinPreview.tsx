@@ -162,7 +162,7 @@ export default function PinPreview({
 
         {detail?.body && <p className="pin-preview-snippet">{detail.body}</p>}
         {detail?.media[0] && (
-          <PostMediaView gateway={gateway} media={detail.media[0]} availableWidth={320} maxHeight={280} />
+          <PostMediaView gateway={gateway} media={detail.media[0]} maxHeight={280} />
         )}
 
         <div className="pin-preview-meta">

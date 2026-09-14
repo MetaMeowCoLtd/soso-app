@@ -84,10 +84,25 @@ interface PushControls {
   onToggle: () => void;
 }
 
+/**
+ * Presence sharing, which lives here rather than on the Friends tab.
+ *
+ * It is a preference about yourself, and it sat in the middle of the Friends
+ * tab's own "You" card taking four lines to say so — above the list of
+ * friends it had nothing to do with. Settings belong with the other settings;
+ * the Friends tab keeps only the live consequence (who is around), and points
+ * here when it is switched off.
+ */
+interface PresenceControls {
+  sharing: boolean;
+  onToggle: (enabled: boolean) => void;
+}
+
 interface ProfileSettingsProps {
   gateway: SosoGateway;
   demoMode: boolean;
   push: PushControls;
+  presence: PresenceControls;
   onClose: () => void;
   /** Fired after a successful save so the People tab and header pick up the new name. */
   onSaved: (profile: MyProfile) => void;
@@ -97,6 +112,7 @@ export default function ProfileSettings({
   gateway,
   demoMode,
   push,
+  presence,
   onClose,
   onSaved,
 }: ProfileSettingsProps) {
@@ -424,6 +440,33 @@ export default function ProfileSettings({
                 <span className="settings-sub">Chosen at sign-up and can&rsquo;t be changed here.</span>
               </div>
             )}
+          </section>
+
+          <section className="settings-group" aria-label="Privacy">
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <strong>Share your presence</strong>
+                {/* The exact scope, in the row itself rather than behind a
+                    tooltip: an opt-in that hides what it discloses is not
+                    really opt-in. */}
+                <span>
+                  {demoMode
+                    ? "Presence needs the live backend — demo mode has nobody to share it with."
+                    : "Friends who follow you back can see you’re online, and whether you’re in the same ward — never where."}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={presence.sharing}
+                className={`settings-switch${presence.sharing ? " on" : ""}`}
+                onClick={() => presence.onToggle(!presence.sharing)}
+                disabled={demoMode}
+                aria-label="Share your presence"
+              >
+                <span className="settings-switch-knob" />
+              </button>
+            </div>
           </section>
 
           <section className="settings-group" aria-label="Notifications">

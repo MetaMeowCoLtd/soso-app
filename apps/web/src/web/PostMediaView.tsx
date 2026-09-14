@@ -38,16 +38,25 @@ import { useMessageImageUrl } from "./MessageMediaView";
 interface PostMediaViewProps {
   gateway: SosoGateway;
   media: PostMedia;
-  /** Width the card gives it; the height follows the stored aspect ratio. */
-  availableWidth: number;
-  /** Cap, so a tall portrait clip cannot push the rest of a card off screen. */
+  /**
+   * Cap on how tall the attachment may render, so a portrait shot cannot
+   * push the rest of a card off screen.
+   *
+   * The WIDTH is not a prop and deliberately cannot be: it is whatever the
+   * card gives it, which CSS already knows and this component does not. It
+   * used to take an `availableWidth`, and every one of its three callers
+   * passed a hardcoded 320 — which was wrong on any viewport wider than
+   * that, and wrong in a way that silently cropped: the box's height was
+   * computed from the fake 320 while its width stretched to the card's real
+   * one, so the box's aspect ratio had nothing to do with the image's and
+   * `object-fit: cover` cut away the difference.
+   */
   maxHeight?: number;
 }
 
 export default function PostMediaView({
   gateway,
   media,
-  availableWidth,
   maxHeight = 420,
 }: PostMediaViewProps) {
   const thumbKey = media.kind === "video" ? media.posterKey! : media.objectKey;
@@ -62,9 +71,22 @@ export default function PostMediaView({
     playing && media.kind === "video" ? media.objectKey : null,
   );
 
-  const ratio = media.width > 0 && media.height > 0 ? media.height / media.width : 0.75;
-  const height = Math.min(Math.round(availableWidth * ratio), maxHeight);
-  const style = { width: "100%", height };
+  /**
+   * The image's own shape, handed to CSS rather than resolved to pixels here.
+   *
+   * `aspect-ratio` plus a `max-height` is what keeps the frame honest at any
+   * card width: the browser derives the height from whatever width the card
+   * actually hands over, and the stylesheet shrinks the width to match when
+   * the cap bites, so the frame is always the picture's own shape and there
+   * is never a mismatch for `object-fit` to crop away.
+   *
+   * 4:3 stands in for media stored without usable dimensions — rare, and a
+   * frame of roughly the right shape beats a collapsed one.
+   */
+  const style = {
+    aspectRatio: media.width > 0 && media.height > 0 ? `${media.width} / ${media.height}` : "4 / 3",
+    maxHeight,
+  };
 
   if (loading) {
     return <span className="post-media skeleton-block" style={style} aria-hidden="true" />;

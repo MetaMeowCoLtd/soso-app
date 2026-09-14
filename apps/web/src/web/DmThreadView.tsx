@@ -625,13 +625,23 @@ export default function DmThreadView({
         </button>
       </form>
 
-      {lightbox && (
-        <MessageMediaLightbox
-          url={lightbox.url}
-          onSave={() => saveMessageMedia(gateway, lightbox.media)}
-          onClose={() => setLightbox(null)}
-        />
-      )}
+      {/* Portalled to <body>, for the same reason the action sheet below it
+          is — and it is the same trap. A full-screen viewer rendered here is
+          a DESCENDANT of a positioned, z-indexed ancestor, which is a
+          stacking context: its own z-index:40 then counts only against its
+          siblings inside that context, so it still paints under the floating
+          .tab-bar (z-index:6) that sits outside it. Portalling takes it out
+          of that context entirely, which also removes every ancestor whose
+          padding, overflow or backdrop-filter could clip or shift it. */}
+      {lightbox &&
+        createPortal(
+          <MessageMediaLightbox
+            url={lightbox.url}
+            onSave={() => saveMessageMedia(gateway, lightbox.media)}
+            onClose={() => setLightbox(null)}
+          />,
+          document.body,
+        )}
 
       {menu &&
         createPortal(

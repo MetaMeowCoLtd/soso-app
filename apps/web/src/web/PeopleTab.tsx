@@ -257,37 +257,31 @@ export default function PeopleTab({
             Edit profile
           </button>
 
-          <div className="people-share">
-            <div className="people-share-text">
-              <strong>Share your presence</strong>
-              {/* The exact scope, in the row itself rather than a tooltip: an
-                  opt-in that hides what it discloses behind a hover is not
-                  really opt-in. */}
+          {/* The SETTING moved to profile settings — it is a preference about
+              yourself, and it took four lines to say so in the middle of a
+              list of other people. What stays is its live consequence, which
+              is the part that belongs on this tab.
+
+              When sharing is off there is no count to show (the heartbeat
+              that feeds it only runs while it is on), so rather than a bare
+              "–" with nothing explaining it, the row says so and goes to the
+              switch it is talking about. */}
+          {presence.sharing ? (
+            <div className="people-nearby">
+              <span className="people-nearby-dot" aria-hidden="true" />
+              <strong>{presence.areaCount ?? "–"}</strong>
               <span>
-                Friends who follow you back can see you&rsquo;re online, and whether you&rsquo;re in the same
-                ward — never where.
+                {presence.areaCount === 1 ? "person" : "people"} active in this area — a count only, no names
               </span>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={presence.sharing}
-              aria-label="Share your presence"
-              className={`people-switch${presence.sharing ? " on" : ""}`}
-              onClick={() => presence.setSharing(!presence.sharing)}
-              disabled={demoMode}
-            >
-              <span className="people-switch-knob" />
+          ) : (
+            <button type="button" className="people-nearby people-nearby-off" onClick={onEditProfile}>
+              <span className="people-nearby-dot" aria-hidden="true" />
+              <span>
+                Presence is off — turn it on in profile settings to see who&rsquo;s around
+              </span>
             </button>
-          </div>
-
-          <div className="people-nearby">
-            <span className="people-nearby-dot" aria-hidden="true" />
-            <strong>{presence.areaCount ?? "–"}</strong>
-            <span>
-              {presence.areaCount === 1 ? "person" : "people"} active in this area — a count only, no names
-            </span>
-          </div>
+          )}
         </section>
 
         {/* Follow requests: people who followed you and aren't yet mutual.

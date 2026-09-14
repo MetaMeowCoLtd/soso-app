@@ -67,8 +67,6 @@ interface DmInboxProps {
   roomLastMessage: ChatMessage | null;
   /** The room's unread count, for its row's badge. */
   unreadRoom: number;
-  /** Opens the new-group flow. Owned by page.tsx, which also owns the friends list it needs. */
-  onNewGroup: () => void;
   /**
    * Changes whenever a conversation is closed. Reading a thread updates
    * `dm_thread_members`, and while that table IS in the realtime publication
@@ -86,7 +84,6 @@ export default function DmInbox({
   onOpenRoom,
   roomLastMessage,
   unreadRoom,
-  onNewGroup,
   refreshToken,
 }: DmInboxProps) {
   const [rows, setRows] = useState<DmThread[]>([]);
@@ -177,17 +174,6 @@ export default function DmInbox({
         </span>
         {unreadRoom > 0 && <span className="dm-unread">{unreadRoom}</span>}
       </button>
-
-      {/* Above the list rather than floating over it: the list scrolls, and a
-          compose button that scrolls away is one people hunt for. */}
-      <div className="dm-inbox-actions">
-        <button type="button" className="dm-new-group" onClick={onNewGroup} disabled={demoMode}>
-          <span className="dm-new-group-icon" aria-hidden="true">
-            <Icon src={ICONS.people} size={15} />
-          </span>
-          New group
-        </button>
-      </div>
 
       {demoMode ? (
         <p className="chat-empty">
