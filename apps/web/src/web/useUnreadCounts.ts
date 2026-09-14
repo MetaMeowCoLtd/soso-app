@@ -65,6 +65,18 @@ export interface UnreadCounts {
    * produced the list and this call.
    */
   markRoomSeen: (latestCreatedAt: string | null) => void;
+  /**
+   * The room's read cursor as it stands right now, or null before one
+   * exists. Read by ChatPanel at the moment it opens, to work out which
+   * message to scroll to.
+   *
+   * A getter rather than a value, because the cursor lives in a ref (it
+   * moves without needing a render) and because WHEN it is read is the
+   * whole point: ChatPanel marks the room seen the instant it has messages
+   * on screen, so anything wanting the pre-open cursor has to ask before
+   * that happens rather than receive a snapshot from an earlier render.
+   */
+  roomSeenAt: () => string | null;
   refresh: () => void;
 }
 
@@ -152,5 +164,7 @@ export function useUnreadCounts(gateway: SosoGateway): UnreadCounts {
     };
   }, [gateway, refresh]);
 
-  return { dm, room, dmPlusRoom: dm + room, markRoomSeen, refresh };
+  const roomSeenAt = useCallback(() => roomSeenRef.current, []);
+
+  return { dm, room, dmPlusRoom: dm + room, markRoomSeen, roomSeenAt, refresh };
 }

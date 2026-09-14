@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   applyReactionToggle,
@@ -19,6 +19,7 @@ import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./Mess
 import SharedPostCard from "./SharedPostCard";
 import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
+import { useChatScroll } from "./useChatScroll";
 import { useSwipeToReply } from "./useSwipeToReply";
 
 /**
@@ -137,9 +138,36 @@ export default function DmThreadView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.id]);
 
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages]);
+  /**
+   * How many messages were unread when this thread opened.
+   *
+   * Captured in a lazy initialiser because the very first thing this view
+   * does is call `markDmRead`, after which the server's count is zero and
+   * the answer is gone. `thread` also gets replaced by later inbox
+   * refreshes carrying the now-cleared count.
+   */
+  const [unreadAtOpen] = useState(() => thread.unread);
+
+  /**
+   * THE INVARIANT THIS RESTS ON: unread messages are always the TAIL of the
+   * conversation. `send_dm` moves the sender's own read cursor to the
+   * message it just wrote, so nothing of yours can sit after the cursor —
+   * which makes the unread set exactly the last `unread` messages, all of
+   * them theirs. That is what lets a plain count stand in for a timestamp
+   * and saves carrying a read cursor through `list_dm_threads`.
+   *
+   * It goes wrong only if the count is stale in the "too small" direction —
+   * messages arriving between the inbox fetch and the thread opening. The
+   * cost then is landing a message or two late, not landing wrongly.
+   */
+  const firstUnreadId = useMemo(() => {
+    if (unreadAtOpen <= 0 || messages.length === 0) return null;
+    // Clamped: more unread than loaded means the oldest of them is off the
+    // first page, and useChatScroll's own fallback handles that honestly.
+    return messages[Math.max(0, messages.length - unreadAtOpen)]?.id ?? null;
+  }, [messages, unreadAtOpen]);
+
+  useChatScroll(listRef, messages, firstUnreadId);
 
   async function send() {
     const body = input.trim();
@@ -600,6 +628,12 @@ function DmBubble({
   return (
     <div
       className={`chat-row ${message.mine ? "mine" : "theirs"}${endsRun ? " run-end" : ""}${pressed ? " pressed" : ""}`}
+      // How useChatScroll finds the message to open the conversation at.
+      // An attribute rather than a ref per row: the hook needs to look up
+      // ONE row out of a list it does not own, and threading a ref callback
+      // through every row to build a map would be more machinery for the
+      // same single querySelector.
+      data-mid={message.id}
     >
       {!message.mine &&
         (showAvatar ? (

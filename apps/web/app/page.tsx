@@ -1283,6 +1283,7 @@ function Map({
           unreadDm={unread.dm}
           unreadRoom={unread.room}
           onRoomSeen={unread.markRoomSeen}
+          roomSeenAt={unread.roomSeenAt}
           categories={categories}
           onOpenPost={(postId) => void openPostById(postId)}
         />

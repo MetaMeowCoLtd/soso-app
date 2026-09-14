@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   applyReactionToggle,
@@ -18,6 +18,7 @@ import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./Mess
 import SharedPostCard from "./SharedPostCard";
 import { useImageAttachment } from "./useImageAttachment";
 import { useLongPress } from "./useLongPress";
+import { useChatScroll } from "./useChatScroll";
 import { useSwipeToReply } from "./useSwipeToReply";
 import { Icon, ICONS } from "./Icon";
 
@@ -85,6 +86,12 @@ interface ChatPanelProps {
    * counted as unread instead of being silently swallowed.
    */
   onRoomSeen: (latestCreatedAt: string | null) => void;
+  /**
+   * The room's read cursor BEFORE this panel marks anything seen — the
+   * thing that decides where the list opens scrolled to. See
+   * `useUnreadCounts.roomSeenAt` on why it is a getter.
+   */
+  roomSeenAt: () => string | null;
 }
 
 /** Consecutive messages from one person inside this window render as a single run. */
@@ -136,6 +143,7 @@ export default function ChatPanel({
   unreadDm,
   unreadRoom,
   onRoomSeen,
+  roomSeenAt,
 }: ChatPanelProps) {
   // Two things live under one tab: the single global room this app started
   // with, and direct messages. They are the same activity from the user's
@@ -181,9 +189,23 @@ export default function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages]);
+  /**
+   * The cursor as it was when this panel opened, captured in a lazy state
+   * initialiser so it is taken during the FIRST render — before the effect
+   * below marks the room seen and moves it. Reading it any later would
+   * always return "everything is read" and the list would always open at
+   * the bottom.
+   */
+  const [roomAnchorAt] = useState<string | null>(() => roomSeenAt());
+
+  const firstUnreadId = useMemo(() => {
+    if (!roomAnchorAt) return null;
+    // `mine` excluded for the same reason useUnreadCounts excludes it from
+    // the badge: your own message is not something to catch up on.
+    return messages.find((m) => !m.mine && m.createdAt > roomAnchorAt)?.id ?? null;
+  }, [messages, roomAnchorAt]);
+
+  useChatScroll(listRef, messages, firstUnreadId);
 
   // Marks the room read up to whatever is actually rendered, and keeps doing
   // so as new messages land while you sit here — which is why it depends on
@@ -674,6 +696,12 @@ function ChatMessageRow({
   return (
     <div
       className={`chat-row ${message.mine ? "mine" : "theirs"}${endsRun ? " run-end" : ""}${pressed ? " pressed" : ""}`}
+      // How useChatScroll finds the message to open the conversation at.
+      // An attribute rather than a ref per row: the hook needs to look up
+      // ONE row out of a list it does not own, and threading a ref callback
+      // through every row to build a map would be more machinery for the
+      // same single querySelector.
+      data-mid={message.id}
     >
       {!message.mine && (
         // Only on the last bubble of a run, so a burst of messages from
