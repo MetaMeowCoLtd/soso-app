@@ -81,9 +81,9 @@ import {
  */
 
 export class VideoEncodeError extends Error {
-  readonly problem: MessageVideoProblem | "undecodable" | "unsupported" | "no_frames";
+  readonly problem: MessageVideoProblem | "undecodable" | "unsupported" | "no_frames" | "load_timeout";
 
-  constructor(problem: MessageVideoProblem | "undecodable" | "unsupported" | "no_frames") {
+  constructor(problem: MessageVideoProblem | "undecodable" | "unsupported" | "no_frames" | "load_timeout") {
     super(problem);
     this.name = "VideoEncodeError";
     this.problem = problem;
@@ -108,8 +108,77 @@ export function videoProblemMessage(problem: VideoEncodeError["problem"]): strin
       return "This browser can't compress video. Try a smaller clip, or use Chrome or Safari.";
     case "no_frames":
       return "Compressing stopped — keep this tab open and try again.";
+    case "load_timeout":
+      return "That video took too long to open. Try a shorter clip.";
   }
 }
+
+/**
+ * Which part of the work is happening, so the composer can say so.
+ *
+ * Exists because "Compressing video… 0%" was, for a while, the only thing a
+ * stuck encode ever showed — `onProgress` is first called from inside the
+ * frame loop, so everything before that loop reported nothing at all and
+ * every failure before it looked identical. Naming the stage turns a silent
+ * wait into a locatable one, for whoever is holding the phone and for
+ * whoever reads the bug report.
+ */
+export type PrepareStage = "reading" | "thumbnail" | "audio" | "encoding";
+
+/**
+ * Every await in this file that waits on the PLATFORM rather than on our own
+ * arithmetic goes through here.
+ *
+ * `loadeddata`, `seeked` and `decodeAudioData` are all events that can simply
+ * never arrive — a container the decoder gives up on, a seek past what was
+ * buffered, a soundtrack in a codec this device only half supports. None of
+ * them has a failure event, so the only way to notice is to stop waiting.
+ * Before this existed, any of them hung the composer permanently with the
+ * send button disabled.
+ */
+function withTimeout<T>(work: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(onTimeout());
+    }, ms);
+    work.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** Opening the file. Generous: a large clip off a slow phone filesystem is slow to read. */
+const LOAD_TIMEOUT_MS = 30_000;
+
+/**
+ * Decoding the soundtrack. Bounded much tighter than the load, because
+ * failing here costs only the audio — see `decodeAudio`.
+ */
+const AUDIO_TIMEOUT_MS = 15_000;
+
+/**
+ * Above this, the soundtrack is skipped rather than decoded.
+ *
+ * `decodeAudioData` needs the WHOLE file as one ArrayBuffer, so a 400 MB
+ * camera original is 400 MB of JavaScript heap on a device that may have
+ * little to spare — and an out-of-memory kill takes the tab, not just the
+ * audio. A silent video that sends beats a tab that dies.
+ */
+const AUDIO_MAX_INPUT_BYTES = 96 * 1024 * 1024;
 
 export interface PreparedVideo {
   /** The MP4 to upload — the re-encoded result, or the original when it was already fine. */
@@ -136,7 +205,7 @@ export function canEncodeVideo(): boolean {
  * exists and can be drawn.
  */
 function loadVideoElement(url: string): Promise<HTMLVideoElement> {
-  return new Promise((resolve, reject) => {
+  return new Promise<HTMLVideoElement>((resolve, reject) => {
     const el = document.createElement("video");
     el.preload = "auto";
     el.muted = true;
@@ -239,17 +308,30 @@ async function decodeAudio(file: Blob): Promise<DecodedAudio | null> {
     return null;
   }
 
-  let buffer: AudioBuffer;
+  if (file.size > AUDIO_MAX_INPUT_BYTES) {
+    console.warn("[soso] skipping audio: file too large to buffer for decoding", file.size);
+    return null;
+  }
+
+  let buffer: AudioBuffer | null;
   try {
     const AudioCtx =
       window.AudioContext ??
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const ctx = new AudioCtx();
-    buffer = await ctx.decodeAudioData(await file.arrayBuffer());
+    // Timed out rather than awaited indefinitely: `decodeAudioData` rejects
+    // for a codec it cannot handle, but some platforms simply never settle
+    // on a container they half-recognise. Losing the soundtrack is the right
+    // way to be wrong here.
+    buffer = await withTimeout(ctx.decodeAudioData(await file.arrayBuffer()), AUDIO_TIMEOUT_MS, () => {
+      console.warn("[soso] audio decode timed out; sending without sound");
+      return null;
+    });
     void ctx.close();
   } catch {
     return null;
   }
+  if (!buffer) return null;
   if (buffer.numberOfChannels === 0 || buffer.length === 0) return null;
 
   const config: AudioEncoderConfig = {
@@ -321,14 +403,28 @@ export async function prepareVideo(
    * the difference between "this is working" and "this has frozen".
    */
   onPoster?: (poster: Blob) => void,
+  /** Which phase is running. See `PrepareStage`. */
+  onStage?: (stage: PrepareStage) => void,
 ): Promise<PreparedVideo> {
   const check = validateMessageVideoFile(file);
   if (!check.ok) throw new VideoEncodeError(check.problem);
 
+  // The DEVELOPER needs this even when the person does not: a clip that will
+  // not encode is almost always one whose type or size explains why, and
+  // neither is visible anywhere else.
+  console.info("[soso] preparing video:", {
+    name: file.name,
+    type: file.type || "(empty)",
+    size: file.size,
+  });
+
   const url = URL.createObjectURL(file);
   let source: HTMLVideoElement | null = null;
   try {
-    source = await loadVideoElement(url);
+    onStage?.("reading");
+    source = await withTimeout(loadVideoElement(url), LOAD_TIMEOUT_MS, () => {
+      throw new VideoEncodeError("load_timeout");
+    });
 
     const durationCheck = validateMessageVideoDuration(source.duration);
     if (!durationCheck.ok) throw new VideoEncodeError(durationCheck.problem);
@@ -338,6 +434,7 @@ export async function prepareVideo(
     if (target.width <= 0 || target.height <= 0) throw new VideoEncodeError("undecodable");
 
     const durationMs = Math.round(source.duration * 1000);
+    onStage?.("thumbnail");
     const poster = await grabPoster(source, target);
     onPoster?.(poster);
 
@@ -351,7 +448,7 @@ export async function prepareVideo(
 
     if (!canEncodeVideo()) throw new VideoEncodeError("unsupported");
 
-    const blob = await reencode(source, target, file, onProgress);
+    const blob = await reencode(source, target, file, onProgress, onStage);
     if (blob.size > MESSAGE_VIDEO_MAX_OUTPUT_BYTES) {
       throw new VideoEncodeError("encode_too_large");
     }
@@ -371,9 +468,11 @@ async function reencode(
   target: { width: number; height: number },
   originalFile: Blob,
   onProgress?: (fraction: number) => void,
+  onStage?: (stage: PrepareStage) => void,
 ): Promise<Blob> {
   // Decoded FIRST, because the muxer below has to be told at construction
   // time whether an audio track exists and at what rate.
+  onStage?.("audio");
   const audio = await decodeAudio(originalFile);
 
   const muxer = new Muxer({
@@ -427,6 +526,7 @@ async function reencode(
   // The output frame rate. Sampling at a fixed cadence rather than following
   // the source's own is what caps a 60fps recording at 30: the extra frames
   // would steal bits from the ones that are kept, at a bitrate chosen for 30.
+  onStage?.("encoding");
   const step = 1 / MESSAGE_VIDEO_MAX_FPS;
   const duration = source.duration;
   // A hard ceiling on the loop. Duration is already validated, so this is a

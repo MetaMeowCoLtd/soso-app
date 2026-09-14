@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ERROR_MESSAGES_EN, type MessageMedia, type SosoGateway } from "soso-core";
 import { MessageImageError, messageImageMessage, prepareMessageImage } from "./messageImage";
-import { prepareVideo, VideoEncodeError, videoProblemMessage } from "./videoEncode";
+import {
+  prepareVideo,
+  VideoEncodeError,
+  videoProblemMessage,
+  type PrepareStage,
+} from "./videoEncode";
 
 /**
  * The "there is an image on this message I am about to send" state.
@@ -38,14 +43,15 @@ export interface MediaAttachment {
   /** True while encoding or uploading. Send is blocked on it. */
   busy: boolean;
   /**
-   * 0..1 while a VIDEO is being re-encoded, null otherwise.
+   * One line describing what is happening right now, or null when idle.
    *
-   * Only video reports a fraction, and that is not an oversight: an image is
-   * one canvas draw, while a clip is bounded by playback and can take tens
-   * of seconds (see videoEncode.ts). A spinner standing in for a real
-   * fraction is the thing that makes people think an app has hung.
+   * Computed here rather than in each composer, which is a real
+   * simplification and not just tidying: the same three-branch ternary was
+   * written out in four places, and when video was added only two of them
+   * learned about it. There is one sentence per state and one place to
+   * change it.
    */
-  progress: number | null;
+  statusText: string | null;
   /** One honest sentence, or null. */
   error: string | null;
   /** Hand a picked file straight from an <input type="file">. */
@@ -62,6 +68,7 @@ export function useMediaAttachment(
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [stage, setStage] = useState<PrepareStage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Identifies the CURRENT pick, so a slow upload for a photo that has since
@@ -90,6 +97,7 @@ export function useMediaAttachment(
     setMedia(null);
     setBusy(false);
     setProgress(null);
+    setStage(null);
     setError(null);
   }, [releasePreview]);
 
@@ -128,6 +136,9 @@ export function useMediaAttachment(
                 const url = URL.createObjectURL(poster);
                 previewRef.current = url;
                 setPreviewUrl(url);
+              },
+              (nextStage) => {
+                if (seq === pickSeq.current) setStage(nextStage);
               },
             );
             if (seq !== pickSeq.current) return;
@@ -214,6 +225,7 @@ export function useMediaAttachment(
           if (seq === pickSeq.current) {
             setBusy(false);
             setProgress(null);
+            setStage(null);
           }
         }
       })();
@@ -225,5 +237,27 @@ export function useMediaAttachment(
     [gateway, scopeKey, releasePreview],
   );
 
-  return { media, previewUrl, busy, progress, error, pick, clear };
+  /**
+   * Each stage gets its own sentence. "Compressing video… 0%" used to be the
+   * only thing shown for everything before the frame loop, so opening the
+   * file, grabbing a thumbnail and decoding the soundtrack were all
+   * indistinguishable from an encode that had stalled at zero.
+   */
+  const statusText = error
+    ? null
+    : stage === "reading"
+      ? "Opening video…"
+      : stage === "thumbnail"
+        ? "Reading video…"
+        : stage === "audio"
+          ? "Preparing audio…"
+          : stage === "encoding" && progress !== null
+            ? `Compressing video… ${Math.round(progress * 100)}%`
+            : busy
+              ? "Uploading…"
+              : media !== null
+                ? "Ready to send"
+                : null;
+
+  return { media, previewUrl, busy, statusText, error, pick, clear };
 }

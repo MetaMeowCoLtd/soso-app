@@ -164,12 +164,7 @@ export default function ThoughtComposer({ gateway, onCancel, onPosted }: Thought
                   )}
                 </span>
                 <span className="composer-attach-text">
-                  {attachment.error ??
-                    (attachment.progress !== null
-                      ? `Compressing video… ${Math.round(attachment.progress * 100)}%`
-                      : attachment.busy
-                        ? "Uploading…"
-                        : "Attached")}
+                  {attachment.error ?? attachment.statusText ?? "Attached"}
                 </span>
                 <button
                   type="button"

@@ -503,14 +503,9 @@ export default function ChatPanel({
             </span>
           )}
           <span className="chat-attachment-text">
-            {attachment.error ??
-              (attachment.progress !== null
-                ? /* A real fraction, because a video encode has one — see
-                     useMediaAttachment. */
-                  `Compressing video… ${Math.round(attachment.progress * 100)}%`
-                : attachment.busy
-                  ? "Uploading…"
-                  : "Ready to send")}
+            {/* One sentence, chosen in useMediaAttachment — see its own note on
+                why this stopped being four copies of a ternary. */}
+            {attachment.error ?? attachment.statusText}
           </span>
           <button
             type="button"
