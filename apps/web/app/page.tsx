@@ -446,6 +446,58 @@ function Map({
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
+  /**
+   * Re-points this browser's push subscription at whoever is signed in NOW.
+   *
+   * THE BUG THIS FIXES
+   * ---------------------------------------------------------------------
+   * A push subscription belongs to the BROWSER, but `push_endpoints` rows
+   * belong to an ACCOUNT — `subscribe_to_push` stores `auth.uid()` alongside
+   * the endpoint. Until this existed, that row was written exactly once, by
+   * the notification toggle, and never revisited. So signing in as someone
+   * else, or picking up a new anonymous session, left the endpoint attached
+   * to the previous account forever.
+   *
+   * The failure that produces is quietly asymmetric, which is why it took a
+   * while to find. Pin alerts are addressed by CELL, and the stale account
+   * was still subscribed to the same area, so those kept arriving and push
+   * looked healthy. Direct messages and room messages are addressed by
+   * `user_id`, so they were sent to an account with no devices at all — the
+   * Edge Function ran, found zero endpoints, and correctly notified nobody.
+   *
+   * `subscribe_to_push` is an upsert on the endpoint with
+   * `do update set user_id = excluded.user_id`, so simply calling it again
+   * moves the row to the current account. There is no separate "reclaim"
+   * path to maintain.
+   *
+   * Keyed on `myHandle`, which changes when the signed-in identity does.
+   * Runs only when the browser ALREADY has a subscription: this repairs an
+   * existing one, it never asks for permission on its own — which is also
+   * why it does not touch `pushSubscribed`. That flag tracks whether THIS
+   * BROWSER has a subscription, which is a different question and is already
+   * answered by its own effect below; being subscribed under the wrong
+   * account was never visible there, and is exactly what this repairs.
+   */
+  useEffect(() => {
+    if (mode !== "supabase" || !myHandle) return;
+    let cancelled = false;
+    void (async () => {
+      const existing = await getExistingSubscription();
+      if (!existing || cancelled) return;
+      try {
+        await gateway.subscribeToPush(existing, nearbyCells(mapCenter.current));
+      } catch (err) {
+        // Left alone rather than surfaced: nobody asked for this to happen,
+        // and a failure here means notifications keep going wherever they
+        // were already going rather than anything getting worse.
+        console.warn("[soso] could not re-register push subscription:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gateway, mode, myHandle]);
+
   // Presence tracks the map centre rather than the device's GPS: the area
   // count answers "is where I'm looking busy", and tying it to the viewport
   // means it works without a second location permission prompt.

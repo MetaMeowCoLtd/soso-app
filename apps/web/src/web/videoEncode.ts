@@ -150,14 +150,43 @@ function loadVideoElement(url: string): Promise<HTMLVideoElement> {
   });
 }
 
+/**
+ * Seeks, and always settles.
+ *
+ * Two ways `seeked` never arrives, both of which used to hang the composer
+ * permanently — `busy` stayed true, so the send button and the file picker
+ * stayed disabled with nothing on screen explaining why.
+ *
+ * The first is a no-op: assigning `currentTime` a value it already holds
+ * fires no event at all, because nothing moved. The loop below steps by a
+ * frame interval, so any source whose frames are coarser than that can land
+ * on the same position twice.
+ *
+ * The second is a genuine stall — a seek past what has been buffered, or a
+ * decoder that gives up on a frame. There is no event for that, so the only
+ * way to notice is to stop waiting. Timing out RESOLVES rather than rejects:
+ * the element is still sitting on whatever frame it reached, drawing that is
+ * better than abandoning the encode, and a systematically stuck seek shows
+ * up as the zero-frame check at the end rather than as a hang.
+ */
+const SEEK_TIMEOUT_MS = 3000;
+
 function seek(el: HTMLVideoElement, time: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const done = () => {
-      el.removeEventListener("seeked", done);
+  // Below one frame at 120fps: close enough that the browser would treat it
+  // as the same position and stay silent.
+  if (Math.abs(el.currentTime - time) < 0.0005) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      el.removeEventListener("seeked", finish);
       resolve();
     };
-    el.addEventListener("seeked", done);
-    el.onerror = () => reject(new VideoEncodeError("undecodable"));
+    const timer = setTimeout(finish, SEEK_TIMEOUT_MS);
+    el.addEventListener("seeked", finish);
     el.currentTime = time;
   });
 }
@@ -285,6 +314,13 @@ async function encodeAudio(audio: DecodedAudio, muxer: Muxer<ArrayBufferTarget>)
 export async function prepareVideo(
   file: File,
   onProgress?: (fraction: number) => void,
+  /**
+   * Called as soon as the poster frame exists, which is well before the
+   * encode finishes. The composer shows it immediately: a video takes tens
+   * of seconds to compress, and a strip with a thumbnail and a percentage is
+   * the difference between "this is working" and "this has frozen".
+   */
+  onPoster?: (poster: Blob) => void,
 ): Promise<PreparedVideo> {
   const check = validateMessageVideoFile(file);
   if (!check.ok) throw new VideoEncodeError(check.problem);
@@ -303,6 +339,7 @@ export async function prepareVideo(
 
     const durationMs = Math.round(source.duration * 1000);
     const poster = await grabPoster(source, target);
+    onPoster?.(poster);
 
     // The fast path. A file that is already an acceptable MP4 is uploaded
     // untouched: re-encoding it would spend the user's battery to make the

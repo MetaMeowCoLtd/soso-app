@@ -399,7 +399,12 @@ export default function DmThreadView({
         </div>
       )}
 
-      {(attachment.previewUrl || attachment.error) && (
+      {/* `busy` is in the condition deliberately. A video's poster does not
+          exist until its frame has been grabbed, so keying this on the
+          preview alone left the composer rendering nothing for the whole
+          encode — while send and attach were disabled, which looked exactly
+          like the app had frozen. */}
+      {(attachment.previewUrl || attachment.error || attachment.busy) && (
         <div className="chat-attachment">
           {attachment.previewUrl && (
             <span className="chat-attachment-thumb">
@@ -421,7 +426,10 @@ export default function DmThreadView({
             type="button"
             className="chat-attachment-remove"
             onClick={attachment.clear}
-            aria-label="Remove photo"
+            // Reachable DURING an encode as well as after it. `clear` bumps
+            // the pick sequence, so an in-flight compression is abandoned
+            // rather than landing later on a composer that moved on.
+            aria-label="Remove attachment"
           >
             <Icon src={ICONS.close} size={11} />
           </button>

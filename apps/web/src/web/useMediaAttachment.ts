@@ -111,18 +111,26 @@ export function useMediaAttachment(
           // combined picker has to reach the video path.
           if (file.type.startsWith("video/")) {
             setProgress(0);
-            const prepared = await prepareVideo(file, (fraction) => {
-              // Guarded, or a superseded encode would keep driving the bar
-              // for a pick nobody is waiting on any more.
-              if (seq === pickSeq.current) setProgress(fraction);
-            });
+            const prepared = await prepareVideo(
+              file,
+              (fraction) => {
+                // Guarded, or a superseded encode would keep driving the bar
+                // for a pick nobody is waiting on any more.
+                if (seq === pickSeq.current) setProgress(fraction);
+              },
+              (poster) => {
+                // Shown the moment it exists, which is before the encode —
+                // the same still the recipient will see before pressing
+                // play. Waiting until the end meant the composer rendered
+                // nothing at all for the whole compression, with sending
+                // disabled and no way to cancel.
+                if (seq !== pickSeq.current) return;
+                const url = URL.createObjectURL(poster);
+                previewRef.current = url;
+                setPreviewUrl(url);
+              },
+            );
             if (seq !== pickSeq.current) return;
-
-            // The poster, not the clip, is what the composer previews — same
-            // still the recipient will see before pressing play.
-            const posterUrl = URL.createObjectURL(prepared.poster);
-            previewRef.current = posterUrl;
-            setPreviewUrl(posterUrl);
 
             // Two objects, uploaded in order. The poster goes first and is
             // cheap; if the clip then fails, the orphan left behind is a

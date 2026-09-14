@@ -155,10 +155,10 @@ export default function ThoughtComposer({ gateway, onCancel, onPosted }: Thought
                 if (picked) attachment.pick(picked);
               }}
             />
-            {attachment.previewUrl ? (
+            {attachment.previewUrl || attachment.busy ? (
               <div className="composer-attach-row">
                 <span className="composer-attach-thumb">
-                  <img src={attachment.previewUrl} alt="" />
+                  {attachment.previewUrl && <img src={attachment.previewUrl} alt="" />}
                   {attachment.busy && (
                     <span className="chat-attachment-spinner" aria-label="Working" />
                   )}
