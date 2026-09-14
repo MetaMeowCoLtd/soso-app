@@ -449,6 +449,18 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .chat-sheet-emoji.active { background:rgba(0,167,143,.16); }
 .chat-sheet-clone { overflow:hidden; padding:8px 13px; border-radius:20px; background:#f0f2f5; color:var(--ink); font-size:.88rem; line-height:1.4; word-break:break-word; box-shadow:var(--e2); }
 .chat-sheet-anchor.mine .chat-sheet-clone { background:var(--teal); color:#fff; }
+/* The clone carries whatever the bubble carried (see MessageActionSheet's
+   `media` slot), so it needs the bubble's own picture rules too. Before it
+   did, the clone rendered only the quote and the body — and a picture-only
+   message has neither, so long-pressing a photo showed a blank coloured
+   rectangle exactly the size of the photo.
+   Written as `.chat-sheet-anchor .chat-sheet-clone.media-only` rather than
+   the bare class so it outweighs the `.mine` colour above; the bubble's
+   equivalent rule lost that same specificity fight for months. */
+.chat-sheet-clone:has(.message-image) { padding:4px; }
+.chat-sheet-clone:has(.message-image) .chat-bubble-text { display:block; padding:4px 6px 2px; }
+.chat-sheet-anchor .chat-sheet-clone.media-only { padding:0; background:transparent; box-shadow:none; }
+.chat-sheet-clone.media-only .message-image { border-radius:20px; }
 .chat-sheet-menu { position:absolute; top:calc(100% + 10px); min-width:196px; padding:6px; border-radius:16px; background:rgba(255,255,255,.98); box-shadow:var(--e3); backdrop-filter:blur(20px) saturate(180%); }
 .chat-sheet-anchor.theirs .chat-sheet-menu { left:0; }
 .chat-sheet-anchor.mine .chat-sheet-menu { right:0; }
@@ -486,18 +498,38 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .message-image-button:disabled { cursor:default; }
 .message-image img { display:block; width:100%; height:100%; object-fit:cover; }
 .message-image-missing { display:grid; place-items:center; padding:6px; color:var(--muted); font-size:.7rem; font-weight:650; text-align:center; }
-/* An image-only bubble is a frame around the picture, not a text bubble that
-   happens to contain one — the padding and background would otherwise show
-   as a border on three sides and a gap under it. */
-/* A bubble built around a picture, whether or not it has a caption: the
-   text padding that suits a sentence leaves a thick, uneven frame around an
-   image. `:has()` rather than another class on the element, because the
-   condition is literally "this bubble contains an image" and both
+/* A bubble built around a picture WITH a caption: the text padding that suits
+   a sentence leaves a thick, uneven frame around an image, so it tightens to
+   a thin even one and the caption keeps its own inset. The bubble colour is
+   correct here — the caption needs a bubble to sit in, and the picture reads
+   as attached to it. `:has()` rather than another class on the element,
+   because the condition is literally "this bubble contains an image" and both
    ChatPanel and DmThreadView would otherwise have to compute and pass it. */
 .chat-bubble:has(.message-image) { padding:4px; }
 .chat-bubble:has(.message-image) .chat-bubble-text { display:block; padding:4px 6px 2px; }
-.chat-bubble-image-only { padding:3px; background:transparent; box-shadow:none; }
-.chat-bubble-image-only .message-image { border-radius:12px; }
+
+/* A bubble with NOTHING but a picture in it is not a bubble at all — the
+   picture IS the message, the way it is in Instagram or iMessage. No
+   background, no padding, no frame: any of them read as a coloured border
+   drawn around someone's photo, which is the one thing a chat client should
+   never do to an image.
+
+   Written as two full `.chat-row.X` selectors rather than the bare class it
+   used to be, and that is the entire bug this replaces. `.chat-bubble-image-
+   only` is one class; `.chat-row.mine .chat-bubble` is three, so it won on
+   specificity and your own image-only messages kept the teal background —
+   showing through the 3px padding as exactly the coloured frame this rule
+   was written to remove. Their messages looked right, which is what made it
+   easy to miss. Matching the specificity and coming later in the file is
+   what makes it actually apply. */
+.chat-row.mine .chat-bubble-image-only,
+.chat-row.theirs .chat-bubble-image-only { padding:0; background:transparent; box-shadow:none; }
+/* The picture takes over the bubble's own geometry, tail included, so a
+   run of photos ends the same shape a run of text does. */
+.chat-bubble-image-only .message-image { border-radius:20px; }
+.chat-row.theirs.run-end .chat-bubble-image-only .message-image { border-bottom-left-radius:7px; }
+.chat-row.mine.run-end .chat-bubble-image-only .message-image { border-bottom-right-radius:7px; }
+
 .chat-bubble-quote .message-image { flex-shrink:0; border-radius:6px; }
 
 /* Full-screen viewer. Deliberately plain: one image, one way out, no

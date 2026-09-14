@@ -519,6 +519,16 @@ export default function ChatPanel({
             rect={menu.rect}
             mine={menu.message.mine}
             bodyText={menu.message.body}
+            media={
+              // The same nodes the real bubble renders, so the clone cannot
+              // drift from it. Not interactive here: the sheet is open over
+              // it and a tap anywhere closes the sheet.
+              menu.message.image ? (
+                <MessageImageView gateway={gateway} image={menu.message.image} />
+              ) : menu.message.sharedPost ? (
+                <SharedPostCard post={menu.message.sharedPost} categories={categories} />
+              ) : undefined
+            }
             quotedText={
               menu.message.replyTo
                 ? { authorLabel: menu.message.replyTo.authorName, text: menu.message.replyTo.body }

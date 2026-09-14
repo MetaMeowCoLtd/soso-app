@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Icon, ICONS } from "./Icon";
 import { QUICK_REACTIONS } from "./quickReactions";
 
@@ -102,6 +102,26 @@ export interface MessageActionSheetProps {
   /** Anchors the sheet to the same side of the bubble the message itself renders on. */
   mine: boolean;
   bodyText: string;
+  /**
+   * Whatever the message carries besides text — its photo, its shared pin —
+   * rendered inside the clone above `bodyText`.
+   *
+   * A ReactNode slot rather than an image path or a `MessageImage`, for the
+   * same reason `primaryAction` is a slot rather than a Delete button: this
+   * component is deliberately generic over what it is showing, and taking a
+   * photo would mean also taking the gateway that turns an R2 key into a
+   * presigned URL — dragging the data layer into a component whose whole
+   * job is layout. The caller already renders exactly this node in the real
+   * bubble, so it passes the same one here and the clone matches by
+   * construction instead of by a second implementation that has to be kept
+   * in step.
+   *
+   * Omitting it is what used to happen ALWAYS, and it is why a long-pressed
+   * photo appeared as a blank coloured rectangle the size of the picture:
+   * the clone rendered the quote and the body, and an image-only message
+   * has neither.
+   */
+  media?: ReactNode;
   /** A reply-to quote to render inside the cloned bubble, above `bodyText` — omit for a message that isn't a reply. */
   quotedText?: { authorLabel: string; text: string } | null;
   /** Which quick-reaction (if any) is the caller's own current reaction — drives that pill's active state. */
@@ -125,6 +145,7 @@ export function MessageActionSheet({
   rect,
   mine,
   bodyText,
+  media,
   quotedText,
   activeReaction,
   onReact,
@@ -191,14 +212,25 @@ export function MessageActionSheet({
           ))}
         </div>
 
-        <div className="chat-sheet-clone" style={{ maxHeight: bubbleHeight }}>
+        {/* `media-only` mirrors `chat-bubble-image-only` on the real bubble:
+            a clone of a picture-only message must lose its background and
+            padding too, or pressing a photo would grow back the coloured
+            frame the list just took off it. */}
+        <div
+          className={`chat-sheet-clone${media && !bodyText && !quotedText ? " media-only" : ""}`}
+          style={{ maxHeight: bubbleHeight }}
+        >
           {quotedText && (
             <div className="chat-bubble-quote">
               <span className="chat-quote-author">{quotedText.authorLabel}</span>
               <span className="chat-quote-body">{quotedText.text}</span>
             </div>
           )}
-          <span className="chat-bubble-text">{bodyText}</span>
+          {media}
+          {/* Omitted rather than rendered empty, matching the bubble: an
+              empty span still has line-height, which showed as a gap under
+              the picture. */}
+          {bodyText && <span className="chat-bubble-text">{bodyText}</span>}
         </div>
 
         <div className="chat-sheet-menu">
