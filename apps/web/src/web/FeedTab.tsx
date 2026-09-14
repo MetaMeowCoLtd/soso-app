@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { formatAgoShort, type Pin, type PostDetail, type SosoGateway } from "soso-core";
 import { useFeedPosts } from "./hooks";
 import { Icon, ICONS } from "./Icon";
+import PostMediaView from "./PostMediaView";
 import ThoughtComposer from "./ThoughtComposer";
 
 interface FeedTabProps {
@@ -319,16 +320,12 @@ export function FeedCard({
           <span className="feed-card-time">{formatAgoShort(post.createdAt, nowSeconds)}</span>
         </div>
         {post.body && <p className="feed-card-text">{post.body}</p>}
-        {/*
-          Photo attachments are deliberately not rendered here: post_media
-          has no upload path anywhere in this app yet (see the README's own
-          "Known limitations" — the table exists, nothing writes to it), so
-          post.media is always empty for every real post today. There is
-          also no established convention anywhere in this codebase for
-          turning an object key into a fetchable image URL — inventing one
-          just for this card, unverified, felt worse than leaving the slot
-          out until photo uploads themselves exist.
-        */}
+        {/* One attachment, because migration 0046's create_post writes one.
+            `post_media` models many (it has an `ord`), so a carousel is a
+            composer and a renderer away rather than a migration. */}
+        {post.media[0] && (
+              <PostMediaView gateway={gateway} media={post.media[0]} availableWidth={320} />
+            )}
         {/*
           An icon row, not the old "👍 3 / 💬 1" text pair. Two icons, not
           the four every big feed shows: repost and share have nothing

@@ -114,10 +114,10 @@ class FakeGateway implements SosoGateway {
   async deleteDmMessage() {}
   async reportDmMessage() {}
   async toggleDmReaction() {}
-  async uploadMessageImage(): Promise<string> {
+  async uploadMessageMedia(): Promise<string> {
     throw new Error('not used');
   }
-  async messageImageUrls() {
+  async messageMediaUrls() {
     return {};
   }
   subscribeDmMessagesChanged() {

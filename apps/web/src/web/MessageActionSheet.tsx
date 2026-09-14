@@ -106,7 +106,7 @@ export interface MessageActionSheetProps {
    * Whatever the message carries besides text — its photo, its shared pin —
    * rendered inside the clone above `bodyText`.
    *
-   * A ReactNode slot rather than an image path or a `MessageImage`, for the
+   * A ReactNode slot rather than an image path or a `MessageMedia`, for the
    * same reason `primaryAction` is a slot rather than a Delete button: this
    * component is deliberately generic over what it is showing, and taking a
    * photo would mean also taking the gateway that turns an R2 key into a

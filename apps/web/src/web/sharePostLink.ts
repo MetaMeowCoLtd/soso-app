@@ -5,7 +5,7 @@ import { postShareText, postShareUrl } from "soso-core";
 /**
  * Handing a pin to another app.
  *
- * Structurally the same as `saveMessageImage` in MessageImageView.tsx —
+ * Structurally the same as `saveMessageMedia` in MessageMediaView.tsx —
  * try the native share sheet, fall back to something every browser can do —
  * and deliberately NOT merged with it. That one shares a `File` it has to
  * fetch first and falls back to a download; this shares a URL it computes
@@ -74,7 +74,7 @@ export async function sharePostLink(
     } catch (err) {
       const name = (err as DOMException | undefined)?.name;
       // Dismissed the sheet. Not a failure, and reporting one would be
-      // wrong — the same distinction saveMessageImage draws.
+      // wrong — the same distinction saveMessageMedia draws.
       if (name === "AbortError") return "cancelled";
       // Anything else (NotAllowedError from a lost gesture window, a
       // platform with the method but no handler) still has a good answer:

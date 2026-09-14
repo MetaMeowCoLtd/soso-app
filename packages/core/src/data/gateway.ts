@@ -28,7 +28,7 @@ import type {
   DmMessage,
   DmThread,
   FeedPostsPage,
-  MessageImage,
+  MessageMedia,
   FlushedBoardTile,
   FriendTier,
   NewZone,
@@ -275,7 +275,7 @@ export interface SosoGateway {
   // image can only be applied somewhere that can ask the database — see
   // migration 0040.
   //
-  // This is why `MessageImage.path` is a path and not a URL, unlike
+  // This is why `MessageMedia.path` is a path and not a URL, unlike
   // `avatarUrl`'s synchronous string construction: an avatar lives in a
   // public bucket, and these do not.
 
@@ -299,9 +299,17 @@ export interface SosoGateway {
    * The blob is expected to be a JPEG already downscaled to display size —
    * see apps/web/src/web/messageImage.ts. Nothing here resizes anything.
    */
-  uploadMessageImage(
-    image: Blob,
-    scope: { kind: "room" } | { kind: "dm"; threadId: string },
+  uploadMessageMedia(
+    bytes: Blob,
+    scope: { kind: "room" } | { kind: "dm"; threadId: string } | { kind: "post" },
+    /**
+     * Which kind of object this is. It decides the key's extension and the
+     * Content-Type the upload URL is signed against, so it is not cosmetic:
+     * a mismatch produces an object browsers refuse to play.
+     *
+     * A video's poster frame is uploaded as a separate call with 'image'.
+     */
+    media?: "image" | "video",
   ): Promise<string>;
 
   /**
@@ -312,7 +320,7 @@ export interface SosoGateway {
    * must not blank out the rest of a conversation. URLs expire, so callers
    * are expected to cache by path with a TTL rather than hold one forever.
    */
-  messageImageUrls(paths: readonly string[]): Promise<Record<string, string | null>>;
+  messageMediaUrls(paths: readonly string[]): Promise<Record<string, string | null>>;
 
   blockUser(userId: string): Promise<void>;
   unblockUser(userId: string): Promise<void>;
@@ -431,7 +439,7 @@ export interface SosoGateway {
   sendChatMessage(
     body: string,
     replyToId?: string | null,
-    image?: MessageImage | null,
+    media?: MessageMedia | null,
     sharedPostId?: string | null,
   ): Promise<ChatMessage>;
 
@@ -501,7 +509,7 @@ export interface SosoGateway {
     threadId: string,
     body: string,
     replyToId?: string | null,
-    image?: MessageImage | null,
+    media?: MessageMedia | null,
     sharedPostId?: string | null,
   ): Promise<DmMessage>;
 

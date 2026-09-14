@@ -66,7 +66,7 @@ import {
   type FlushedBoardTile,
   type WireFlushedBoardTile,
   type FeedPostsPage,
-  type MessageImage,
+  type MessageMedia,
   type WireFeedPostsPage,
   type UserProfile,
   type ConnectionsPage,
@@ -267,6 +267,12 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_ttl_minutes: input.ttlMinutes ?? null,
         p_audience: input.audience ?? null,
         p_recipients: input.recipients ?? null,
+        p_media_key: input.media?.objectKey ?? null,
+        p_media_kind: input.media?.kind ?? null,
+        p_media_w: input.media?.width ?? null,
+        p_media_h: input.media?.height ?? null,
+        p_media_poster: input.media?.posterKey ?? null,
+        p_media_ms: input.media?.durationMs ?? null,
       });
 
       if (error) throw toSosoError(error);
@@ -483,39 +489,48 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       return decodeConnectionsPage(data as WireConnectionsPage);
     },
 
-    async uploadMessageImage(
-      image: Blob,
-      scope: { kind: 'room' } | { kind: 'dm'; threadId: string },
+    async uploadMessageMedia(
+      bytes: Blob,
+      scope: { kind: 'room' } | { kind: 'dm'; threadId: string } | { kind: 'post' },
+      media: 'image' | 'video' = 'image',
     ): Promise<string> {
+      // The extension and the Content-Type are one decision, made once here
+      // and enforced twice: the function signs the URL for this type, and R2
+      // rejects a PUT whose header disagrees.
+      const ext = media === 'video' ? '.mp4' : '.jpg';
+      const contentType = media === 'video' ? 'video/mp4' : 'image/jpeg';
+
       const { data, error } = await client.functions.invoke('message-image-urls', {
         body:
-          scope.kind === 'room'
-            ? { action: 'put', scope: 'room' }
-            : { action: 'put', scope: 'dm', threadId: scope.threadId },
+          scope.kind === 'dm'
+            ? { action: 'put', scope: 'dm', threadId: scope.threadId, ext }
+            : { action: 'put', scope: scope.kind, ext },
       });
       if (error) throw await toEdgeFunctionError(error);
       const row = data as { objectKey?: string; url?: string };
       if (!row?.objectKey || !row?.url) throw new SosoError('soso/internal_error');
 
       // Straight to R2, not back through the Edge Function: the presigned
-      // URL exists precisely so image bytes never occupy a function
-      // invocation's memory or its request-size ceiling.
+      // URL exists precisely so the bytes never occupy a function
+      // invocation's memory or its request-size ceiling. That mattered for
+      // images and it is load-bearing for video, which is two orders of
+      // magnitude larger.
       const put = await fetch(row.url, {
         method: 'PUT',
-        body: image,
+        body: bytes,
         // Must match the ContentType the URL was signed with, or R2 rejects
         // the request as a signature mismatch — the header is part of what
         // was signed, not metadata added afterwards.
-        headers: { 'Content-Type': 'image/jpeg' },
+        headers: { 'Content-Type': contentType },
       });
       if (!put.ok) {
-        console.error('[soso] message image upload failed:', put.status);
+        console.error('[soso] message media upload failed:', put.status, media);
         throw new SosoError('soso/internal_error');
       }
       return row.objectKey;
     },
 
-    async messageImageUrls(paths: readonly string[]): Promise<Record<string, string | null>> {
+    async messageMediaUrls(paths: readonly string[]): Promise<Record<string, string | null>> {
       if (paths.length === 0) return {};
       const { data, error } = await client.functions.invoke('message-image-urls', {
         body: { action: 'get', paths: [...paths] },
@@ -684,16 +699,19 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
     async sendChatMessage(
       body: string,
       replyToId?: string | null,
-      image?: MessageImage | null,
+      media?: MessageMedia | null,
       sharedPostId?: string | null,
     ): Promise<ChatMessage> {
       const { data, error } = await client.rpc('send_chat_message', {
         p_body: body,
         p_reply_to: replyToId ?? null,
-        p_image_path: image?.path ?? null,
-        p_image_w: image?.width ?? null,
-        p_image_h: image?.height ?? null,
+        p_image_path: media?.path ?? null,
+        p_image_w: media?.width ?? null,
+        p_image_h: media?.height ?? null,
         p_shared_post_id: sharedPostId ?? null,
+        p_media_kind: media?.kind ?? null,
+        p_poster_path: media?.posterPath ?? null,
+        p_duration_ms: media?.durationMs ?? null,
       });
       if (error) throw toSosoError(error);
       return decodeChatMessage(data as WireChatMessage);
@@ -769,17 +787,20 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       threadId: string,
       body: string,
       replyToId?: string | null,
-      image?: MessageImage | null,
+      media?: MessageMedia | null,
       sharedPostId?: string | null,
     ): Promise<DmMessage> {
       const { data, error } = await client.rpc('send_dm', {
         p_thread_id: threadId,
         p_body: body,
         p_reply_to: replyToId ?? null,
-        p_image_path: image?.path ?? null,
-        p_image_w: image?.width ?? null,
-        p_image_h: image?.height ?? null,
+        p_image_path: media?.path ?? null,
+        p_image_w: media?.width ?? null,
+        p_image_h: media?.height ?? null,
         p_shared_post_id: sharedPostId ?? null,
+        p_media_kind: media?.kind ?? null,
+        p_poster_path: media?.posterPath ?? null,
+        p_duration_ms: media?.durationMs ?? null,
       });
       if (error) throw toSosoError(error);
       return decodeDmMessage(data as WireDmMessage);

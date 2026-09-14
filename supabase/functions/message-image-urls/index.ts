@@ -120,7 +120,7 @@ const r2 = R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface ParsedKey {
-  scope: "room" | "dm";
+  scope: "room" | "dm" | "post";
   /** Present only for a dm key. */
   threadId: string | null;
 }
@@ -134,23 +134,51 @@ interface ParsedKey {
  * also disposes of traversal (`..`), absolute paths and empty segments
  * without needing to special-case them.
  */
+/**
+ * Which file extensions a key may end in.
+ *
+ * `.jpg` covers photos and the poster frame of a video; `.mp4` covers the
+ * clip. The list is closed on purpose: the extension is what decides the
+ * Content-Type a PUT is signed for, so an unlisted one has no correct answer
+ * and is refused rather than guessed at.
+ */
+const EXTENSIONS: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".mp4": "video/mp4",
+};
+
+function extensionOf(filename: string): string | null {
+  const dot = filename.lastIndexOf(".");
+  if (dot < 0) return null;
+  const ext = filename.slice(dot).toLowerCase();
+  return ext in EXTENSIONS ? ext : null;
+}
+
 function parseKey(key: string): ParsedKey | null {
   const parts = key.split("/");
   if (parts.some((p) => p.length === 0)) return null;
 
   if (parts.length === 3 && parts[0] === "chat") {
-    return UUID.test(parts[1]) && parts[2].endsWith(".jpg") ? { scope: "room", threadId: null } : null;
+    return UUID.test(parts[1]) && extensionOf(parts[2]) ? { scope: "room", threadId: null } : null;
   }
   if (parts.length === 4 && parts[0] === "dm") {
-    if (!UUID.test(parts[1]) || !UUID.test(parts[2]) || !parts[3].endsWith(".jpg")) return null;
+    if (!UUID.test(parts[1]) || !UUID.test(parts[2]) || !extensionOf(parts[3])) return null;
     return { scope: "dm", threadId: parts[1] };
+  }
+  // post/<author_id>/<uuid>.<ext> — a post attachment or a video's poster.
+  // Unlike a DM key this carries no clue about who may read it: that depends
+  // on the post referencing it, so the check is a database lookup (see
+  // may_read_post_media) rather than string work.
+  if (parts.length === 3 && parts[0] === "post") {
+    return UUID.test(parts[1]) && extensionOf(parts[2]) ? { scope: "post", threadId: null } : null;
   }
   return null;
 }
 
 type RequestBody =
-  | { action: "put"; scope: "room" }
-  | { action: "put"; scope: "dm"; threadId: string }
+  | { action: "put"; scope: "room"; ext: string }
+  | { action: "put"; scope: "dm"; threadId: string; ext: string }
+  | { action: "put"; scope: "post"; ext: string }
   | { action: "get"; paths: string[] };
 
 function parseBody(value: unknown): RequestBody | null {
@@ -158,9 +186,17 @@ function parseBody(value: unknown): RequestBody | null {
   const v = value as Record<string, unknown>;
 
   if (v.action === "put") {
-    if (v.scope === "room") return { action: "put", scope: "room" };
+    // The caller says which KIND of object it is about to upload, never the
+    // key itself. An unrecognised extension is refused rather than defaulted,
+    // because the extension decides the signed Content-Type and a mismatch
+    // there produces an object browsers will not play.
+    const ext = typeof v.ext === "string" && v.ext in EXTENSIONS ? v.ext : ".jpg";
+    if (typeof v.ext === "string" && !(v.ext in EXTENSIONS)) return null;
+
+    if (v.scope === "room") return { action: "put", scope: "room", ext };
+    if (v.scope === "post") return { action: "put", scope: "post", ext };
     if (v.scope === "dm" && typeof v.threadId === "string" && UUID.test(v.threadId)) {
-      return { action: "put", scope: "dm", threadId: v.threadId };
+      return { action: "put", scope: "dm", threadId: v.threadId, ext };
     }
     return null;
   }
@@ -235,13 +271,24 @@ Deno.serve(async (req: Request) => {
       // Generated here, never accepted from the caller: this is what makes
       // "you can only be given a key under your own id" true by
       // construction rather than by validation.
+      const name = `${crypto.randomUUID()}${body.ext}`;
       const objectKey = body.scope === "room"
-        ? `chat/${callerId}/${crypto.randomUUID()}.jpg`
-        : `dm/${body.threadId}/${callerId}/${crypto.randomUUID()}.jpg`;
+        ? `chat/${callerId}/${name}`
+        : body.scope === "post"
+          ? `post/${callerId}/${name}`
+          : `dm/${body.threadId}/${callerId}/${name}`;
 
       const url = await getSignedUrl(
         r2,
-        new PutObjectCommand({ Bucket: R2_BUCKET, Key: objectKey, ContentType: "image/jpeg" }),
+        new PutObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: objectKey,
+          // Signed against the type the extension implies, so the browser's
+          // PUT has to send a matching Content-Type or R2 rejects the
+          // signature. That is what stops an .mp4 key being filled with
+          // something else.
+          ContentType: EXTENSIONS[body.ext],
+        }),
         { expiresIn: PUT_TTL_SECONDS },
       );
 
@@ -274,6 +321,24 @@ Deno.serve(async (req: Request) => {
       if (allowed === true) allowedThreads.add(threadId);
     }
 
+    // Post media cannot be batched the way threads can: each key resolves
+    // back to its own post, whose audience is its own question. One lookup
+    // per distinct key, which for a feed of posts is one per post.
+    const postKeys = [
+      ...new Set(parsed.filter((p) => p.key?.scope === "post").map((p) => p.path)),
+    ];
+    const allowedPostKeys = new Set<string>();
+    for (const key of postKeys) {
+      const { data: allowed, error } = await callerClient.rpc("may_read_post_media", {
+        p_key: key,
+      });
+      if (error) {
+        console.error("[message-image-urls] may_read_post_media failed:", error);
+        return json({ error: "soso/internal_error" }, 500);
+      }
+      if (allowed === true) allowedPostKeys.add(key);
+    }
+
     const urls = await Promise.all(
       parsed.map(async ({ path, key }) => {
         // A malformed key, or a DM thread this caller is not in, comes back
@@ -283,6 +348,9 @@ Deno.serve(async (req: Request) => {
         // the same thing it does for an upload that never landed.
         if (!key) return { path, url: null };
         if (key.scope === "dm" && !allowedThreads.has(key.threadId!)) {
+          return { path, url: null };
+        }
+        if (key.scope === "post" && !allowedPostKeys.has(path)) {
           return { path, url: null };
         }
         const url = await getSignedUrl(

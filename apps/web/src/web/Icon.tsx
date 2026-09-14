@@ -76,6 +76,7 @@ export const ICONS = {
   personRemove: "icons/ui/person-remove.svg",
   place: "icons/ui/place.svg",
   plus: "icons/ui/plus.svg",
+  play: "icons/ui/play.svg",
   redo: "icons/ui/redo.svg",
   reply: "icons/ui/reply.svg",
   search: "icons/ui/search.svg",

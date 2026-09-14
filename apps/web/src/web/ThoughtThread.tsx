@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ERROR_MESSAGES_EN, formatAgoShort, type PostDetail, type PostReply, type ReportReason, type SosoGateway } from "soso-core";
 import { Icon, ICONS } from "./Icon";
+import PostMediaView from "./PostMediaView";
 
 interface ThoughtThreadProps {
   post: PostDetail;
@@ -215,6 +216,9 @@ export default function ThoughtThread({ post, gateway, nowSeconds, onClose, onPo
               <span className="feed-card-time">{formatAgoShort(post.createdAt, nowSeconds)}</span>
             </div>
             {post.body && <p className="feed-card-text">{post.body}</p>}
+            {post.media[0] && (
+              <PostMediaView gateway={gateway} media={post.media[0]} availableWidth={320} />
+            )}
             {/* The same action row FeedTab renders, so a post looks
                 identical whether you are reading it in the list or in its
                 own thread. The reply icon is inert here on purpose: you

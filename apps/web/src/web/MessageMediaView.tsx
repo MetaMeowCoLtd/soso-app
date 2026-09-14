@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { messageImageDisplaySize, type MessageImage, type SosoGateway } from "soso-core";
+import { messageImageDisplaySize, type MessageMedia, type SosoGateway } from "soso-core";
 import { Icon, ICONS } from "./Icon";
 
 /**
  * Rendering an image that lives in a private bucket.
  *
- * A stored `MessageImage.path` is an R2 object key, not a URL, and R2 has no
+ * A stored `MessageMedia.path` is an R2 object key, not a URL, and R2 has no
  * access control of its own — so every image needs a presigned URL minted by
  * the `message-image-urls` Edge Function, which applies the rule about who
  * may read a DM's images (migration 0040). That is the whole reason this is
@@ -71,7 +71,7 @@ function scheduleFetch(gateway: SosoGateway, path: string): Promise<void> {
     if (paths.length === 0) return;
 
     try {
-      const urls = await gateway.messageImageUrls(paths);
+      const urls = await gateway.messageMediaUrls(paths);
       const expiresAt = Date.now() + 15 * 60_000 - EXPIRY_MARGIN_MS;
       for (const p of paths) {
         cache.set(p, { url: urls[p] ?? null, expiresAt });
@@ -131,11 +131,11 @@ export function useMessageImageUrl(gateway: SosoGateway, path: string | null): {
  * The current URL for a path, minting one if the cache has none.
  *
  * Exists for callers that need a URL *now*, outside React's render cycle —
- * `saveMessageImage` below is the only one. `useMessageImageUrl` cannot
+ * `saveMessageMedia` below is the only one. `useMessageImageUrl` cannot
  * serve them: it returns null on first call and re-renders later, which is
  * right for an <img> and useless for "the person just pressed Save".
  */
-async function messageImageUrlNow(gateway: SosoGateway, path: string): Promise<string | null> {
+async function messageMediaUrlNow(gateway: SosoGateway, path: string): Promise<string | null> {
   const hit = cached(path);
   if (hit) return hit.url;
   await scheduleFetch(gateway, path);
@@ -151,13 +151,13 @@ async function messageImageUrlNow(gateway: SosoGateway, path: string): Promise<s
  * hard-coded so this keeps telling the truth if the pipeline ever stores
  * something other than JPEG.
  */
-function downloadName(image: MessageImage): string {
+function downloadName(image: MessageMedia): string {
   const stamp = new Date().toISOString().slice(0, 10);
   const ext = image.path.split(".").pop();
   return `soso-${stamp}.${ext && ext.length <= 5 ? ext : "jpg"}`;
 }
 
-export class MessageImageSaveError extends Error {}
+export class MessageMediaSaveError extends Error {}
 
 /**
  * What actually happened, so the caller can tell a cancellation apart from a
@@ -194,7 +194,7 @@ function openInNewTab(url: string): boolean {
 }
 
 /**
- * The `<a download>` route. Same-origin blob URL only — see `saveMessageImage`.
+ * The `<a download>` route. Same-origin blob URL only — see `saveMessageMedia`.
  */
 function downloadViaAnchor(file: File): void {
   const objectUrl = URL.createObjectURL(file);
@@ -243,12 +243,12 @@ function downloadViaAnchor(file: File): void {
  * A fresh URL is minted rather than reusing whatever the on-screen <img>
  * has, since that one may be minutes old and close to expiry.
  */
-export async function saveMessageImage(
+export async function saveMessageMedia(
   gateway: SosoGateway,
-  image: MessageImage,
+  image: MessageMedia,
 ): Promise<SaveOutcome> {
-  const url = await messageImageUrlNow(gateway, image.path);
-  if (!url) throw new MessageImageSaveError("no url");
+  const url = await messageMediaUrlNow(gateway, image.path);
+  if (!url) throw new MessageMediaSaveError("no url");
 
   // CORS lives or dies here, and this is the single line that has ever
   // failed in production. Reading another origin's bytes into JavaScript
@@ -265,19 +265,23 @@ export async function saveMessageImage(
     // the presigned URL is expired or wrong, and handing that URL to the
     // browser would replace an error message with a page of S3 error XML —
     // which looks like a crash and tells the person nothing.
-    if (!res.ok) throw new MessageImageSaveError(`fetch ${res.status}`);
+    if (!res.ok) throw new MessageMediaSaveError(`fetch ${res.status}`);
     blob = await res.blob();
   } catch (err) {
-    if (err instanceof MessageImageSaveError) throw err;
+    if (err instanceof MessageMediaSaveError) throw err;
     // Everything else is a fetch that never completed: a CORS policy with no
     // rule for this origin (the production cause), or a dropped network.
     // Logged because those two are indistinguishable on screen and only one
     // of them is worth retrying.
     console.warn("[soso] could not read image bytes for saving:", { path: image.path, error: err });
     if (openInNewTab(url)) return "opened";
-    throw new MessageImageSaveError("bytes unreadable and popup blocked");
+    throw new MessageMediaSaveError("bytes unreadable and popup blocked");
   }
-  const file = new File([blob], downloadName(image), { type: blob.type || "image/jpeg" });
+  // Falls back on the KIND rather than a hardcoded image type: a clip whose
+  // blob arrives without one would otherwise be handed to the share sheet
+  // labelled as a JPEG, and iOS refuses to save it.
+  const fallbackType = image.kind === "video" ? "video/mp4" : "image/jpeg";
+  const file = new File([blob], downloadName(image), { type: blob.type || fallbackType });
 
   const canShare =
     typeof navigator !== "undefined" &&
@@ -310,11 +314,11 @@ export async function saveMessageImage(
  * One image in a message bubble.
  *
  * The box is sized from the stored dimensions BEFORE the bytes arrive, which
- * is why `MessageImage` carries width and height at all: without it every
+ * is why `MessageMedia` carries width and height at all: without it every
  * image that finishes decoding shoves everything below it down the screen,
  * which in a list you are actively reading is the worst kind of jank.
  */
-export function MessageImageView({
+export function MessageMediaView({
   gateway,
   image,
   availableWidth = 260,
@@ -322,7 +326,7 @@ export function MessageImageView({
   onOpen,
 }: {
   gateway: SosoGateway;
-  image: MessageImage;
+  image: MessageMedia;
   availableWidth?: number;
   maxHeight?: number;
   /**
@@ -330,11 +334,19 @@ export function MessageImageView({
    * (a reply quote). Hands back the image as well as the URL, because the
    * viewer needs the object path to save it and only this component has it.
    */
-  onOpen?: (url: string, image: MessageImage) => void;
+  onOpen?: (url: string, image: MessageMedia) => void;
 }) {
-  const { url, loading } = useMessageImageUrl(gateway, image.path);
+  const isVideo = image.kind === "video";
+  // A video shows its POSTER in the list and only fetches the clip itself
+  // once someone asks to play it. That is the whole reason a poster exists:
+  // minting a URL for a 20 MB object, and letting the browser start
+  // buffering it, for every clip in a scrolling conversation would be
+  // expensive in a way nobody asked for.
+  const thumbPath = isVideo ? image.posterPath! : image.path;
+  const { url, loading } = useMessageImageUrl(gateway, thumbPath);
   const size = messageImageDisplaySize(image, availableWidth, maxHeight);
   const [failed, setFailed] = useState(false);
+  const [playing, setPlaying] = useState(false);
 
   const style = { width: size.width, height: size.height };
 
@@ -342,15 +354,23 @@ export function MessageImageView({
     return <span className="message-image skeleton-block" style={style} aria-hidden="true" />;
   }
 
-  // Null url means the function declined to mint one — a DM image belonging
-  // to a thread this viewer is no longer in, or an object that was never
-  // uploaded. `failed` means the URL was minted but the fetch broke. Both
-  // are the same thing to look at, and neither is an error worth interrupting
-  // the conversation over.
+  // Null url means the function declined to mint one — a DM attachment
+  // belonging to a thread this viewer is no longer in, or an object that was
+  // never uploaded. `failed` means the URL was minted but the fetch broke.
+  // Both are the same thing to look at, and neither is an error worth
+  // interrupting the conversation over.
   if (!url || failed) {
     return (
       <span className="message-image message-image-missing" style={style}>
-        Image unavailable
+        {isVideo ? "Video unavailable" : "Image unavailable"}
+      </span>
+    );
+  }
+
+  if (isVideo && playing) {
+    return (
+      <span className="message-image message-video-playing" style={style}>
+        <InlineVideo gateway={gateway} media={image} poster={url} size={size} />
       </span>
     );
   }
@@ -360,14 +380,86 @@ export function MessageImageView({
       type="button"
       className="message-image message-image-button"
       style={style}
-      onClick={onOpen ? () => onOpen(url, image) : undefined}
+      onClick={
+        // A video plays in place; an image opens the viewer. Tapping a clip
+        // should start it, not move you to another screen first.
+        isVideo ? () => setPlaying(true) : onOpen ? () => onOpen(url, image) : undefined
+      }
       // A quote's thumbnail is not independently tappable — the whole quote
       // is — so it is not offered as a control either.
-      disabled={!onOpen}
-      aria-label={onOpen ? "Open image" : undefined}
+      disabled={!isVideo && !onOpen}
+      aria-label={isVideo ? "Play video" : onOpen ? "Open image" : undefined}
     >
       <img src={url} alt="" width={size.width} height={size.height} onError={() => setFailed(true)} />
+      {isVideo && (
+        <>
+          <span className="message-video-play" aria-hidden="true">
+            <Icon src={ICONS.play} size={22} />
+          </span>
+          {image.durationMs !== null && (
+            <span className="message-video-duration" aria-hidden="true">
+              {formatClipLength(image.durationMs)}
+            </span>
+          )}
+        </>
+      )}
     </button>
+  );
+}
+
+/** m:ss, the one format every video player in the world uses for a short clip. */
+function formatClipLength(durationMs: number): string {
+  const total = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * The clip itself, mounted only after a tap.
+ *
+ * Its URL is minted here rather than alongside the poster, which is the
+ * point: nothing fetches a video's bytes until someone asks for it.
+ *
+ * `controls` is the browser's own, deliberately. A custom control bar would
+ * mean reimplementing scrubbing, fullscreen, AirPlay and Picture-in-Picture,
+ * and getting all of them slightly wrong — and on iOS the native controls are
+ * the only route to fullscreen that works.
+ */
+function InlineVideo({
+  gateway,
+  media,
+  poster,
+  size,
+}: {
+  gateway: SosoGateway;
+  media: MessageMedia;
+  poster: string;
+  size: { width: number; height: number };
+}) {
+  const { url, loading } = useMessageImageUrl(gateway, media.path);
+
+  if (loading || !url) {
+    // The poster stays on screen while the clip's URL is minted, so the tap
+    // does not blank the bubble it was aimed at.
+    return (
+      <img src={poster} alt="" width={size.width} height={size.height} className="message-video-poster" />
+    );
+  }
+
+  return (
+    <video
+      src={url}
+      poster={poster}
+      width={size.width}
+      height={size.height}
+      controls
+      autoPlay
+      // Required on iOS, or tapping play hands the clip to the fullscreen
+      // system player and takes the person out of the conversation.
+      playsInline
+      preload="metadata"
+    />
   );
 }
 
@@ -378,7 +470,7 @@ export function MessageImageView({
  * opened it necessarily had one, and re-minting would mean a spinner over a
  * picture the person can already see behind the overlay.
  */
-export function MessageImageLightbox({
+export function MessageMediaLightbox({
   url,
   onSave,
   onClose,
@@ -462,4 +554,16 @@ export function MessageImageLightbox({
       {error && <p className="message-lightbox-error">{error}</p>}
     </div>
   );
+}
+
+/**
+ * The one word a quote or an inbox row uses for an attachment it cannot draw.
+ *
+ * Lives here rather than in each caller so "Photo" and "Video" are decided
+ * once — three surfaces need the same word (a reply quote, the DM inbox
+ * preview, the long-press sheet) and they were already drifting when it was
+ * only ever "Photo".
+ */
+export function attachmentWord(media: { kind: "image" | "video" }): string {
+  return media.kind === "video" ? "Video" : "Photo";
 }

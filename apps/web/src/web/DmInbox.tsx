@@ -124,7 +124,12 @@ export default function DmInbox({ gateway, myId, demoMode, onOpenThread, refresh
                     {/* An image-only or share-only message has no body, so the
                         row would otherwise read as blank — indistinguishable
                         from a thread nobody has written in. */}
-                    {thread.lastBody || (thread.lastHasImage ? "Photo" : "Shared a pin")}
+                    {thread.lastBody ||
+                      (thread.lastHasImage
+                        ? thread.lastMediaKind === "video"
+                          ? "Video"
+                          : "Photo"
+                        : "Shared a pin")}
                   </>
                 ) : (
                   <em>No messages yet</em>

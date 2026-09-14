@@ -63,7 +63,7 @@ import type {
   BoardTilePutRequest,
   ChatMessage,
   ChatReplyPreview,
-  MessageImage,
+  MessageMedia,
   Connection,
   ConnectionsPage,
   DmMessage,
@@ -74,6 +74,7 @@ import type {
   FollowResult,
   Friend,
   PostReply,
+  PostMedia,
   ReportReason,
   SharedPost,
   SignedBoardTileUrl,
@@ -410,6 +411,8 @@ interface DemoPost {
   confirmCount: number;
   disputeCount: number;
   replyCount: number;
+  /** One attachment, matching what create_post writes (migration 0046). */
+  media?: PostMedia | null;
 }
 
 interface DemoReply {
@@ -517,7 +520,7 @@ function loadMessageImages(): Record<string, string> {
   return readJSON<Record<string, string>>(MESSAGE_IMAGES_KEY, {});
 }
 
-function saveMessageImages(store: Record<string, string>): void {
+function saveMessageMedias(store: Record<string, string>): void {
   writeJSON(MESSAGE_IMAGES_KEY, store);
 }
 
@@ -606,7 +609,7 @@ function toPin(p: DemoPost): Pin {
     createdAt: p.createdAt,
     expiresAt: p.expiresAt,
     net: p.confirmCount - p.disputeCount,
-    hasMedia: false,
+    hasMedia: Boolean(p.media),
   };
 }
 
@@ -792,6 +795,9 @@ interface DemoChatMessage {
   imageWidth?: number | null;
   imageHeight?: number | null;
   sharedPostId?: string | null;
+  mediaKind?: "image" | "video" | null;
+  posterPath?: string | null;
+  durationMs?: number | null;
 }
 
 function loadChatMessages(): DemoChatMessage[] {
@@ -826,15 +832,23 @@ function chatReplyPreview(id: string | null, me: string): ChatReplyPreview | nul
     id: target.id,
     body: target.body,
     authorName: target.authorId === me ? "You" : "A neighbour",
-    image: demoMessageImage(target),
+    media: demoMessageImage(target),
     hasPost: Boolean(target.sharedPostId),
   };
 }
 
-/** The decoded shape `MessageImage` expects, or null when there is no image. */
-function demoMessageImage(m: DemoChatMessage): MessageImage | null {
+/** The decoded shape `MessageMedia` expects, or null when there is no attachment. */
+function demoMessageImage(m: DemoChatMessage): MessageMedia | null {
   if (!m.imagePath || !m.imageWidth || !m.imageHeight) return null;
-  return { path: m.imagePath, width: m.imageWidth, height: m.imageHeight };
+  const isVideo = m.mediaKind === "video" && Boolean(m.posterPath);
+  return {
+    kind: isVideo ? "video" : "image",
+    path: m.imagePath,
+    width: m.imageWidth,
+    height: m.imageHeight,
+    posterPath: isVideo ? m.posterPath! : null,
+    durationMs: isVideo ? m.durationMs ?? null : null,
+  };
 }
 
 /**
@@ -1080,7 +1094,7 @@ export function createDemoGateway(): SosoGateway {
           displayName: post.authorId === me ? "You" : "A neighbour",
           avatarPath: post.authorId === me ? myAvatarPath() : null,
         },
-        media: [],
+        media: post.media ? [post.media] : [],
         replyCount: post.replyCount,
         liked: hasLiked(post.id, me),
       };
@@ -1167,6 +1181,16 @@ export function createDemoGateway(): SosoGateway {
         confirmCount: 0,
         disputeCount: 0,
         replyCount: 0,
+        media: input.media
+          ? {
+              kind: input.media.kind,
+              objectKey: input.media.objectKey,
+              width: input.media.width,
+              height: input.media.height,
+              posterKey: input.media.posterKey ?? null,
+              durationMs: input.media.durationMs ?? null,
+            }
+          : null,
       };
 
       savePosts([post, ...loadPosts()]);
@@ -1385,22 +1409,24 @@ export function createDemoGateway(): SosoGateway {
     // and real data are the same kind of value, even though nothing here
     // parses them — a demo that invented `demo-image-3` would hide a whole
     // class of key-shape bug.
-    async uploadMessageImage(
-      image: Blob,
-      scope: { kind: "room" } | { kind: "dm"; threadId: string },
+    async uploadMessageMedia(
+      bytes: Blob,
+      scope: { kind: "room" } | { kind: "dm"; threadId: string } | { kind: "post" },
+      media: "image" | "video" = "image",
     ): Promise<string> {
       const me = getMe();
+      const name = `${crypto.randomUUID()}${media === "video" ? ".mp4" : ".jpg"}`;
       const path =
-        scope.kind === "room"
-          ? `chat/${me}/${crypto.randomUUID()}.jpg`
-          : `dm/${scope.threadId}/${me}/${crypto.randomUUID()}.jpg`;
+        scope.kind === "dm" ? `dm/${scope.threadId}/${me}/${name}` : `${
+          scope.kind === "post" ? "post" : "chat"
+        }/${me}/${name}`;
       const store = loadMessageImages();
-      store[path] = await blobToDataUrl(image);
-      saveMessageImages(store);
+      store[path] = await blobToDataUrl(bytes);
+      saveMessageMedias(store);
       return path;
     },
 
-    async messageImageUrls(paths: readonly string[]): Promise<Record<string, string | null>> {
+    async messageMediaUrls(paths: readonly string[]): Promise<Record<string, string | null>> {
       const store = loadMessageImages();
       // Null for anything missing, exactly as the real one returns null for
       // an object the caller may not read — so the renderer's "no URL" path
@@ -1478,7 +1504,7 @@ export function createDemoGateway(): SosoGateway {
           displayName: post.authorId === me ? "You" : "A neighbour",
           avatarPath: post.authorId === me ? myAvatarPath() : null,
         },
-          media: [],
+          media: post.media ? [post.media] : [],
           replyCount: post.replyCount,
           liked: hasLiked(post.id, me),
         })),
@@ -1592,7 +1618,7 @@ export function createDemoGateway(): SosoGateway {
             displayName: post.authorId === me ? "You" : "A neighbour",
             avatarPath: post.authorId === me ? myAvatarPath() : null,
           },
-          media: [],
+          media: post.media ? [post.media] : [],
           replyCount: post.replyCount,
           liked: hasLiked(post.id, me),
         })),
@@ -1697,13 +1723,13 @@ export function createDemoGateway(): SosoGateway {
     async sendChatMessage(
       body: string,
       replyToId?: string | null,
-      image?: MessageImage | null,
+      media?: MessageMedia | null,
       sharedPostId?: string | null,
     ): Promise<ChatMessage> {
       const trimmed = body.trim();
       // Empty is allowed with an image or a shared post, matching
       // send_chat_message's own relaxed check in migrations 0040 and 0044.
-      if (trimmed.length === 0 && !image && !sharedPostId) {
+      if (trimmed.length === 0 && !media && !sharedPostId) {
         throw new SosoError("soso/empty_message");
       }
       if (trimmed.length > 500) throw new SosoError("soso/message_too_long");
@@ -1727,10 +1753,13 @@ export function createDemoGateway(): SosoGateway {
         createdAt: new Date().toISOString(),
         authorId: me,
         replyToId: replyToId ?? null,
-        imagePath: image?.path ?? null,
-        imageWidth: image?.width ?? null,
-        imageHeight: image?.height ?? null,
+        imagePath: media?.path ?? null,
+        imageWidth: media?.width ?? null,
+        imageHeight: media?.height ?? null,
         sharedPostId: sharedPostId ?? null,
+        mediaKind: media?.kind ?? null,
+        posterPath: media?.posterPath ?? null,
+        durationMs: media?.durationMs ?? null,
       };
       saveChatMessages([...loadChatMessages(), message]);
 
@@ -1746,7 +1775,7 @@ export function createDemoGateway(): SosoGateway {
         mine: true,
         replyTo: preview,
         reactions: [],
-        image: demoMessageImage(message),
+        media: demoMessageImage(message),
         sharedPost: demoSharedPost(message.sharedPostId),
         // Nobody has read a message that was sent a millisecond ago.
         seenBy: 0,
@@ -1805,7 +1834,7 @@ export function createDemoGateway(): SosoGateway {
           mine,
           replyTo: preview,
           reactions: chatReactionsFor(m.id, me),
-          image: demoMessageImage(m),
+          media: demoMessageImage(m),
           sharedPost: demoSharedPost(m.sharedPostId),
           // Counts readers OTHER than the author, matching the real
           // function's own exclusion: "you have read this" is not news.

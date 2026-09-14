@@ -9,8 +9,10 @@ import {
   type Pin,
   type PostDetail,
   type ReportReason,
+  type SosoGateway,
 } from "soso-core";
 import { Icon, ICONS } from "./Icon";
+import PostMediaView from "./PostMediaView";
 import { lookOf } from "./theme";
 
 /**
@@ -44,6 +46,8 @@ import { lookOf } from "./theme";
 
 interface PinPreviewProps {
   pin: Pin;
+  /** Needed to mint a presigned URL for an attachment — see PostMediaView. */
+  gateway: SosoGateway;
   detail: PostDetail | null;
   categories: CategoryConfig[];
   nowSeconds: number;
@@ -69,6 +73,7 @@ const REPORT_REASONS: { label: string; value: ReportReason }[] = [
 
 export default function PinPreview({
   pin,
+  gateway,
   detail,
   categories,
   nowSeconds,
@@ -156,6 +161,9 @@ export default function PinPreview({
           </p>}
 
         {detail?.body && <p className="pin-preview-snippet">{detail.body}</p>}
+        {detail?.media[0] && (
+          <PostMediaView gateway={gateway} media={detail.media[0]} availableWidth={320} maxHeight={280} />
+        )}
 
         <div className="pin-preview-meta">
           <span className="detail-countdown pin-preview-countdown">

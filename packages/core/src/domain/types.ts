@@ -182,7 +182,12 @@ export interface PostDetail extends Pin {
   /** True when the signed-in user wrote it. Drives the edit/delete affordances. */
   mine: boolean;
   author: { id: string; handle: string; displayName: string; avatarPath: AvatarPath };
-  media: { objectKey: string; width: number; height: number }[];
+  /**
+   * Attachments on the post. At most one today — `post_media` models many
+   * (it has an `ord`) and migration 0046 writes one, so carousels are a
+   * composer change rather than a schema one.
+   */
+  media: PostMedia[];
   replyCount: number;
   /**
    * Whether the signed-in user has already cast a "still valid"
@@ -203,7 +208,7 @@ export interface WirePostDetail extends WirePin {
   address: string | null;
   mine: boolean;
   author: { id: string; handle: string; name: string; avatar?: string | null };
-  media: { key: string; w: number; h: number }[];
+  media: WirePostMedia[];
   replies: number;
   liked: boolean;
 }
@@ -222,7 +227,7 @@ export function decodePostDetail(w: WirePostDetail): PostDetail {
       displayName: w.author.name,
       avatarPath: w.author.avatar ?? null,
     },
-    media: (w.media ?? []).map((m) => ({ objectKey: m.key, width: m.w, height: m.h })),
+    media: (w.media ?? []).map(decodePostMedia),
     replyCount: w.replies,
     liked: w.liked,
   };
@@ -240,6 +245,25 @@ export interface NewPost {
   category: string;
   subtype?: string | null;
   body?: string | null;
+  /**
+   * One photo or clip, already uploaded — pass the key `uploadMessageMedia`
+   * returned with scope `post`.
+   *
+   * Uploaded before the post exists rather than after, which is the same
+   * order messages use and for the same reason: the bytes are the slow part,
+   * so they move while the composer is still open. The cost, stated in
+   * migration 0040's header and still true, is that an attachment picked and
+   * then abandoned leaves an object nothing references.
+   */
+  media?: {
+    kind: MediaKind;
+    objectKey: string;
+    width: number;
+    height: number;
+    /** Required for a video; the server refuses one without it. */
+    posterKey?: string | null;
+    durationMs?: number | null;
+  } | null;
   /**
    * What the post is about. Omit for a location-optional category
    * (post_categories.requires_location = false, e.g. "thought") — every
@@ -703,28 +727,107 @@ export interface ChatMessageReaction {
  * before the bytes arrive; without them every image that decodes shoves the
  * messages below it down the screen.
  */
-export interface MessageImage {
+/**
+ * An attachment on a POST.
+ *
+ * Deliberately a different type from `MessageMedia` despite carrying the same
+ * information: the two live in different tables, arrive under different wire
+ * keys (`key`/`w`/`h` here, `image_path`/`image_width`/… there) and are
+ * authorized differently — a post attachment's readability depends on the
+ * post's audience, a message attachment's on thread membership. Collapsing
+ * them into one type would mean one decoder pretending both wires are the
+ * same shape.
+ */
+export interface PostMedia {
+  kind: MediaKind;
+  objectKey: string;
+  width: number;
+  height: number;
+  /** A JPEG still, for a video. Null for an image. */
+  posterKey: string | null;
+  durationMs: number | null;
+}
+
+export interface WirePostMedia {
+  key: string;
+  w: number | string;
+  h: number | string;
+  kind?: string | null;
+  poster?: string | null;
+  duration_ms?: number | string | null;
+}
+
+export function decodePostMedia(w: WirePostMedia): PostMedia {
+  const isVideo = w.kind === 'video' && Boolean(w.poster);
+  return {
+    kind: isVideo ? 'video' : 'image',
+    objectKey: w.key,
+    width: Number(w.w) || 0,
+    height: Number(w.h) || 0,
+    posterKey: isVideo ? w.poster! : null,
+    durationMs: isVideo ? Number(w.duration_ms) || null : null,
+  };
+}
+
+/** Which kind of thing an attachment key points at. */
+export type MediaKind = 'image' | 'video';
+
+/**
+ * An attachment on a message: a photo, or a video.
+ *
+ * One type with a `kind` rather than two, because every caller does the same
+ * three things with it — reserve space from the dimensions, mint a URL for
+ * the path, then render — and only the last of those differs.
+ *
+ * `posterPath` and `durationMs` are non-null exactly when `kind` is 'video',
+ * which migration 0046 enforces with a check constraint rather than leaving
+ * to convention: a video with no poster renders as a black rectangle until
+ * it buffers.
+ */
+export interface MessageMedia {
+  kind: MediaKind;
   path: string;
   width: number;
   height: number;
+  /** A JPEG still, for a video. Null for an image. */
+  posterPath: string | null;
+  /** Null for an image. */
+  durationMs: number | null;
 }
 
-export interface WireMessageImage {
+export interface WireMessageMedia {
   image_path?: string | null;
   image_width?: number | string | null;
   image_height?: number | string | null;
+  media_kind?: string | null;
+  poster_path?: string | null;
+  duration_ms?: number | string | null;
 }
 
-export function decodeMessageImage(w: WireMessageImage): MessageImage | null {
+export function decodeMessageMedia(w: WireMessageMedia): MessageMedia | null {
   if (!w.image_path) return null;
   const width = Number(w.image_width) || 0;
   const height = Number(w.image_height) || 0;
-  // A path with no usable dimensions is treated as no image at all rather
-  // than rendered at a guessed size — the database's own check constraint
-  // makes this unreachable, so reaching it means something upstream is
-  // wrong and guessing would hide it.
+  // A path with no usable dimensions is treated as no attachment at all
+  // rather than rendered at a guessed size — the database's own check
+  // constraint makes this unreachable, so reaching it means something
+  // upstream is wrong and guessing would hide it.
   if (width <= 0 || height <= 0) return null;
-  return { path: w.image_path, width, height };
+
+  // Anything that is not explicitly a video is an image, which is also what
+  // a server predating migration 0046 reports by omitting the key entirely.
+  // A video whose poster did not survive is downgraded rather than shown:
+  // there is no honest way to render it, and the constraint says it cannot
+  // happen.
+  const isVideo = w.media_kind === 'video' && Boolean(w.poster_path);
+  return {
+    kind: isVideo ? 'video' : 'image',
+    path: w.image_path,
+    width,
+    height,
+    posterPath: isVideo ? w.poster_path! : null,
+    durationMs: isVideo ? Number(w.duration_ms) || null : null,
+  };
 }
 
 /**
@@ -796,8 +899,8 @@ export interface ChatReplyPreview {
   id: string;
   body: string;
   authorName: string;
-  /** Non-null when the quoted message was an image; a quote of an image-only message is otherwise blank. */
-  image: MessageImage | null;
+  /** Non-null when the quoted message carried a photo or a clip; such a quote is otherwise blank. */
+  media: MessageMedia | null;
   /** The quoted message shared a pin. A flag, not a card — the card itself is a few bubbles up. */
   hasPost: boolean;
 }
@@ -813,8 +916,8 @@ export interface ChatMessage {
   mine: boolean;
   replyTo: ChatReplyPreview | null;
   reactions: ChatMessageReaction[];
-  /** Null for an ordinary text message. `body` may be empty when this is set. */
-  image: MessageImage | null;
+  /** Null for a plain text message. `body` may be empty when this is set. */
+  media: MessageMedia | null;
   /** Null unless a post was shared. `body` may be empty when this is set. */
   sharedPost: SharedPost | null;
   /**
@@ -840,7 +943,7 @@ export interface WireChatMessage {
   author_avatar?: string | null;
   mine: boolean;
   reply_to?:
-    | ({ id: string; body: string; author_name: string; has_post?: boolean | null } & WireMessageImage)
+    | ({ id: string; body: string; author_name: string; has_post?: boolean | null } & WireMessageMedia)
     | null;
   reactions?: { emoji: string; count: number; mine: boolean }[] | null;
   image_path?: string | null;
@@ -865,12 +968,12 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
           id: w.reply_to.id,
           body: w.reply_to.body,
           authorName: w.reply_to.author_name,
-          image: decodeMessageImage(w.reply_to),
+          media: decodeMessageMedia(w.reply_to),
           hasPost: Boolean(w.reply_to.has_post),
         }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({ emoji: r.emoji, count: r.count, mine: r.mine })),
-    image: decodeMessageImage(w),
+    media: decodeMessageMedia(w),
     sharedPost: decodeSharedPost(w.shared_post),
     // `count(*)` arrives as a string from PostgREST for bigint, and is
     // absent entirely from a server that has not run migration 0045 — both
@@ -1133,6 +1236,8 @@ export interface DmThread {
   lastHasImage: boolean;
   /** The last message shared a pin — same problem, same shape as `lastHasImage`. */
   lastHasPost: boolean;
+  /** What `lastHasImage` was, so the inbox can say "Video" rather than "Photo". */
+  lastMediaKind: MediaKind;
   lastSenderId: string | null;
   unread: number;
 }
@@ -1147,6 +1252,7 @@ export interface WireDmThread {
   last_body?: string | null;
   last_has_image?: boolean | null;
   last_has_post?: boolean | null;
+  last_media_kind?: string | null;
   last_sender_id?: string | null;
   unread: number | string;
 }
@@ -1162,6 +1268,7 @@ export function decodeDmThread(w: WireDmThread): DmThread {
     lastBody: w.last_body ?? null,
     lastHasImage: Boolean(w.last_has_image),
     lastHasPost: Boolean(w.last_has_post),
+    lastMediaKind: w.last_media_kind === 'video' ? 'video' : 'image',
     lastSenderId: w.last_sender_id ?? null,
     // `count(*)` comes back as a string from PostgREST for bigint columns.
     unread: Number(w.unread) || 0,
@@ -1180,8 +1287,8 @@ export interface DmReplyPreview {
   id: string;
   body: string;
   senderId: string;
-  /** Non-null when the quoted message was an image; a quote of an image-only message is otherwise blank. */
-  image: MessageImage | null;
+  /** Non-null when the quoted message carried a photo or a clip; such a quote is otherwise blank. */
+  media: MessageMedia | null;
   /** The quoted message shared a pin. A flag, not a card — the card itself is a few bubbles up. */
   hasPost: boolean;
 }
@@ -1213,8 +1320,8 @@ export interface DmMessage {
   /** Null once the quoted message is deleted (ON DELETE SET NULL), same as no reply at all. */
   replyTo: DmReplyPreview | null;
   reactions: DmMessageReaction[];
-  /** Null for an ordinary text message. `body` may be empty when this is set. */
-  image: MessageImage | null;
+  /** Null for a plain text message. `body` may be empty when this is set. */
+  media: MessageMedia | null;
   /** Null unless a post was shared. `body` may be empty when this is set. */
   sharedPost: SharedPost | null;
 }
@@ -1227,7 +1334,7 @@ export interface WireDmMessage {
   created_at: string;
   mine: boolean;
   reply_to?:
-    | ({ id: string; body: string; sender_id: string; has_post?: boolean | null } & WireMessageImage)
+    | ({ id: string; body: string; sender_id: string; has_post?: boolean | null } & WireMessageMedia)
     | null;
   reactions?: { emoji: string; count: number | string; mine: boolean }[] | null;
   image_path?: string | null;
@@ -1249,7 +1356,7 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
           id: w.reply_to.id,
           body: w.reply_to.body,
           senderId: w.reply_to.sender_id,
-          image: decodeMessageImage(w.reply_to),
+          media: decodeMessageMedia(w.reply_to),
           hasPost: Boolean(w.reply_to.has_post),
         }
       : null,
@@ -1258,7 +1365,7 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
       count: Number(r.count) || 0,
       mine: r.mine,
     })),
-    image: decodeMessageImage(w),
+    media: decodeMessageMedia(w),
     sharedPost: decodeSharedPost(w.shared_post),
   };
 }

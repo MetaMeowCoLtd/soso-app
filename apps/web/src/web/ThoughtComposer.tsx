@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ERROR_MESSAGES_EN,
+  MESSAGE_IMAGE_MIME_TYPES,
+  MESSAGE_VIDEO_MIME_TYPES,
   type NewPost,
   type PostAudience,
   type PostDetail,
   type SosoGateway,
 } from "soso-core";
+
+import { Icon, ICONS } from "./Icon";
+import { useMediaAttachment } from "./useMediaAttachment";
 
 interface ThoughtComposerProps {
   gateway: SosoGateway;
@@ -43,16 +48,39 @@ export default function ThoughtComposer({ gateway, onCancel, onPosted }: Thought
   const [audience, setAudience] = useState<PostAudience>("public");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachment = useMediaAttachment(gateway, { kind: "post" });
 
   const trimmed = body.trim();
-  const canSubmit = trimmed.length > 0 && trimmed.length <= BODY_MAX_LENGTH && !busy;
+  // An attachment alone is a post, the same way an image alone is a message.
+  // Still blocked while one is uploading: sending then would attach nothing
+  // and silently drop the picture.
+  const canSubmit =
+    (trimmed.length > 0 || attachment.media !== null) &&
+    trimmed.length <= BODY_MAX_LENGTH &&
+    !busy &&
+    !attachment.busy;
 
   async function submit() {
     if (!canSubmit) return;
     setBusy(true);
     setError(null);
     try {
-      const input: NewPost = { category: "thought", body: trimmed, audience };
+      const input: NewPost = {
+        category: "thought",
+        body: trimmed,
+        audience,
+        media: attachment.media
+          ? {
+              kind: attachment.media.kind,
+              objectKey: attachment.media.path,
+              width: attachment.media.width,
+              height: attachment.media.height,
+              posterKey: attachment.media.posterPath,
+              durationMs: attachment.media.durationMs,
+            }
+          : null,
+      };
       const pin = await gateway.createPost(input);
       // createPost's own return is a lightweight Pin, not the full
       // PostDetail a feed card needs (author name/handle, reply count,
@@ -111,6 +139,61 @@ export default function ThoughtComposer({ gateway, onCancel, onPosted }: Thought
         <div className="thought-composer-count">
           {trimmed.length}/{BODY_MAX_LENGTH}
         </div>
+
+        {/* The same strip the pin composer and both chat composers use.
+            No category gate here: a "thought" allows media, and this
+            composer only ever makes thoughts. */}
+            <div className="composer-attach">
+            <input
+              ref={fileInput}
+              type="file"
+              accept={[...MESSAGE_IMAGE_MIME_TYPES, ...MESSAGE_VIDEO_MIME_TYPES].join(",")}
+              hidden
+              onChange={(e) => {
+                const picked = e.target.files?.[0];
+                e.target.value = "";
+                if (picked) attachment.pick(picked);
+              }}
+            />
+            {attachment.previewUrl ? (
+              <div className="composer-attach-row">
+                <span className="composer-attach-thumb">
+                  <img src={attachment.previewUrl} alt="" />
+                  {attachment.busy && (
+                    <span className="chat-attachment-spinner" aria-label="Working" />
+                  )}
+                </span>
+                <span className="composer-attach-text">
+                  {attachment.error ??
+                    (attachment.progress !== null
+                      ? `Compressing video… ${Math.round(attachment.progress * 100)}%`
+                      : attachment.busy
+                        ? "Uploading…"
+                        : "Attached")}
+                </span>
+                <button
+                  type="button"
+                  className="composer-attach-remove"
+                  onClick={attachment.clear}
+                  aria-label="Remove attachment"
+                >
+                  <Icon src={ICONS.close} size={14} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="composer-attach-button"
+                onClick={() => fileInput.current?.click()}
+              >
+                <Icon src={ICONS.image} size={16} />
+                Add photo or video
+              </button>
+            )}
+            {attachment.error && !attachment.previewUrl && (
+              <p className="composer-attach-error">{attachment.error}</p>
+            )}
+            </div>
 
         <div className="audience-picker" role="group" aria-label="Who can see this">
           <span className="audience-label">Visible to</span>

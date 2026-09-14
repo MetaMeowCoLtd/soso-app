@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   ERROR_MESSAGES_EN,
   formatDuration,
+  MESSAGE_IMAGE_MIME_TYPES,
+  MESSAGE_VIDEO_MIME_TYPES,
   type CategoryConfig,
   type NewPost,
   type Pin,
+  type SosoGateway,
 } from "soso-core";
 import { lookOf } from "./theme";
+import { useMediaAttachment } from "./useMediaAttachment";
 import { Icon, ICONS } from "./Icon";
 import { toLngLat, type Coordinates } from "./region";
 import type { PostAudience } from "soso-core";
@@ -39,6 +43,8 @@ import type { PostAudience } from "soso-core";
 
 interface ReportFormProps {
   categories: CategoryConfig[];
+  /** Needed to upload an attachment before the post exists — see useMediaAttachment. */
+  gateway: SosoGateway;
   location: Coordinates;
   onCancel: () => void;
   onSubmit: (input: NewPost) => Promise<Pin>;
@@ -47,8 +53,16 @@ interface ReportFormProps {
 type GeoState = "unknown" | "locating" | "denied" | "timeout" | "unavailable" | "granted" | "unsupported";
 type Step = "category" | "details";
 
-export default function ReportForm({ categories, location, onCancel, onSubmit }: ReportFormProps) {
+export default function ReportForm({
+  categories,
+  gateway,
+  location,
+  onCancel,
+  onSubmit,
+}: ReportFormProps) {
   const [step, setStep] = useState<Step>("category");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachment = useMediaAttachment(gateway, { kind: "post" });
   const [categoryKey, setCategoryKey] = useState<string | null>(null);
   const [subtypeKey, setSubtypeKey] = useState<string | null>(null);
   const [description, setDescription] = useState("");
@@ -138,7 +152,7 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
   // succeeds where the first one was still warming up.
   const canRetryLocation = geoState === "denied" || geoState === "timeout" || geoState === "unavailable";
 
-  const canSubmit = Boolean(category && !blockedReason && !busy);
+  const canSubmit = Boolean(category && !blockedReason && !busy && !attachment.busy);
 
   /** A category with nothing optional to add has no reason to show a second step at all. */
   function hasOptionalDetails(c: CategoryConfig): boolean {
@@ -156,6 +170,16 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
         at: toLngLat(location),
         device: device ? toLngLat(device) : null,
         audience,
+        media: attachment.media
+          ? {
+              kind: attachment.media.kind,
+              objectKey: attachment.media.path,
+              width: attachment.media.width,
+              height: attachment.media.height,
+              posterKey: attachment.media.posterPath,
+              durationMs: attachment.media.durationMs,
+            }
+          : null,
       });
     } catch (err) {
       const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
@@ -307,6 +331,65 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
                 <button type="button" onClick={() => setGeoState("unknown")} className="composer-retry">
                   Try again
                 </button>
+              )}
+            </div>
+          )}
+
+          {/* Offered only where the category allows it — `allows_media` has
+              been in post_categories since migration 0003 and, until 0046,
+              had no reader at all. The server refuses an attachment on a
+              category without it, so hiding the control matches the rule
+              rather than guessing at it. */}
+          {category.allowsMedia && (
+            <div className="composer-attach">
+              <input
+                ref={fileInput}
+                type="file"
+                accept={[...MESSAGE_IMAGE_MIME_TYPES, ...MESSAGE_VIDEO_MIME_TYPES].join(",")}
+                hidden
+                onChange={(e) => {
+                  const picked = e.target.files?.[0];
+                  e.target.value = "";
+                  if (picked) attachment.pick(picked);
+                }}
+              />
+              {attachment.previewUrl ? (
+                <div className="composer-attach-row">
+                  <span className="composer-attach-thumb">
+                    <img src={attachment.previewUrl} alt="" />
+                    {attachment.busy && (
+                      <span className="chat-attachment-spinner" aria-label="Working" />
+                    )}
+                  </span>
+                  <span className="composer-attach-text">
+                    {attachment.error ??
+                      (attachment.progress !== null
+                        ? `Compressing video… ${Math.round(attachment.progress * 100)}%`
+                        : attachment.busy
+                          ? "Uploading…"
+                          : "Attached")}
+                  </span>
+                  <button
+                    type="button"
+                    className="composer-attach-remove"
+                    onClick={attachment.clear}
+                    aria-label="Remove attachment"
+                  >
+                    <Icon src={ICONS.close} size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="composer-attach-button"
+                  onClick={() => fileInput.current?.click()}
+                >
+                  <Icon src={ICONS.image} size={16} />
+                  Add photo or video
+                </button>
+              )}
+              {attachment.error && !attachment.previewUrl && (
+                <p className="composer-attach-error">{attachment.error}</p>
               )}
             </div>
           )}

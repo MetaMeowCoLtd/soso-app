@@ -10,15 +10,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "soso-core": "*",
+    "@maplibre/maplibre-gl-leaflet": "^0.1.4",
     "@supabase/supabase-js": "^2.45.4",
+    "leaflet": "^1.9.4",
+    "maplibre-gl": "^6.6.0",
+    "mp4-muxer": "^5.2.2",
     "next": "^15.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "leaflet": "^1.9.4",
     "react-leaflet": "^5.0.0",
-    "maplibre-gl": "^6.6.0",
-    "@maplibre/maplibre-gl-leaflet": "^0.1.4"
+    "soso-core": "*"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.16",

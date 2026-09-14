@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ERROR_MESSAGES_EN, type MessageImage, type SosoGateway } from "soso-core";
+import { ERROR_MESSAGES_EN, type MessageMedia, type SosoGateway } from "soso-core";
 import { MessageImageError, messageImageMessage, prepareMessageImage } from "./messageImage";
+import { prepareVideo, VideoEncodeError, videoProblemMessage } from "./videoEncode";
 
 /**
  * The "there is an image on this message I am about to send" state.
@@ -29,13 +30,22 @@ import { MessageImageError, messageImageMessage, prepareMessageImage } from "./m
  * those yet.
  */
 
-export interface ImageAttachment {
+export interface MediaAttachment {
   /** Non-null once the bytes are in the bucket and the message can carry it. */
-  image: MessageImage | null;
+  media: MessageMedia | null;
   /** Object URL for the local preview, available from the moment of picking. */
   previewUrl: string | null;
   /** True while encoding or uploading. Send is blocked on it. */
   busy: boolean;
+  /**
+   * 0..1 while a VIDEO is being re-encoded, null otherwise.
+   *
+   * Only video reports a fraction, and that is not an oversight: an image is
+   * one canvas draw, while a clip is bounded by playback and can take tens
+   * of seconds (see videoEncode.ts). A spinner standing in for a real
+   * fraction is the thing that makes people think an app has hung.
+   */
+  progress: number | null;
   /** One honest sentence, or null. */
   error: string | null;
   /** Hand a picked file straight from an <input type="file">. */
@@ -44,13 +54,14 @@ export interface ImageAttachment {
   clear: () => void;
 }
 
-export function useImageAttachment(
+export function useMediaAttachment(
   gateway: SosoGateway,
-  scope: { kind: "room" } | { kind: "dm"; threadId: string },
-): ImageAttachment {
-  const [image, setImage] = useState<MessageImage | null>(null);
+  scope: { kind: "room" } | { kind: "dm"; threadId: string } | { kind: "post" },
+): MediaAttachment {
+  const [media, setMedia] = useState<MessageMedia | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Identifies the CURRENT pick, so a slow upload for a photo that has since
@@ -76,24 +87,62 @@ export function useImageAttachment(
     pickSeq.current += 1;
     releasePreview();
     setPreviewUrl(null);
-    setImage(null);
+    setMedia(null);
     setBusy(false);
+    setProgress(null);
     setError(null);
   }, [releasePreview]);
 
-  const scopeKey = scope.kind === "room" ? "room" : `dm:${scope.threadId}`;
+  const scopeKey = scope.kind === "dm" ? `dm:${scope.threadId}` : scope.kind;
 
   const pick = useCallback(
     (file: File) => {
       const seq = ++pickSeq.current;
       releasePreview();
-      setImage(null);
+      setMedia(null);
       setPreviewUrl(null);
       setError(null);
       setBusy(true);
 
       void (async () => {
         try {
+          // Which pipeline this is comes from the file, not from which button
+          // was pressed: one picker accepts both, so a clip chosen from a
+          // combined picker has to reach the video path.
+          if (file.type.startsWith("video/")) {
+            setProgress(0);
+            const prepared = await prepareVideo(file, (fraction) => {
+              // Guarded, or a superseded encode would keep driving the bar
+              // for a pick nobody is waiting on any more.
+              if (seq === pickSeq.current) setProgress(fraction);
+            });
+            if (seq !== pickSeq.current) return;
+
+            // The poster, not the clip, is what the composer previews — same
+            // still the recipient will see before pressing play.
+            const posterUrl = URL.createObjectURL(prepared.poster);
+            previewRef.current = posterUrl;
+            setPreviewUrl(posterUrl);
+
+            // Two objects, uploaded in order. The poster goes first and is
+            // cheap; if the clip then fails, the orphan left behind is a
+            // thumbnail rather than tens of megabytes.
+            const posterPath = await gateway.uploadMessageMedia(prepared.poster, scope, "image");
+            if (seq !== pickSeq.current) return;
+            const path = await gateway.uploadMessageMedia(prepared.blob, scope, "video");
+            if (seq !== pickSeq.current) return;
+
+            setMedia({
+              kind: "video",
+              path,
+              width: prepared.width,
+              height: prepared.height,
+              posterPath,
+              durationMs: prepared.durationMs,
+            });
+            return;
+          }
+
           const prepared = await prepareMessageImage(file);
           if (seq !== pickSeq.current) {
             // Superseded while encoding. Release what we just made rather
@@ -108,10 +157,17 @@ export function useImageAttachment(
           previewRef.current = prepared.previewUrl;
           setPreviewUrl(prepared.previewUrl);
 
-          const path = await gateway.uploadMessageImage(prepared.blob, scope);
+          const path = await gateway.uploadMessageMedia(prepared.blob, scope, "image");
           if (seq !== pickSeq.current) return;
 
-          setImage({ path, width: prepared.width, height: prepared.height });
+          setMedia({
+            kind: "image",
+            path,
+            width: prepared.width,
+            height: prepared.height,
+            posterPath: null,
+            durationMs: null,
+          });
         } catch (err) {
           if (seq !== pickSeq.current) return;
           // The user-facing copy stays short, but the DEVELOPER needs the
@@ -136,16 +192,21 @@ export function useImageAttachment(
           // the one message that could have said so was being discarded.
           const code = (err as { code?: string }).code;
           setError(
-            err instanceof MessageImageError
-              ? messageImageMessage(err.problem)
-              : code && code in ERROR_MESSAGES_EN
-                ? ERROR_MESSAGES_EN[code as keyof typeof ERROR_MESSAGES_EN]
-                : "Couldn't attach that image. Try again.",
+            err instanceof VideoEncodeError
+              ? videoProblemMessage(err.problem)
+              : err instanceof MessageImageError
+                ? messageImageMessage(err.problem)
+                : code && code in ERROR_MESSAGES_EN
+                  ? ERROR_MESSAGES_EN[code as keyof typeof ERROR_MESSAGES_EN]
+                  : "Couldn't attach that file. Try again.",
           );
           releasePreview();
           setPreviewUrl(null);
         } finally {
-          if (seq === pickSeq.current) setBusy(false);
+          if (seq === pickSeq.current) {
+            setBusy(false);
+            setProgress(null);
+          }
         }
       })();
     },
@@ -156,5 +217,5 @@ export function useImageAttachment(
     [gateway, scopeKey, releasePreview],
   );
 
-  return { image, previewUrl, busy, error, pick, clear };
+  return { media, previewUrl, busy, progress, error, pick, clear };
 }

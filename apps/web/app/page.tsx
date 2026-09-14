@@ -1094,6 +1094,7 @@ function Map({
             // makes "this is a fresh pin" the default instead of something
             // that has to be remembered per field.
             key={selectedPin.id}
+            gateway={gateway}
             pin={selectedPin}
             detail={selectedDetail}
             categories={categories}
@@ -1169,6 +1170,7 @@ function Map({
           <div role="dialog" aria-modal="true" aria-label="Create a local pin" onMouseDown={(e) => e.stopPropagation()}>
             <ReportForm
               categories={categories}
+              gateway={gateway}
               location={draftAt}
               onCancel={cancelComposer}
               onSubmit={submitReport}

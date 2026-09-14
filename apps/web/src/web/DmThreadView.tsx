@@ -6,8 +6,9 @@ import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
+  MESSAGE_VIDEO_MIME_TYPES,
   type CategoryConfig,
-  type MessageImage,
+  type MessageMedia,
   type DmMessage,
   type DmThread,
   type SosoGateway,
@@ -15,9 +16,14 @@ import {
 import { Avatar } from "./Avatar";
 import { Icon, ICONS } from "./Icon";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
-import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./MessageImageView";
+import {
+  attachmentWord,
+  MessageMediaLightbox,
+  MessageMediaView,
+  saveMessageMedia,
+} from "./MessageMediaView";
 import SharedPostCard from "./SharedPostCard";
-import { useImageAttachment } from "./useImageAttachment";
+import { useMediaAttachment } from "./useMediaAttachment";
 import { useLongPress } from "./useLongPress";
 import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import { useChatScroll } from "./useChatScroll";
@@ -102,8 +108,8 @@ export default function DmThreadView({
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const attachment = useImageAttachment(gateway, { kind: "dm", threadId: thread.id });
-  const [lightbox, setLightbox] = useState<{ url: string; image: MessageImage } | null>(null);
+  const attachment = useMediaAttachment(gateway, { kind: "dm", threadId: thread.id });
+  const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia } | null>(null);
   /** How far the other person has read. Null until fetched, or if never. */
   const [otherReadAt, setOtherReadAt] = useState<string | null>(null);
 
@@ -210,11 +216,11 @@ export default function DmThreadView({
     const body = input.trim();
     // Image-only is allowed; still blocked while one is uploading, or the
     // send would attach nothing and silently drop the picture.
-    if ((!body && !attachment.image) || sending || attachment.busy) return;
+    if ((!body && !attachment.media) || sending || attachment.busy) return;
     setSending(true);
     setError(null);
     try {
-      const sent = await gateway.sendDm(thread.id, body, replyingTo?.id ?? null, attachment.image);
+      const sent = await gateway.sendDm(thread.id, body, replyingTo?.id ?? null, attachment.media);
       setInput("");
       setReplyingTo(null);
       attachment.clear();
@@ -354,7 +360,7 @@ export default function DmThreadView({
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onSwipeReply={() => startReply(message)}
                 onToggleReaction={(emoji) => void react(message, emoji)}
-                onOpenImage={(url, image) => setLightbox({ url, image })}
+                onOpenImage={(url, media) => setLightbox({ url, media })}
                 categories={categories}
                 onOpenPost={onOpenPost}
                 receipt={
@@ -379,7 +385,7 @@ export default function DmThreadView({
               Replying to {replyingTo.mine ? "yourself" : thread.otherName}
             </span>
             <span className="chat-reply-bar-text">
-              {replyingTo.body || (replyingTo.image ? "Photo" : "")}
+              {replyingTo.body || (replyingTo.media ? attachmentWord(replyingTo.media) : "")}
             </span>
           </div>
           <button
@@ -402,7 +408,14 @@ export default function DmThreadView({
             </span>
           )}
           <span className="chat-attachment-text">
-            {attachment.error ?? (attachment.busy ? "Uploading…" : "Ready to send")}
+            {attachment.error ??
+              (attachment.progress !== null
+                ? /* A real fraction, because a video encode has one — see
+                     useMediaAttachment. */
+                  `Compressing video… ${Math.round(attachment.progress * 100)}%`
+                : attachment.busy
+                  ? "Uploading…"
+                  : "Ready to send")}
           </span>
           <button
             type="button"
@@ -425,7 +438,10 @@ export default function DmThreadView({
         <input
           ref={fileInput}
           type="file"
-          accept={MESSAGE_IMAGE_MIME_TYPES.join(",")}
+          // One picker for both. Splitting them into two buttons would make the
+          // person categorise their own file before the app will look at it;
+          // useMediaAttachment decides which pipeline to use from the type.
+          accept={[...MESSAGE_IMAGE_MIME_TYPES, ...MESSAGE_VIDEO_MIME_TYPES].join(",")}
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -458,7 +474,7 @@ export default function DmThreadView({
         <button
           className="chat-send"
           type="submit"
-          disabled={sending || attachment.busy || (input.trim().length === 0 && !attachment.image)}
+          disabled={sending || attachment.busy || (input.trim().length === 0 && !attachment.media)}
           aria-label="Send"
         >
           <Icon src={ICONS.send} size={16} />
@@ -466,9 +482,9 @@ export default function DmThreadView({
       </form>
 
       {lightbox && (
-        <MessageImageLightbox
+        <MessageMediaLightbox
           url={lightbox.url}
-          onSave={() => saveMessageImage(gateway, lightbox.image)}
+          onSave={() => saveMessageMedia(gateway, lightbox.media)}
           onClose={() => setLightbox(null)}
         />
       )}
@@ -483,8 +499,8 @@ export default function DmThreadView({
               // The same nodes the real bubble renders, so the clone cannot
               // drift from it. Not interactive here: the sheet is open over
               // it and a tap anywhere closes the sheet.
-              menu.message.image ? (
-                <MessageImageView gateway={gateway} image={menu.message.image} />
+              menu.message.media ? (
+                <MessageMediaView gateway={gateway} image={menu.message.media} />
               ) : menu.message.sharedPost ? (
                 <SharedPostCard post={menu.message.sharedPost} categories={categories} />
               ) : undefined
@@ -503,21 +519,21 @@ export default function DmThreadView({
             onReply={() => startReply(menu.message)}
             onCopy={() => void copy(menu.message)}
             onSave={
-              menu.message.image
+              menu.message.media
                 ? () => {
-                    const image = menu.message.image!;
+                    const image = menu.message.media!;
                     setMenu(null);
-                    // NOT `void saveMessageImage(...)`. That swallowed every
+                    // NOT `void saveMessageMedia(...)`. That swallowed every
                     // failure, so a save that could not happen — an
                     // undeployed function, an expired URL, a refused
                     // download — was indistinguishable from the button
                     // doing nothing at all. The sheet closes on tap, so
                     // there is no sheet left to report into; the composer's
                     // own error line is where the person is already looking.
-                    void saveMessageImage(gateway, image)
+                    void saveMessageMedia(gateway, image)
                       .then((outcome) => {
                         // "opened" means the bytes could not be read (see
-                        // saveMessageImage) and the image was handed to a new
+                        // saveMessageMedia) and the image was handed to a new
                         // tab instead. Nothing was saved, so saying nothing
                         // would leave someone hunting for a file that is not
                         // there.
@@ -598,7 +614,7 @@ function DmBubble({
   message: DmMessage;
   /** Only used to label a reply quote as yours or theirs. */
   myId: string;
-  /** Needed to mint a presigned URL for an attached image — see MessageImageView. */
+  /** Needed to mint a presigned URL for an attached image — see MessageMediaView. */
   gateway: SosoGateway;
   showAvatar: boolean;
   endsRun: boolean;
@@ -615,7 +631,7 @@ function DmBubble({
   onOpenMenu: (rect: DOMRect) => void;
   onSwipeReply: () => void;
   onToggleReaction: (emoji: string) => void;
-  onOpenImage: (url: string, image: MessageImage) => void;
+  onOpenImage: (url: string, media: MessageMedia) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
   /** Non-null on the one message that carries a read receipt, null on the rest. */
@@ -705,7 +721,7 @@ function DmBubble({
               <div
                 ref={bubbleRef}
                 className={`chat-bubble${
-                  (message.image || message.sharedPost) && !message.body
+                  (message.media || message.sharedPost) && !message.body
                     ? " chat-bubble-image-only"
                     : ""
                 }`}
@@ -716,22 +732,26 @@ function DmBubble({
                     <span className="chat-quote-author">
                       {message.replyTo.senderId === myId ? "You" : otherName}
                     </span>
-                    {message.replyTo.image && (
-                      <MessageImageView
+                    {message.replyTo.media && (
+                      <MessageMediaView
                         gateway={gateway}
-                        image={message.replyTo.image}
+                        image={message.replyTo.media}
                         availableWidth={40}
                         maxHeight={40}
                       />
                     )}
                     <span className="chat-quote-body">
                       {message.replyTo.body ||
-                        (message.replyTo.image ? "Photo" : message.replyTo.hasPost ? "Pin" : "")}
+                        (message.replyTo.media
+                          ? attachmentWord(message.replyTo.media)
+                          : message.replyTo.hasPost
+                            ? "Pin"
+                            : "")}
                     </span>
                   </div>
                 )}
-                {message.image && (
-                  <MessageImageView gateway={gateway} image={message.image} onOpen={onOpenImage} />
+                {message.media && (
+                  <MessageMediaView gateway={gateway} image={message.media} onOpen={onOpenImage} />
                 )}
                 {message.sharedPost && (
                   <SharedPostCard

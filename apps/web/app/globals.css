@@ -535,6 +535,40 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 
 .chat-bubble-quote .message-image { flex-shrink:0; border-radius:6px; }
 
+/* Video attachments. The thumbnail IS the poster frame (see MessageMediaView
+   on why the clip's own bytes are not fetched until someone presses play), so
+   these are overlays on an ordinary image rather than a separate layout. */
+.message-image-button { position:relative; }
+.message-video-play { position:absolute; inset:0; display:grid; place-items:center; color:#fff; pointer-events:none; }
+.message-video-play::before { content:""; position:absolute; width:46px; height:46px; border-radius:50%; background:rgba(12,26,22,.5); backdrop-filter:blur(2px); }
+.message-video-play .icon { position:relative; }
+.message-video-duration { position:absolute; right:7px; bottom:7px; padding:1px 6px; border-radius:999px; background:rgba(12,26,22,.62); color:#fff; font-size:.66rem; font-weight:750; font-variant-numeric:tabular-nums; pointer-events:none; }
+.message-video-playing { display:block; overflow:hidden; border-radius:14px; background:#000; }
+.message-video-playing video, .message-video-poster { display:block; width:100%; height:100%; object-fit:contain; background:#000; }
+.chat-bubble-image-only .message-video-playing { border-radius:20px; }
+
+/* --- Post attachments -----------------------------------------------------
+   The renderer is PostMediaView, a sibling of MessageMediaView rather than a
+   reuse of it (see its own comment on why the authorization models differ),
+   but the play badge and duration pill are shared with it above. */
+.post-media { position:relative; display:block; overflow:hidden; margin:8px 0 2px; border-radius:14px; background:#eef1f0; }
+.post-media img, .post-media video { display:block; width:100%; height:100%; object-fit:cover; }
+.post-media-button { padding:0; border:0; width:100%; cursor:pointer; }
+.post-media-playing { background:#000; }
+.post-media-playing video, .post-media-poster { object-fit:contain; background:#000; }
+.post-media-missing { display:grid; place-items:center; color:var(--muted); font-size:.75rem; font-weight:650; }
+
+/* --- The attachment strip in the two post composers ----------------------- */
+.composer-attach { margin:10px 0 0; }
+.composer-attach-button { display:inline-flex; align-items:center; gap:7px; padding:9px 14px; border:1px dashed var(--line); border-radius:13px; background:#f7faf9; color:var(--deep); font-size:.83rem; font-weight:700; transition:background .16s, border-color .16s; }
+.composer-attach-button:hover { background:var(--mint); border-color:var(--teal); }
+.composer-attach-row { display:flex; align-items:center; gap:10px; padding:8px; border:1px solid var(--hairline); border-radius:13px; background:#f7faf9; }
+.composer-attach-thumb { position:relative; flex-shrink:0; width:46px; height:46px; overflow:hidden; border-radius:10px; background:#e4eae8; }
+.composer-attach-thumb img { display:block; width:100%; height:100%; object-fit:cover; }
+.composer-attach-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:.8rem; font-weight:650; }
+.composer-attach-remove { flex-shrink:0; display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:rgba(20,50,43,.07); color:#5b706a; }
+.composer-attach-error { margin:6px 0 0; color:#b5442d; font-size:.78rem; }
+
 /* Read receipt. Aligned to the same edge as the message it belongs to, so a
    receipt under your own message reads as part of it rather than as a stray
    line of chrome. Quiet on purpose: it is a status, not a message. */

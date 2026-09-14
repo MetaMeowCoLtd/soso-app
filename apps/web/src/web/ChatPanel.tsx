@@ -6,17 +6,23 @@ import {
   applyReactionToggle,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
+  MESSAGE_VIDEO_MIME_TYPES,
   type CategoryConfig,
-  type MessageImage,
+  type MessageMedia,
   type ChatMessage,
   type DmThread,
   type SosoGateway,
 } from "soso-core";
 import DmInbox from "./DmInbox";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
-import { MessageImageLightbox, MessageImageView, saveMessageImage } from "./MessageImageView";
+import {
+  attachmentWord,
+  MessageMediaLightbox,
+  MessageMediaView,
+  saveMessageMedia,
+} from "./MessageMediaView";
 import SharedPostCard from "./SharedPostCard";
-import { useImageAttachment } from "./useImageAttachment";
+import { useMediaAttachment } from "./useMediaAttachment";
 import { useLongPress } from "./useLongPress";
 import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import { useChatScroll } from "./useChatScroll";
@@ -163,11 +169,11 @@ export default function ChatPanel({
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const attachment = useImageAttachment(gateway, { kind: "room" });
+  const attachment = useMediaAttachment(gateway, { kind: "room" });
   // The URL of the image currently open full-screen, or null. Holds the URL
   // rather than the path because the thumbnail that opened it already had
-  // one minted — see MessageImageLightbox.
-  const [lightbox, setLightbox] = useState<{ url: string; image: MessageImage } | null>(null);
+  // one minted — see MessageMediaLightbox.
+  const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia } | null>(null);
 
   async function reload() {
     try {
@@ -271,12 +277,12 @@ export default function ChatPanel({
     // send" now means neither text NOR a finished attachment. Still blocked
     // while one is uploading: sending then would attach nothing and silently
     // drop the picture.
-    if ((!body && !attachment.image) || sending || attachment.busy) return;
+    if ((!body && !attachment.media) || sending || attachment.busy) return;
     setSending(true);
     setError(null);
     const replyToId = replyingTo?.id ?? null;
     try {
-      const message = await gateway.sendChatMessage(body, replyToId, attachment.image);
+      const message = await gateway.sendChatMessage(body, replyToId, attachment.media);
       setInput("");
       setReplyingTo(null);
       attachment.clear();
@@ -449,7 +455,7 @@ export default function ChatPanel({
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onSwipeReply={() => startReply(message)}
-                onOpenImage={(url, image) => setLightbox({ url, image })}
+                onOpenImage={(url, media) => setLightbox({ url, media })}
                 categories={categories}
                 onOpenPost={onOpenPost}
                 receipt={
@@ -492,7 +498,14 @@ export default function ChatPanel({
             </span>
           )}
           <span className="chat-attachment-text">
-            {attachment.error ?? (attachment.busy ? "Uploading…" : "Ready to send")}
+            {attachment.error ??
+              (attachment.progress !== null
+                ? /* A real fraction, because a video encode has one — see
+                     useMediaAttachment. */
+                  `Compressing video… ${Math.round(attachment.progress * 100)}%`
+                : attachment.busy
+                  ? "Uploading…"
+                  : "Ready to send")}
           </span>
           <button
             type="button"
@@ -518,7 +531,10 @@ export default function ChatPanel({
         <input
           ref={fileInput}
           type="file"
-          accept={MESSAGE_IMAGE_MIME_TYPES.join(",")}
+          // One picker for both. Splitting them into two buttons would make the
+          // person categorise their own file before the app will look at it;
+          // useMediaAttachment decides which pipeline to use from the type.
+          accept={[...MESSAGE_IMAGE_MIME_TYPES, ...MESSAGE_VIDEO_MIME_TYPES].join(",")}
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -559,7 +575,7 @@ export default function ChatPanel({
         <button
           className="chat-send"
           type="submit"
-          disabled={sending || attachment.busy || (input.trim().length === 0 && !attachment.image)}
+          disabled={sending || attachment.busy || (input.trim().length === 0 && !attachment.media)}
           aria-label="Send"
         >
           <Icon src={ICONS.send} size={16} />
@@ -567,9 +583,9 @@ export default function ChatPanel({
       </form>
 
       {lightbox && (
-        <MessageImageLightbox
+        <MessageMediaLightbox
           url={lightbox.url}
-          onSave={() => saveMessageImage(gateway, lightbox.image)}
+          onSave={() => saveMessageMedia(gateway, lightbox.media)}
           onClose={() => setLightbox(null)}
         />
       )}
@@ -594,8 +610,8 @@ export default function ChatPanel({
               // The same nodes the real bubble renders, so the clone cannot
               // drift from it. Not interactive here: the sheet is open over
               // it and a tap anywhere closes the sheet.
-              menu.message.image ? (
-                <MessageImageView gateway={gateway} image={menu.message.image} />
+              menu.message.media ? (
+                <MessageMediaView gateway={gateway} image={menu.message.media} />
               ) : menu.message.sharedPost ? (
                 <SharedPostCard post={menu.message.sharedPost} categories={categories} />
               ) : undefined
@@ -611,21 +627,21 @@ export default function ChatPanel({
             onReply={() => startReply(menu.message)}
             onCopy={() => void copy(menu.message)}
             onSave={
-              menu.message.image
+              menu.message.media
                 ? () => {
-                    const image = menu.message.image!;
+                    const image = menu.message.media!;
                     setMenu(null);
-                    // NOT `void saveMessageImage(...)`. That swallowed every
+                    // NOT `void saveMessageMedia(...)`. That swallowed every
                     // failure, so a save that could not happen — an
                     // undeployed function, an expired URL, a refused
                     // download — was indistinguishable from the button
                     // doing nothing at all. The sheet closes on tap, so
                     // there is no sheet left to report into; the composer's
                     // own error line is where the person is already looking.
-                    void saveMessageImage(gateway, image)
+                    void saveMessageMedia(gateway, image)
                       .then((outcome) => {
                         // "opened" means the bytes could not be read (see
-                        // saveMessageImage) and the image was handed to a new
+                        // saveMessageMedia) and the image was handed to a new
                         // tab instead. Nothing was saved, so saying nothing
                         // would leave someone hunting for a file that is not
                         // there.
@@ -668,7 +684,7 @@ function ChatMessageRow({
   nowSeconds,
 }: {
   message: ChatMessage;
-  /** Needed to mint a presigned URL for an attached image — see MessageImageView. */
+  /** Needed to mint a presigned URL for an attached image — see MessageMediaView. */
   gateway: SosoGateway;
   /** Resolved by the caller — see `SosoGateway.avatarUrl` on why a path is not a URL. */
   avatarSrc: string | null;
@@ -679,7 +695,7 @@ function ChatMessageRow({
   onOpenMenu: (rect: DOMRect) => void;
   onToggleReaction: (emoji: string) => void;
   onSwipeReply: () => void;
-  onOpenImage: (url: string, image: MessageImage) => void;
+  onOpenImage: (url: string, media: MessageMedia) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
   /** Non-null on the one message that carries a read receipt, null on the rest. */
@@ -811,7 +827,7 @@ function ChatMessageRow({
               <div
                 ref={bubbleRef}
                 className={`chat-bubble${
-                  (message.image || message.sharedPost) && !message.body
+                  (message.media || message.sharedPost) && !message.body
                     ? " chat-bubble-image-only"
                     : ""
                 }`}
@@ -820,24 +836,28 @@ function ChatMessageRow({
                 {message.replyTo && (
                   <div className="chat-bubble-quote">
                     <span className="chat-quote-author">{message.replyTo.authorName}</span>
-                    {message.replyTo.image && (
-                      <MessageImageView
+                    {message.replyTo.media && (
+                      <MessageMediaView
                         gateway={gateway}
-                        image={message.replyTo.image}
+                        image={message.replyTo.media}
                         availableWidth={40}
                         maxHeight={40}
                       />
                     )}
                     <span className="chat-quote-body">
                       {message.replyTo.body ||
-                        (message.replyTo.image ? "Photo" : message.replyTo.hasPost ? "Pin" : "")}
+                        (message.replyTo.media
+                          ? attachmentWord(message.replyTo.media)
+                          : message.replyTo.hasPost
+                            ? "Pin"
+                            : "")}
                     </span>
                   </div>
                 )}
-                {message.image && (
-                  <MessageImageView
+                {message.media && (
+                  <MessageMediaView
                     gateway={gateway}
-                    image={message.image}
+                    image={message.media}
                     onOpen={onOpenImage}
                   />
                 )}
