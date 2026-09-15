@@ -340,11 +340,13 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       displayName: string;
       bio: string;
       avatarPath: AvatarPath;
+      coverPath: AvatarPath;
     }): Promise<MyProfile> {
       const { data, error } = await client.rpc('update_profile', {
         p_display_name: input.displayName,
         p_bio: input.bio,
         p_avatar_path: input.avatarPath,
+        p_cover_path: input.coverPath,
       });
       if (error) throw toSosoError(error);
       return decodeMyProfile(data as WireMyProfile);

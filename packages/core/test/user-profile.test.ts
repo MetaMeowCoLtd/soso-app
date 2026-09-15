@@ -70,20 +70,32 @@ describe('decodeUserProfile — badges are owner-only', () => {
 describe('decodeUserProfile — the rest of the shape', () => {
   it('maps the wire names onto the domain ones', () => {
     const p = decodeUserProfile(
-      wire({ name: 'Kenji', bio: 'hi', avatar: 'u1/abc.jpg', is_following: true, is_mutual: true }),
+      wire({
+        name: 'Kenji',
+        bio: 'hi',
+        avatar: 'u1/abc.jpg',
+        cover: 'u1/def.jpg',
+        is_following: true,
+        is_mutual: true,
+      }),
     );
     assert.equal(p.displayName, 'Kenji');
     assert.equal(p.avatarPath, 'u1/abc.jpg');
+    assert.equal(p.coverPath, 'u1/def.jpg');
     assert.equal(p.isFollowing, true);
     assert.equal(p.isMutual, true);
   });
 
-  it('coalesces a missing bio and avatar rather than passing undefined through', () => {
+  it('coalesces a missing bio, avatar and cover rather than passing undefined through', () => {
     const raw = wire() as unknown as Record<string, unknown>;
     delete raw.bio;
     const p = decodeUserProfile(raw as unknown as WireUserProfile);
     assert.equal(p.bio, '');
     assert.equal(p.avatarPath, null);
+    // No `cover` key at all — a server predating migration 0051 — decodes
+    // the same as an explicit null, the same "no picture" collapse avatar
+    // already gets one migration earlier.
+    assert.equal(p.coverPath, null);
   });
 
   it('coerces counts that arrive as strings, which PostgREST does for bigint', () => {

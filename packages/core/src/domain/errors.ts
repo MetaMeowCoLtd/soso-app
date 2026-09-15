@@ -66,6 +66,13 @@ export const SOSO_ERROR_CODES = [
   'soso/invalid_avatar_path',
   'soso/invalid_avatar_image',
   'soso/avatar_upload_failed',
+  // Profile cover photos (migration 0051) — reuses the avatar upload path
+  // (`uploadAvatar`/`deleteAvatar`) verbatim, so only the server's own
+  // path-validation code needs an entry here; a failed decode is reported
+  // through `CoverImageError`/`coverImageMessage`, not this table (see
+  // `coverImage.ts`, mirroring `avatarImage.ts`), and a failed upload is
+  // already `soso/avatar_upload_failed` — the same call either way.
+  'soso/invalid_cover_path',
   // Group chats (migration 0047).
   'soso/group_too_small',
   'soso/group_too_large',
@@ -171,6 +178,8 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/invalid_avatar_path': "That photo couldn't be saved. Try picking it again.",
   'soso/invalid_avatar_image': 'Pick a JPEG, PNG or WebP image under 12 MB.',
   'soso/avatar_upload_failed': "Couldn't upload that photo. Check your connection and try again.",
+  // Same reasoning as invalid_avatar_path — a client-built value, not a typo.
+  'soso/invalid_cover_path': "That cover photo couldn't be saved. Try picking it again.",
   'soso/group_too_small': 'Pick at least two friends to start a group.',
   'soso/group_too_large': 'A group can hold 32 people, and this one is full.',
   'soso/invalid_group_title': 'That group name is too long.',

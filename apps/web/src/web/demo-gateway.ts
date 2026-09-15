@@ -579,6 +579,8 @@ interface DemoProfileEdits {
    * bytes instead of rewriting a base64 photo alongside it every time.
    */
   avatarPath?: string | null;
+  /** Same shape as `avatarPath`, for `profiles.cover_path` (migration 0051) — same avatar store, same reason to keep the path apart from the bytes. */
+  coverPath?: string | null;
 }
 
 function loadProfileEdits(): DemoProfileEdits {
@@ -1282,6 +1284,7 @@ export function createDemoGateway(): SosoGateway {
         displayName: edits.displayName ?? "You (demo)",
         bio: edits.bio ?? "",
         avatarPath: edits.avatarPath ?? null,
+        coverPath: edits.coverPath ?? null,
       };
     },
 
@@ -1290,7 +1293,12 @@ export function createDemoGateway(): SosoGateway {
     // would, rather than resetting and making the screen look broken. Mirrors
     // update_profile's validation (migration 0033) so demo and real reject
     // the same inputs; the trimming here is what the server would store.
-    async updateProfile(input: { displayName: string; bio: string; avatarPath: string | null }) {
+    async updateProfile(input: {
+      displayName: string;
+      bio: string;
+      avatarPath: string | null;
+      coverPath: string | null;
+    }) {
       const displayName = input.displayName.trim();
       const bio = input.bio.trim();
       const me = getMe();
@@ -1309,13 +1317,21 @@ export function createDemoGateway(): SosoGateway {
       if (avatarPath !== null && !isOwnAvatarPath(avatarPath, me)) {
         throw new SosoError("soso/invalid_avatar_path");
       }
-      saveProfileEdits({ displayName, bio, avatarPath });
+      // Same check, same reasoning, one migration later (0051) — a cover
+      // path is exactly as much the client's own construction as an avatar
+      // path is.
+      const coverPath = input.coverPath === null ? null : input.coverPath.trim();
+      if (coverPath !== null && !isOwnAvatarPath(coverPath, me)) {
+        throw new SosoError("soso/invalid_cover_path");
+      }
+      saveProfileEdits({ displayName, bio, avatarPath, coverPath });
       return {
         id: me,
         handle: "demo_user",
         displayName,
         bio,
         avatarPath,
+        coverPath,
       };
     },
 
@@ -1531,6 +1547,7 @@ export function createDemoGateway(): SosoGateway {
           displayName: edits.displayName ?? "You (demo)",
           bio: edits.bio ?? "",
           avatarPath: edits.avatarPath ?? null,
+          coverPath: edits.coverPath ?? null,
           pins: posts.filter((p) => p.authorId === me).length,
           // The length of the lists these numbers now open, not a
           // stand-alone figure: tapping "5 followers" and being handed a
@@ -1563,6 +1580,7 @@ export function createDemoGateway(): SosoGateway {
         displayName: "A neighbour",
         bio: "Sharing what's happening around the neighbourhood. 🌸",
         avatarPath: null,
+        coverPath: null,
         pins: posts.filter((p) => p.authorId === "seed").length,
         // Was a flattering 128/86 back when these were display-only. They
         // open a real list now, so they have to be that list's length.

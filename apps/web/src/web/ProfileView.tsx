@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { type PostDetail, type SosoGateway, type UserProfile } from "soso-core";
 import { Avatar } from "./Avatar";
 import AvatarViewer from "./AvatarViewer";
+import { coverGradient } from "./coverGradient";
 import { FeedCard } from "./FeedTab";
 import { Icon, ICONS } from "./Icon";
 
@@ -82,28 +83,6 @@ interface ProfileViewProps {
 
 const TIER_MEDAL: Record<string, string> = { bronze: "🥉", silver: "🥈", gold: "🥇" };
 
-/**
- * A cover gradient derived from the handle, so each person's banner is
- * reliably their own — the same hash-to-hue trick Avatar.tsx uses, widened
- * into a two-tone diagonal. The second hue is offset ~50° so the gradient
- * always has real movement rather than two near-identical shades, and both
- * stops are kept vivid (high saturation, mid-high lightness) so the banner
- * reads as lively, not muted. Pure function of the handle — stable across
- * every visit.
- */
-function coverGradient(seed: string): { background: string } {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < seed.length; i++) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  const h1 = Math.abs(hash) % 360;
-  const h2 = (h1 + 48) % 360;
-  return {
-    background: `linear-gradient(135deg, hsl(${h1} 85% 62%), hsl(${h2} 88% 54%))`,
-  };
-}
-
 export default function ProfileView({
   gateway,
   handle,
@@ -125,10 +104,19 @@ export default function ProfileView({
   const [followBusy, setFollowBusy] = useState(false);
   const [viewingPhoto, setViewingPhoto] = useState(false);
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const coverStyle = profile ? coverGradient(profile.handle) : undefined;
   // Resolved once: it decides both whether the header avatar is tappable
   // and what the viewer shows, so the two cannot disagree.
   const avatarSrc = profile ? gateway.avatarUrl(profile.avatarPath) : null;
+  const coverUrl = profile ? gateway.avatarUrl(profile.coverPath) : null;
+  // An uploaded cover wins outright — the gradient (migration 0051's own
+  // fallback) is never layered under it. `background-size:cover` is what
+  // lets one re-encoded-but-uncropped image (see `cover.ts`'s own header)
+  // fill this fixed-height, full-width band at any viewport width.
+  const coverStyle = coverUrl
+    ? { backgroundImage: `url(${coverUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
+    : profile
+      ? coverGradient(profile.handle)
+      : undefined;
 
   useEffect(() => {
     let alive = true;
@@ -216,10 +204,12 @@ export default function ProfileView({
         <p className="profile-view-status">This profile isn&rsquo;t available.</p>
       ) : (
         <div className="profile-view-scroll">
-          {/* A gradient cover keyed off the handle, so a given person's
-              banner is their own colour every time — the same "colour does
-              the identifying work" idea the Avatar uses, scaled up to a
-              banner. Purely decorative; hidden from AT. */}
+          {/* An uploaded cover photo (migration 0051), or — for everyone who
+              has not set one — a gradient keyed off the handle, so a given
+              person's banner is their own colour every time even without a
+              picture. Same "colour does the identifying work" idea the
+              Avatar uses, scaled up to a banner. Purely decorative; hidden
+              from AT. */}
           <div className="profile-view-cover" style={coverStyle} aria-hidden="true" />
 
           <section className="profile-view-head">

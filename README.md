@@ -53,7 +53,7 @@ Supabase.
 | Topic groups | Not implemented. Distinct from [Group chats](#group-chats) above, which are private and invite-only by construction; a topic group would be public and joinable, which is a different membership model and a different moderation problem. |
 | Presence and mutual-follow contacts | Implemented. Its own People tab; opt-in, off by default; see [Presence and people](#presence-and-people). |
 | Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
-| Profile pictures (avatar upload) | Implemented. Storage layer not verified against a real bucket. See [Profile pictures](#profile-pictures). |
+| Profile pictures (avatar upload) and cover photos | Implemented. Storage layer not verified against a real bucket. See [Profile pictures](#profile-pictures) and [Cover photos](#cover-photos). |
 | Photo uploads on posts | Not implemented. The `post_media` table exists; nothing writes to it. Unrelated to profile pictures above, which use their own bucket. |
 | Push notifications | Implemented, not verified end-to-end. See [Push notifications](#push-notifications). |
 | Early resolution (author's own early removal) | Implemented, not verified end-to-end. See [Early resolution](#early-resolution). |
@@ -1970,6 +1970,12 @@ its policies, and performing an actual upload. That carries the same
 caveat as `board-tile-urls` and `notify-new-pin`; the full list is under
 "Not verified end-to-end" at the end of this section.
 
+The profile's **cover photo** (migration 0051) — the banner behind the
+avatar on `ProfileView`, customizable from the same **Edit profile**
+screen — is the same feature again on a second field. See
+[Cover photos](#cover-photos) below for what it shares with the avatar and
+what it does not.
+
 ### Viewing one full size
 
 Tapping the avatar on a profile opens it full screen, with the person's name
@@ -2118,6 +2124,52 @@ picture has on every other social product. Writes are not public.
   the new one appears immediately instead of after whatever lifetime the CDN
   chose — which is what makes a year-long `cacheControl` safe.
 
+### Cover photos
+
+`ProfileView`'s banner used to be exactly one thing: `coverGradient(handle)`
+— a pure hash-to-hue function, the same trick `Avatar` uses for its own
+colour, with no way to override it. Migration 0051 and
+`packages/core/src/domain/cover.ts` let someone replace it with a picture of
+their own, from the same **Edit profile** screen the avatar lives on, one
+section above it.
+
+**Reuses the avatar's storage completely; shares none of its crop code.**
+A cover lands in the exact same public `avatars` bucket, through the exact
+same `SosoGateway.uploadAvatar` / `deleteAvatar` / `avatarUrl`, in the
+caller's own `<uid>/<token>.jpg` folder — the same reuse
+`apps/web/src/web/useGroupPhoto.ts` already makes for a group's photo, for
+the same reason: the storage policy authorizes on the FOLDER an object sits
+in, never on what it depicts (migration 0038's own header), so a second
+bucket for this would be new infrastructure enforcing a rule the app
+already has. All that is genuinely new server-side is a second column,
+`profiles.cover_path`, CHECKed identically to `avatar_path`, and a fourth
+`update_profile` parameter, `p_cover_path` — validated the same way, with
+its own coded error (`soso/invalid_cover_path`) rather than reusing the
+avatar's. The two read paths that ever show a cover — `my_profile` (so
+Edit Profile can prefill it) and `user_profile` (every profile `ProfileView`
+opens, including your own) — are the whole of the read side; unlike an
+avatar, a cover never appears in a list, a chat bubble, or a DM thread, so
+there is nothing else to restate.
+
+**The crop model is a parallel one, not a shared one, because the shape is
+different.** `AvatarCropper` is a 1:1 viewport; a cover is a wide banner,
+so it gets its own `CoverCropper.tsx` and its own geometry in `cover.ts` —
+cover-scale, offset clamping, the source rectangle — split into an
+independent width and height everywhere `avatar.ts`'s equivalents assume
+they are equal. The crop viewport itself is a fixed 3:1
+(`COVER_CROP_ASPECT_RATIO`), even though `.profile-view-cover`'s own
+on-screen ratio is not (it is a fixed height at full page width, so it is
+wider on a desktop browser than on a phone) — `background-size:cover`
+absorbs that mismatch the same way it would for any picture on the web,
+filling the available box and cropping whatever does not fit rather than
+letterboxing. 3:1 is a common cover-photo ratio for exactly this reason
+(Twitter's own header image has used it for years). Everything else about
+the cropper — drag to pan, pinch or scroll to zoom anchored at the pointer,
+the zoom slider, nothing stored until Save, the previous object deleted
+only after the new one lands — is identical in behaviour to the avatar's
+own, because it is the same interaction pattern re-parameterized, not a
+different one.
+
 ### Demo mode
 
 Unlike drawing boards, this is a genuine drop-in. A tile upload is "PUT
@@ -2125,7 +2177,9 @@ bytes to a presigned URL", which has no local equivalent, hence
 `demoStoreBoardTileBlob` — the one export in `demo-gateway.ts` that is
 deliberately not part of `SosoGateway`. `uploadAvatar` carries the bytes
 itself, so demo mode implements the same method the real gateway does and
-no screen needs a mode check to set a profile picture.
+no screen needs a mode check to set a profile picture. A cover photo goes
+through the exact same `uploadAvatar`/`deleteAvatar` in demo mode too — one
+more path, one more token, same `soso-demo:avatars:v1` store.
 
 Images are stored as `data:` URLs in `localStorage` under
 `soso-demo:avatars:v1`, keyed by the same object path the real bucket would
@@ -2165,13 +2219,17 @@ real project. Specifically unverified:
 - Every restated function in migration 0038 — reviewed line by line against
   its source and differing only by the added key, but not executed, the same
   as every migration since 0025.
+- Migration 0051 (`cover_path`, and its own restatements of `my_profile`,
+  `update_profile` and `user_profile`) carries the identical caveat — same
+  bucket, same policies, so nothing new to verify on the storage side, but
+  the SQL itself is equally unexecuted.
 
-Verified locally: the domain rules under `node --test` (including the
-cropper geometry), and the complete pick → position → crop → preview →
-save → reload → remove cycle in demo mode,
-including that a rejected file (SVG, PDF, over 12 MB) reports the right
-message, that Cancel stores nothing, and that removing a picture deletes the
-now-unreferenced object.
+Verified locally: the domain rules under `node --test` (including both
+croppers' geometry — `avatar.test.ts` and `cover.test.ts`), and the
+complete pick → position → crop → preview → save → reload → remove cycle
+for both the avatar and the cover in demo mode, including that a rejected
+file (SVG, PDF, over 12 MB) reports the right message, that Cancel stores
+nothing, and that removing a picture deletes the now-unreferenced object.
 
 ## Drawing boards
 

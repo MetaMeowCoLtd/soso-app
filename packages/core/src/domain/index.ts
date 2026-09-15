@@ -11,6 +11,7 @@ export * from './mentions';
 export * from './phone';
 export * from './profile';
 export * from './avatar';
+export * from './cover';
 export * from './connections';
 export * from './message-image';
 export * from './share';

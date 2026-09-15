@@ -149,24 +149,26 @@ export interface SosoGateway {
   myProfile(): Promise<MyProfile | null>;
 
   /**
-   * Updates your own display name, bio and profile picture. Handle is
-   * deliberately not editable here — it is claimed once at signup (see
-   * `complete_signup`), and a rename that frees the old handle is an
+   * Updates your own display name, bio, profile picture and cover photo.
+   * Handle is deliberately not editable here — it is claimed once at signup
+   * (see `complete_signup`), and a rename that frees the old handle is an
    * impersonation vector that needs a reservation period this app has no
    * reason to build yet. Returns the profile as saved, so the caller renders
    * the server's own trimmed copy rather than the raw input.
    *
-   * `avatarPath` IS THE WHOLE INTENDED STATE, NOT A PATCH: null means "no
-   * picture", never "leave whatever is there alone". The screen that calls
-   * this always knows the complete profile it is saving, and "remove my
-   * photo" has to be sayable — see `update_profile`'s own note in migration
-   * 0038. Pass the path returned by `uploadAvatar`, or the one already on
-   * the `MyProfile` you loaded, to keep an existing picture.
+   * `avatarPath` AND `coverPath` ARE EACH THE WHOLE INTENDED STATE, NOT A
+   * PATCH: null means "no picture" / "no cover", never "leave whatever is
+   * there alone". The screen that calls this always knows the complete
+   * profile it is saving, and "remove my photo" (or cover) has to be
+   * sayable — see `update_profile`'s own note in migrations 0038 and 0051.
+   * Pass the path returned by `uploadAvatar`, or the one already on the
+   * `MyProfile` you loaded, to keep an existing picture.
    */
   updateProfile(input: {
     displayName: string;
     bio: string;
     avatarPath: AvatarPath;
+    coverPath: AvatarPath;
   }): Promise<MyProfile>;
 
   /**
@@ -176,7 +178,8 @@ export interface SosoGateway {
    * profile at the result are two steps, so a picked photo that is never
    * saved (the screen is cancelled, the name beside it fails validation)
    * leaves the profile exactly as it was. Pass the returned path to
-   * `updateProfile` to actually adopt it.
+   * `updateProfile` to actually adopt it — as `avatarPath` for a picture, or
+   * as `coverPath` for a cover; both live in the same bucket (see below).
    *
    * UNLIKE `getBoardTileUploadUrls`, THIS CARRIES THE BYTES. Tiles are
    * uploaded by the caller straight to R2 through a presigned URL, because
@@ -187,11 +190,21 @@ export interface SosoGateway {
    * implement this honestly rather than through an escape hatch outside
    * this interface.
    *
-   * The blob is expected to be a square JPEG of at most
-   * `AVATAR_MAX_DIMENSION` — see `packages/core/src/domain/avatar.ts` for
-   * the rules and apps/web/src/web/avatarImage.ts for the encoder. This
-   * does not resize anything; a caller that skips that step will have its
-   * upload rejected by the bucket's own size limit.
+   * NOT JUST FOR AVATARS, DESPITE THE NAME. The storage policy behind this
+   * authorizes on the FOLDER an object sits in, never on what it depicts —
+   * see migration 0038's own header — so `useGroupPhoto.ts` already uploads
+   * a group's photo through this exact method, and a profile's cover photo
+   * (migration 0051) does the same. The name stayed `uploadAvatar` rather
+   * than becoming something generic like `uploadImage`: every caller is
+   * still a small, square-ish profile-adjacent picture bound for this one
+   * bucket, not an arbitrary upload.
+   *
+   * The blob is expected to be a JPEG of at most `AVATAR_MAX_DIMENSION` on
+   * its longest edge for an avatar or a group photo (both square — see
+   * `packages/core/src/domain/avatar.ts`), or at most `COVER_MAX_WIDTH` wide
+   * for a cover (not square — see `cover.ts`). This does not resize
+   * anything itself; a caller that skips that step will have its upload
+   * rejected by the bucket's own size limit.
    */
   uploadAvatar(image: Blob): Promise<string>;
 

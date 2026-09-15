@@ -5,12 +5,14 @@ import {
   AVATAR_MIME_TYPES,
   bioRemaining,
   BIO_MAX,
+  COVER_MIME_TYPES,
   DISPLAY_NAME_MAX,
   ERROR_MESSAGES_EN,
   isOwnAvatarPath,
   validateBio,
   validateDisplayName,
   type AvatarPath,
+  type CoverCrop,
   type MyProfile,
   type SosoGateway,
   type SquareCrop,
@@ -24,6 +26,15 @@ import {
   renderAvatarCrop,
   type DecodedAvatar,
 } from "./avatarImage";
+import CoverCropper from "./CoverCropper";
+import { coverGradient } from "./coverGradient";
+import {
+  CoverImageError,
+  coverImageMessage,
+  decodeCoverFile,
+  renderCoverCrop,
+  type DecodedCover,
+} from "./coverImage";
 import { Icon, ICONS } from "./Icon";
 
 /**
@@ -66,6 +77,18 @@ import { Icon, ICONS } from "./Icon";
  * if the save fails, the profile still points at an object that still
  * exists. A delete that fails leaves an unreferenced file and nothing worse,
  * which is why it is not allowed to fail the save.
+ *
+ * THE COVER PHOTO TILE (migration 0051) IS THE SAME FOUR STEPS AS THE
+ * AVATAR'S, INCLUDING THE CROPPER. Pick, position (`CoverCropper`, a wide
+ * 3:1 viewport instead of `AvatarCropper`'s square one — see
+ * `cover.ts`'s own header on the aspect ratio and why the geometry is not
+ * shared with the avatar's), upload-on-save, delete-the-old-one-after: all
+ * identical to the avatar's own version of each step, even the same bucket
+ * underneath (`gateway.uploadAvatar`/`deleteAvatar` — see `cover.ts`'s own
+ * header on why a second bucket would be redundant infrastructure). Falls
+ * back to the same gradient (`coverGradient.ts`) `ProfileView` shows for a
+ * profile with no cover uploaded, so the preview here is never showing
+ * something nobody else would ever see.
  *
  * WHY IT OWNS ITS OWN LOAD RATHER THAN TAKING THE PROFILE AS A PROP
  * ---------------------------------------------------------------------
@@ -132,15 +155,28 @@ export default function ProfileSettings({
   // released through `closeCropper` rather than dropped.
   const [cropping, setCropping] = useState<DecodedAvatar | null>(null);
   const [rendering, setRendering] = useState(false);
+  // The cover's own version of every avatar state above, one for one:
+  // `coverPath`/`coverPending`/`coverPreparing` mirror
+  // `avatarPath`/`pending`/`preparing`, `coverCropping`/`coverRendering`
+  // mirror `cropping`/`rendering`. See the module comment.
+  const [coverPath, setCoverPath] = useState<AvatarPath>(null);
+  const [coverPending, setCoverPending] = useState<{ blob: Blob; previewUrl: string } | null>(null);
+  const [coverPreparing, setCoverPreparing] = useState(false);
+  const [coverCropping, setCoverCropping] = useState<DecodedCover | null>(null);
+  const [coverRendering, setCoverRendering] = useState(false);
   // The values as last saved, so "Save" can be disabled when nothing
   // actually changed — a save button that does nothing is a button that
   // makes you doubt whether it worked.
-  const [saved, setSaved] = useState<{ name: string; bio: string; avatarPath: AvatarPath } | null>(
-    null,
-  );
+  const [saved, setSaved] = useState<{
+    name: string;
+    bio: string;
+    avatarPath: AvatarPath;
+    coverPath: AvatarPath;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const coverFileInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -155,7 +191,13 @@ export default function ProfileSettings({
         setName(profile.displayName);
         setBio(profile.bio);
         setAvatarPath(profile.avatarPath);
-        setSaved({ name: profile.displayName, bio: profile.bio, avatarPath: profile.avatarPath });
+        setCoverPath(profile.coverPath);
+        setSaved({
+          name: profile.displayName,
+          bio: profile.bio,
+          avatarPath: profile.avatarPath,
+          coverPath: profile.coverPath,
+        });
       } catch {
         // Leaves the fields empty and the error visible rather than
         // pretending a blank profile loaded successfully.
@@ -178,6 +220,12 @@ export default function ProfileSettings({
     return url ? () => URL.revokeObjectURL(url) : undefined;
   }, [pending]);
 
+  // The cover's own copy of the effect above.
+  useEffect(() => {
+    const url = coverPending?.previewUrl;
+    return url ? () => URL.revokeObjectURL(url) : undefined;
+  }, [coverPending]);
+
   const nameCheck = useMemo(() => validateDisplayName(name), [name]);
   const bioCheck = useMemo(() => validateBio(bio), [bio]);
   const remaining = bioRemaining(bio);
@@ -187,24 +235,42 @@ export default function ProfileSettings({
   // through the gateway because a stored path is not a URL — see
   // `SosoGateway.avatarUrl`.
   const avatarSrc = pending?.previewUrl ?? gateway.avatarUrl(avatarPath);
+  // Same idea for the cover — null (rather than a data/blob URL) is the
+  // "show the gradient instead" case, handled where this is rendered.
+  const coverSrc = coverPending?.previewUrl ?? gateway.avatarUrl(coverPath);
 
   const dirty =
     saved !== null &&
     (name.trim() !== saved.name.trim() ||
       bio.trim() !== saved.bio.trim() ||
       pending !== null ||
-      avatarPath !== saved.avatarPath);
+      avatarPath !== saved.avatarPath ||
+      coverPending !== null ||
+      coverPath !== saved.coverPath);
   // `cropping !== null` counts as busy so Save cannot fire while the cropper
   // is open. The overlay covers the header, so a mouse cannot reach it — but
   // there is no focus trap, so a keyboard still can, and saving mid-crop
   // would commit the profile WITHOUT the photo being positioned and then
-  // unmount the cropper from under the person.
-  const busy = saving || preparing || rendering || cropping !== null;
+  // unmount the cropper from under the person. `coverCropping`/
+  // `coverRendering` block Save for the identical reason, one photo later.
+  const busy =
+    saving ||
+    preparing ||
+    rendering ||
+    cropping !== null ||
+    coverPreparing ||
+    coverRendering ||
+    coverCropping !== null;
   const canSave = loaded && dirty && nameCheck.ok && bioCheck.ok && !busy;
 
   function closeCropper() {
     setCropping(null);
     setRendering(false);
+  }
+
+  function closeCoverCropper() {
+    setCoverCropping(null);
+    setCoverRendering(false);
   }
 
   // The ONLY place a decoded image is released, deliberately. It fires when
@@ -216,6 +282,11 @@ export default function ProfileSettings({
   useEffect(() => {
     return () => cropping?.release();
   }, [cropping]);
+
+  // The cover's own copy of the effect above.
+  useEffect(() => {
+    return () => coverCropping?.release();
+  }, [coverCropping]);
 
   async function pickPhoto(file: File | null | undefined) {
     if (!file) return;
@@ -267,6 +338,52 @@ export default function ProfileSettings({
     setError(null);
   }
 
+  async function pickCoverPhoto(file: File | null | undefined) {
+    if (!file) return;
+    setCoverPreparing(true);
+    setError(null);
+    try {
+      // Decode only — the exact same split `pickPhoto` makes. Which
+      // rectangle becomes the cover is CoverCropper's question next, not
+      // something decided here on the person's behalf.
+      setCoverCropping(await decodeCoverFile(file));
+    } catch (err) {
+      setError(
+        err instanceof CoverImageError
+          ? coverImageMessage(err.problem)
+          : ERROR_MESSAGES_EN["soso/unknown"],
+      );
+    } finally {
+      setCoverPreparing(false);
+    }
+  }
+
+  async function applyCoverCrop(crop: CoverCrop) {
+    if (!coverCropping) return;
+    setCoverRendering(true);
+    setError(null);
+    try {
+      const blob = await renderCoverCrop(coverCropping, crop);
+      setCoverPending({ blob, previewUrl: URL.createObjectURL(blob) });
+      closeCoverCropper();
+    } catch (err) {
+      setError(
+        err instanceof CoverImageError
+          ? coverImageMessage(err.problem)
+          : ERROR_MESSAGES_EN["soso/unknown"],
+      );
+      // Leaves the cropper open on failure — the framing is still on
+      // screen and still valid, the same choice applyCrop makes.
+      setCoverRendering(false);
+    }
+  }
+
+  function removeCoverPhoto() {
+    setCoverPending(null);
+    setCoverPath(null);
+    setError(null);
+  }
+
   async function save() {
     if (!canSave || !nameCheck.ok || !bioCheck.ok) return;
     setSaving(true);
@@ -274,14 +391,18 @@ export default function ProfileSettings({
     try {
       // The upload comes first and is the only step that can leave anything
       // behind on failure — an object nothing points at, which the next
-      // successful save does not compound.
+      // successful save does not compound. Both uploads (if both are
+      // pending) run before anything is written, for the same reason.
       const nextPath = pending ? await gateway.uploadAvatar(pending.blob) : avatarPath;
+      const nextCoverPath = coverPending ? await gateway.uploadAvatar(coverPending.blob) : coverPath;
       const previousPath = saved?.avatarPath ?? null;
+      const previousCoverPath = saved?.coverPath ?? null;
 
       const updated = await gateway.updateProfile({
         displayName: nameCheck.value,
         bio: bioCheck.value,
         avatarPath: nextPath,
+        coverPath: nextCoverPath,
       });
 
       // Only now that the profile no longer references it, and only if it
@@ -291,6 +412,13 @@ export default function ProfileSettings({
       // successful save look failed.
       if (previousPath && previousPath !== nextPath && isOwnAvatarPath(previousPath, updated.id)) {
         void gateway.deleteAvatar(previousPath).catch(() => {});
+      }
+      if (
+        previousCoverPath &&
+        previousCoverPath !== nextCoverPath &&
+        isOwnAvatarPath(previousCoverPath, updated.id)
+      ) {
+        void gateway.deleteAvatar(previousCoverPath).catch(() => {});
       }
       // Closes the screen rather than sitting on a "Saved ✓" state — Save
       // is the one action here with somewhere to go back TO (the profile
@@ -336,6 +464,64 @@ export default function ProfileSettings({
         <p className="settings-loading">Loading…</p>
       ) : (
         <div className="settings-scroll">
+          {/* Cover photo. Sits above the avatar block, the same order
+              ProfileView itself renders the two in. Picking a photo opens
+              CoverCropper (below) to position and zoom it, the same as the
+              avatar's own tile; the preview here, once confirmed, shows the
+              cropped result, or the same gradient ProfileView falls back to
+              when there is nothing uploaded — so this never previews
+              something nobody else would ever see. */}
+          <section className="settings-cover-block">
+            <input
+              ref={coverFileInput}
+              type="file"
+              accept={COVER_MIME_TYPES.join(",")}
+              hidden
+              onChange={(e) => {
+                void pickCoverPhoto(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+
+            <button
+              type="button"
+              className="settings-cover-button"
+              onClick={() => coverFileInput.current?.click()}
+              disabled={busy}
+              aria-label={coverSrc ? "Change cover photo" : "Add a cover photo"}
+              style={
+                coverSrc
+                  ? { backgroundImage: `url(${coverSrc})`, backgroundSize: "cover", backgroundPosition: "center" }
+                  : coverGradient(handle ?? "you")
+              }
+            >
+              <span className="settings-cover-badge" aria-hidden="true">
+                <Icon src={ICONS.plus} size={16} />
+              </span>
+            </button>
+
+            <div className="settings-avatar-actions">
+              <button
+                type="button"
+                className="settings-avatar-cta"
+                onClick={() => coverFileInput.current?.click()}
+                disabled={busy}
+              >
+                {coverPreparing ? "Preparing…" : coverSrc ? "Change cover" : "Add cover photo"}
+              </button>
+              {coverSrc && (
+                <button
+                  type="button"
+                  className="settings-avatar-remove"
+                  onClick={removeCoverPhoto}
+                  disabled={busy}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          </section>
+
           {/* Avatar. The circle and the pill open the same picker; the
               hidden input is the only actual file control. */}
           <section className="settings-avatar-block">
@@ -400,6 +586,15 @@ export default function ProfileSettings({
               busy={rendering}
               onConfirm={(crop) => void applyCrop(crop)}
               onCancel={closeCropper}
+            />
+          )}
+
+          {coverCropping && (
+            <CoverCropper
+              image={coverCropping}
+              busy={coverRendering}
+              onConfirm={(crop) => void applyCoverCrop(crop)}
+              onCancel={closeCoverCropper}
             />
           )}
 

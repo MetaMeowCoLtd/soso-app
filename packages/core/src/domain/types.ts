@@ -310,6 +310,12 @@ export interface MyProfile {
   bio: string;
   /** See `AvatarPath` — a path, not a URL. */
   avatarPath: AvatarPath;
+  /**
+   * The profile's cover photo (migration 0051), same shape as `avatarPath`
+   * — a path into the shared `avatars` bucket, or null for the handle-
+   * derived gradient `ProfileView`'s own `coverGradient` falls back to.
+   */
+  coverPath: AvatarPath;
 }
 
 /** `my_profile` response. Single-character-free here; only the pin wire shape uses those. */
@@ -319,6 +325,7 @@ export interface WireMyProfile {
   name: string;
   bio: string;
   avatar?: string | null;
+  cover?: string | null;
 }
 
 export function decodeMyProfile(w: WireMyProfile): MyProfile {
@@ -334,6 +341,8 @@ export function decodeMyProfile(w: WireMyProfile): MyProfile {
     // response from a database that has not run 0038 omits the key entirely,
     // which is the same "no picture" as an explicit null.
     avatarPath: w.avatar ?? null,
+    // Same reasoning again, one migration later still (0051).
+    coverPath: w.cover ?? null,
   };
 }
 
@@ -480,6 +489,8 @@ export interface UserProfile {
   displayName: string;
   bio: string;
   avatarPath: AvatarPath;
+  /** See `MyProfile.coverPath` — same field, same fallback to `coverGradient` when null. */
+  coverPath: AvatarPath;
   /** Lifetime pins contributed — a tally, may exceed the posts a given viewer can open. */
   pins: number;
   followers: number;
@@ -501,6 +512,7 @@ export interface WireUserProfile {
   name: string;
   bio: string;
   avatar?: string | null;
+  cover?: string | null;
   pins: number;
   followers: number;
   following: number;
@@ -533,6 +545,7 @@ export function decodeUserProfile(w: WireUserProfile): UserProfile {
     displayName: w.name,
     bio: w.bio ?? "",
     avatarPath: w.avatar ?? null,
+    coverPath: w.cover ?? null,
     pins: Number(w.pins) || 0,
     followers: Number(w.followers) || 0,
     following: Number(w.following) || 0,
