@@ -1727,6 +1727,10 @@ export function createDemoGateway(): SosoGateway {
       replyToId?: string | null,
       media?: MessageMedia | null,
       sharedPostId?: string | null,
+      // Accepted and ignored, like the rest of this method's simulation:
+      // demo mode has nobody else to @mention any more than it has anybody
+      // else to talk to, so there is nothing here for a mention to do.
+      _mentionedUserIds?: readonly string[],
     ): Promise<ChatMessage> {
       const trimmed = body.trim();
       // Empty is allowed with an image or a shared post, matching
@@ -1777,6 +1781,7 @@ export function createDemoGateway(): SosoGateway {
         mine: true,
         replyTo: preview,
         reactions: [],
+        mentions: [],
         media: demoMessageImage(message),
         sharedPost: demoSharedPost(message.sharedPostId),
         // Nobody has read a message that was sent a millisecond ago.

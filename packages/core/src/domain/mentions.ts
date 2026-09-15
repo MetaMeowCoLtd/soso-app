@@ -24,7 +24,7 @@
  * other's idea of what counts as a mention.
  */
 
-import type { DmMention } from './types';
+import type { Mention } from './types';
 
 /** Handle characters, matching `profiles.handle`'s own `^[a-z0-9_]{3,20}$`. */
 const HANDLE_CHAR = /[a-z0-9_]/i;
@@ -34,7 +34,7 @@ export interface MentionTextSegment {
   text: string;
 }
 
-export interface MentionMatchSegment extends DmMention {
+export interface MentionMatchSegment extends Mention {
   kind: 'mention';
 }
 
@@ -52,7 +52,7 @@ export type MentionSegment = MentionTextSegment | MentionMatchSegment;
  */
 export function splitMentions(
   body: string,
-  candidates: readonly DmMention[],
+  candidates: readonly Mention[],
 ): MentionSegment[] {
   if (body.length === 0) return [];
   if (candidates.length === 0) return [{ kind: 'text', text: body }];
@@ -105,7 +105,7 @@ export function extractMentionedIds(
   body: string,
   members: readonly { id: string; handle: string }[],
 ): string[] {
-  const asMentions: DmMention[] = members.map((m) => ({ id: m.id, handle: m.handle, name: m.handle }));
+  const asMentions: Mention[] = members.map((m) => ({ id: m.id, handle: m.handle, name: m.handle }));
   const ids: string[] = [];
   for (const segment of splitMentions(body, asMentions)) {
     if (segment.kind === 'mention' && !ids.includes(segment.id)) ids.push(segment.id);

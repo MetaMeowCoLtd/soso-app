@@ -13,7 +13,7 @@ import {
   MESSAGE_IMAGE_MIME_TYPES,
   MESSAGE_VIDEO_MIME_TYPES,
   type CategoryConfig,
-  type DmMention,
+  type Mention,
   type DmReadReceipt,
   type DmThreadMember,
   type Friend,
@@ -196,7 +196,7 @@ export default function DmThreadView({
     members: mentionCandidates,
   });
 
-  function openMentionedProfile(target: DmMention) {
+  function openMentionedProfile(target: Mention) {
     // ProfileView cannot stack above an open conversation — see the prop's
     // own comment — so the conversation closes first, the same order
     // page.tsx itself uses going from a profile to a post.
@@ -948,7 +948,7 @@ function DmBubble({
   onSwipeReply: () => void;
   onToggleReaction: (emoji: string) => void;
   onOpenImage: (url: string, media: MessageMedia, startTime?: number) => void;
-  onOpenMention: (target: DmMention) => void;
+  onOpenMention: (target: Mention) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
   /** Non-null on the one message that carries a read receipt, null on the rest. */

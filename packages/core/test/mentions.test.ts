@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { extractMentionedIds, splitMentions } from '../src/domain/mentions.js';
-import type { DmMention } from '../src/domain/types.js';
+import type { Mention } from '../src/domain/types.js';
 
-const ANA: DmMention = { id: 'u1', handle: 'ana', name: 'Ana Ruiz' };
-const BO: DmMention = { id: 'u2', handle: 'bo', name: 'Bo Tanaka' };
+const ANA: Mention = { id: 'u1', handle: 'ana', name: 'Ana Ruiz' };
+const BO: Mention = { id: 'u2', handle: 'bo', name: 'Bo Tanaka' };
 
 describe('splitMentions', () => {
   it('returns no segments for an empty body', () => {

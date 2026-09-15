@@ -916,6 +916,13 @@ export interface ChatMessage {
   mine: boolean;
   replyTo: ChatReplyPreview | null;
   reactions: ChatMessageReaction[];
+  /**
+   * Everyone this message addressed by @handle (migration 0049), validated
+   * server-side against the SENDER'S OWN mutual follows at send time — the
+   * room has no membership to check against the way a group does, so
+   * "someone you follow each other with" is the boundary here instead.
+   */
+  mentions: Mention[];
   /** Null for a plain text message. `body` may be empty when this is set. */
   media: MessageMedia | null;
   /** Null unless a post was shared. `body` may be empty when this is set. */
@@ -946,6 +953,7 @@ export interface WireChatMessage {
     | ({ id: string; body: string; author_name: string; has_post?: boolean | null } & WireMessageMedia)
     | null;
   reactions?: { emoji: string; count: number; mine: boolean }[] | null;
+  mentions?: WireMention[] | null;
   image_path?: string | null;
   image_width?: number | string | null;
   image_height?: number | string | null;
@@ -973,6 +981,7 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
         }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({ emoji: r.emoji, count: r.count, mine: r.mine })),
+    mentions: (w.mentions ?? []).map(decodeMention),
     media: decodeMessageMedia(w),
     sharedPost: decodeSharedPost(w.shared_post),
     // `count(*)` arrives as a string from PostgREST for bigint, and is
@@ -1486,28 +1495,30 @@ export interface DmMessageReaction {
 }
 
 /**
- * One `@handle` addressed at a specific person inside a message.
+ * One `@handle` addressed at a specific person inside a message — a room
+ * message (migration 0049) or a DM/group one (migration 0048) alike, which
+ * is why this carries no thread- or room-specific field.
  *
  * `handle`, not just `id`, because it is what a client actually matches
  * against `body` to find where the mention sits — see
- * `splitMentions` in `mentions.ts`. Persisted per message (migration 0048)
- * rather than re-derived from current membership on every render, so a
+ * `splitMentions` in `mentions.ts`. Persisted per message rather than
+ * re-derived from current membership/followership on every render, so a
  * mention keeps highlighting and pointing at the right profile even after
- * that person has since left the group.
+ * that person has since left the group or the sender unfollowed them.
  */
-export interface DmMention {
+export interface Mention {
   id: string;
   handle: string;
   name: string;
 }
 
-export interface WireDmMention {
+export interface WireMention {
   id: string;
   handle: string;
   name: string;
 }
 
-export function decodeDmMention(w: WireDmMention): DmMention {
+export function decodeMention(w: WireMention): Mention {
   return { id: w.id, handle: w.handle, name: w.name };
 }
 
@@ -1537,7 +1548,7 @@ export interface DmMessage {
    * against thread membership at send time. Empty on almost every message,
    * and on every system event.
    */
-  mentions: DmMention[];
+  mentions: Mention[];
   /** Null for a plain text message. `body` may be empty when this is set. */
   media: MessageMedia | null;
   /** Null unless a post was shared. `body` may be empty when this is set. */
@@ -1585,7 +1596,7 @@ export interface WireDmMessage {
       } & WireMessageMedia)
     | null;
   reactions?: { emoji: string; count: number | string; mine: boolean }[] | null;
-  mentions?: WireDmMention[] | null;
+  mentions?: WireMention[] | null;
   image_path?: string | null;
   image_width?: number | string | null;
   image_height?: number | string | null;
@@ -1626,7 +1637,7 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
       count: Number(r.count) || 0,
       mine: r.mine,
     })),
-    mentions: (w.mentions ?? []).map(decodeDmMention),
+    mentions: (w.mentions ?? []).map(decodeMention),
     media: decodeMessageMedia(w),
     sharedPost: decodeSharedPost(w.shared_post),
     eventKind: decodeEventKind(w.event_kind),

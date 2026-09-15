@@ -707,6 +707,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       replyToId?: string | null,
       media?: MessageMedia | null,
       sharedPostId?: string | null,
+      mentionedUserIds?: readonly string[],
     ): Promise<ChatMessage> {
       const { data, error } = await client.rpc('send_chat_message', {
         p_body: body,
@@ -718,6 +719,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_media_kind: media?.kind ?? null,
         p_poster_path: media?.posterPath ?? null,
         p_duration_ms: media?.durationMs ?? null,
+        p_mentioned_user_ids: mentionedUserIds ? [...mentionedUserIds] : [],
       });
       if (error) throw toSosoError(error);
       return decodeChatMessage(data as WireChatMessage);

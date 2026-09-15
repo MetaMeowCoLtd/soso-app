@@ -437,12 +437,20 @@ export interface SosoGateway {
    * else with `soso/post_not_public` — the room is global, so a friends-only
    * pin shared here would be a card almost nobody could open. `sendDm` has
    * no such restriction.
+   *
+   * `mentionedUserIds` is a courtesy, not the authority on who gets
+   * @mentioned — migration 0049's `send_chat_message` re-derives the real
+   * set itself from the SENDER'S mutual follows (the room has no membership
+   * to check the way a group does) and silently drops anything else.
+   * `extractMentionedIds` (core) is how a caller should build this from the
+   * composed text.
    */
   sendChatMessage(
     body: string,
     replyToId?: string | null,
     media?: MessageMedia | null,
     sharedPostId?: string | null,
+    mentionedUserIds?: readonly string[],
   ): Promise<ChatMessage>;
 
   /** Most recent messages, oldest first. Pass a prior page's oldest `createdAt` to page further back. */
