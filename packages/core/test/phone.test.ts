@@ -183,6 +183,16 @@ describe('normalizeHandle', () => {
     }
   });
 
+  // "all" is reserved for a different reason than the ones above: it is the
+  // @mention broadcast keyword (mentions.ts), not an authority claim, but a
+  // real profile holding it would make "@all" ambiguous the same way a real
+  // "@soso" would be misleading — see mentions.ts's own module comment.
+  it('refuses "all", the @mention broadcast keyword', () => {
+    const result = normalizeHandle('all');
+    assert.equal(result.ok, false);
+    assert.equal(result.ok ? '' : result.problem, 'reserved');
+  });
+
   it('catches a reserved name typed in mixed case too', () => {
     assert.equal(normalizeHandle('AdMiN').ok, false);
     assert.equal(isReservedHandle('  Support '), true);

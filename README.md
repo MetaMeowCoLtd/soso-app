@@ -49,7 +49,7 @@ Supabase.
 | Local demo mode (no backend required) | Implemented |
 | Polls | Modeled, disabled. Requires separate options/votes tables. |
 | Local news and official notices | Modeled, disabled |
-| Group chats | Implemented, not verified against a live database. Up to 32 people, any member can add their own mutual follows. @mentions a current member, with their own push notification. See [Group chats](#group-chats) and [User mentions](#user-mentions). |
+| Group chats | Implemented, not verified against a live database. Up to 32 people, any member can add their own mutual follows. @mentions a current member (or "@all" to broadcast to every member), with their own push notification. See [Group chats](#group-chats) and [User mentions](#user-mentions). |
 | Topic groups | Not implemented. Distinct from [Group chats](#group-chats) above, which are private and invite-only by construction; a topic group would be public and joinable, which is a different membership model and a different moderation problem. |
 | Presence and mutual-follow contacts | Implemented. Its own People tab; opt-in, off by default; see [Presence and people](#presence-and-people). |
 | Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
@@ -1805,6 +1805,27 @@ almost every message (most messages mention nobody), and always empty for a
 system event, which is what makes this degrade to exactly the original
 single-payload behaviour whenever there is nothing to split.
 
+**"@all" broadcasts to a group, and is not a server concept at all.** It is
+purely a client-side expansion in `extractMentionedIds`
+(`packages/core/src/domain/mentions.ts`): typing or picking "@all" sends
+the exact same `p_mentioned_user_ids` array `send_dm` already accepts,
+just filled with every OTHER current member instead of one id (`excludeId`
+drops the sender, who is always their own row in `thread.members`). The
+server has no idea "@all" was ever typed — it re-validates that array
+against membership exactly as it would any hand-picked list, which is what
+makes a group's full-membership broadcast exactly as safe as an ordinary
+mention already is. Rendering treats "@all" as its own segment kind
+(`mention-all`, not `mention`) that highlights the same way a real mention
+does but is not a `<button>` — there is no one profile for a tap to lead
+to. Scoped to groups only (`allowAll` on `useMentionAutocomplete`,
+`extractMentionedIds` and `splitMentions` alike): a direct thread's only
+other member already gets an ordinary mention, and the shared room never
+sets this at all — see [User mentions in the room](#user-mentions-in-the-room)
+on why a boundary built from mutual follows, not membership, has no
+well-defined "everyone" to broadcast to. `all` is a reserved handle
+(migration 0050, `RESERVED_HANDLES` in `phone.ts`) so no real profile can
+ever collide with the keyword.
+
 **Deliberately left out of this pass:** arrow-key highlight navigation in
 the picker (Enter selects the top match; tapping a specific row is the
 primary interaction on the phone-sized screens this app targets first), and
@@ -1814,23 +1835,24 @@ this shipped against was the mention itself, not a new counting surface.
 
 ### Not verified end-to-end
 
-Migrations 0047 and 0048 have **not been run against a live database** —
-this workspace has neither the Supabase CLI nor a running Docker daemon, so
-`supabase db reset` could not be executed. The TypeScript is type-checked,
-the naming/event-sentence logic (`conversation.test.ts`) and the mention
-matching (`mentions.test.ts`) are unit-tested; the SQL is reviewed but
-unexecuted, and the screens were verified against fixture data rather than a
-real backend.
+Migrations 0047, 0048 and 0050 have **not been run against a live
+database** — this workspace has neither the Supabase CLI nor a running
+Docker daemon, so `supabase db reset` could not be executed. The
+TypeScript is type-checked, the naming/event-sentence logic
+(`conversation.test.ts`) and the mention matching, "@all" included
+(`mentions.test.ts`), are unit-tested; the SQL is reviewed but unexecuted,
+and the screens were verified against fixture data rather than a real
+backend.
 
 `supabase/tests/group_chats.sql` and `supabase/tests/group_mentions.sql`
 exist for exactly this gap. Between them: creating, sending, replying,
 reacting, adding, renaming, removing, leaving, ownership hand-off, thread
 deletion, the member cap, refusal of a one-person group, a mention naming a
-non-member or the sender being dropped rather than rejected, a mention
-surviving the mentioned person leaving the group, a mention from one thread
-not leaking into another, and the row-level security policies as the
-`authenticated` role. Run them against a local stack before relying on any
-of the above:
+non-member or the sender being dropped rather than rejected, "@all"
+expanding to a row per other member, a mention surviving the mentioned
+person leaving the group, a mention from one thread not leaking into
+another, and the row-level security policies as the `authenticated` role.
+Run them against a local stack before relying on any of the above:
 
 ```bash
 supabase db reset && psql "$(supabase status -o env | grep DB_URL | cut -d= -f2- | tr -d '"')" -v ON_ERROR_STOP=1 -f supabase/tests/group_chats.sql -f supabase/tests/group_mentions.sql

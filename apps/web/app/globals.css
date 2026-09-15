@@ -518,6 +518,8 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
    the same teal used as "mine"'s own background. */
 .chat-mention { display:inline; padding:0; border:0; background:transparent; color:var(--teal); font:inherit; font-weight:800; cursor:pointer; }
 .chat-row.mine .chat-mention { color:var(--mint); }
+/* "@all" is a <span>, not a <button> — same highlight, but nothing to tap. */
+.chat-mention-all { cursor:default; }
 
 /* Fixed footer, not part of the scrolling list — the same "scrollable
    content plus a pinned bottom row" shape .pin-preview-body already uses

@@ -144,6 +144,29 @@ begin
   end if;
 end $$;
 
+-- "@all" (the client's own broadcast affordance in DmThreadView.tsx) is not
+-- a server concept at all -- there is no p_mentioned_user_ids sentinel for
+-- it. The client just expands "@all" to every OTHER current member and
+-- sends that as an ordinary array, so the one thing worth proving here is
+-- that this array -- naming everyone in the group, self excluded, the same
+-- as extractMentionedIds's own `excludeId` -- comes back with a row per
+-- real member and nothing more.
+create temp table msg_all as
+select public.send_dm(
+  (select (t->>'id')::uuid from g),
+  '@all practice moved to 7pm',
+  null, null, null, null, null, null, null, null,
+  array['22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333']::uuid[]
+) as m;
+
+select '@all expands to every other member' as step, jsonb_array_length(m->'mentions') as n from msg_all;
+do $$
+begin
+  if (select jsonb_array_length(m->'mentions') from msg_all) <> 2 then
+    raise exception 'the "@all" broadcast did not reach every other member';
+  end if;
+end $$;
+
 -- A mention in ONE thread must not appear when reading a DIFFERENT one, even
 -- for the same two people — the read policy is scoped by message, not by
 -- who the mentioned person happens to be.

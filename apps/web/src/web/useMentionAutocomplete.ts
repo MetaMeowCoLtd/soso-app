@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
-import type { AvatarPath } from "soso-core";
+import { MENTION_ALL_HANDLE, type AvatarPath } from "soso-core";
 
 /**
  * The Instagram-style "@" picker: typing "@" followed by letters opens a
@@ -61,11 +61,26 @@ const QUERY_PATTERN = /(?:^|[^a-z0-9_])@([a-z0-9_]{0,20})$/i;
 /** Shown at once — Instagram's own list is this short before it starts scrolling. */
 const MAX_SUGGESTIONS = 6;
 
+/**
+ * The synthetic "All" row `allowAll` adds to the list — not a real person,
+ * so `id` is `MENTION_ALL_HANDLE` itself rather than a uuid nothing else
+ * will ever compare it against. Selecting it inserts "@all " exactly the
+ * way selecting a real member inserts "@<their handle> " — `select` below
+ * has no special case for it at all, because it does not need one.
+ */
+const ALL_CANDIDATE: MentionCandidate = {
+  id: MENTION_ALL_HANDLE,
+  handle: MENTION_ALL_HANDLE,
+  displayName: "All",
+  avatarPath: null,
+};
+
 export function useMentionAutocomplete({
   inputRef,
   value,
   onChange,
   members,
+  allowAll = false,
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -76,6 +91,11 @@ export function useMentionAutocomplete({
    * follows. Either way, this hook has no opinion beyond `MentionCandidate`.
    */
   members: readonly MentionCandidate[];
+  /**
+   * Also offers "All" — see `mentions.ts`'s own `allowAll` on why this is
+   * off by default and why the room never turns it on.
+   */
+  allowAll?: boolean;
 }): {
   suggestions: MentionCandidate[];
   /** True while a query is active, whether or not it currently has any matches. */
@@ -138,14 +158,18 @@ export function useMentionAutocomplete({
 
   const suggestions = useMemo(() => {
     if (!query) return [];
-    return members
-      .filter(
-        (m) =>
-          m.handle.toLowerCase().startsWith(query.text) ||
-          m.displayName.toLowerCase().startsWith(query.text),
-      )
-      .slice(0, MAX_SUGGESTIONS);
-  }, [query, members]);
+    const matches = members.filter(
+      (m) =>
+        m.handle.toLowerCase().startsWith(query.text) ||
+        m.displayName.toLowerCase().startsWith(query.text),
+    );
+    // "All" leads the list rather than sorting in wherever "all" would
+    // alphabetically land — it is a different KIND of suggestion, not one
+    // more name, the same reason Slack's own "@channel" always sits first.
+    const withAll =
+      allowAll && MENTION_ALL_HANDLE.startsWith(query.text) ? [ALL_CANDIDATE, ...matches] : matches;
+    return withAll.slice(0, MAX_SUGGESTIONS);
+  }, [query, members, allowAll]);
 
   const select = useCallback(
     (member: MentionCandidate) => {

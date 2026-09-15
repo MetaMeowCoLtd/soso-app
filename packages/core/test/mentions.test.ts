@@ -73,6 +73,51 @@ describe('splitMentions', () => {
       { kind: 'mention', ...ANA },
     ]);
   });
+
+  describe('"@all"', () => {
+    it('is plain text when allowAll is not set', () => {
+      assert.deepEqual(splitMentions('hey @all', [ANA]), [{ kind: 'text', text: 'hey @all' }]);
+    });
+
+    it('is plain text when allowAll is explicitly off', () => {
+      assert.deepEqual(splitMentions('hey @all', [ANA], { allowAll: false }), [
+        { kind: 'text', text: 'hey @all' },
+      ]);
+    });
+
+    it('is a mention-all segment when allowAll is on', () => {
+      assert.deepEqual(splitMentions('hey @all', [ANA], { allowAll: true }), [
+        { kind: 'text', text: 'hey ' },
+        { kind: 'mention-all', text: 'all' },
+      ]);
+    });
+
+    it('matches with no real candidates at all, unlike an ordinary mention', () => {
+      assert.deepEqual(splitMentions('@all', [], { allowAll: true }), [
+        { kind: 'mention-all', text: 'all' },
+      ]);
+    });
+
+    it('preserves the case actually typed', () => {
+      assert.deepEqual(splitMentions('@ALL', [], { allowAll: true }), [
+        { kind: 'mention-all', text: 'ALL' },
+      ]);
+    });
+
+    it('does not match as a prefix of a longer word', () => {
+      assert.deepEqual(splitMentions('@allison', [], { allowAll: true }), [
+        { kind: 'text', text: '@allison' },
+      ]);
+    });
+
+    it('coexists with a real mention in the same message', () => {
+      assert.deepEqual(splitMentions('@all — especially you, @ana', [ANA], { allowAll: true }), [
+        { kind: 'mention-all', text: 'all' },
+        { kind: 'text', text: ' — especially you, ' },
+        { kind: 'mention', ...ANA },
+      ]);
+    });
+  });
 });
 
 describe('extractMentionedIds', () => {
@@ -90,5 +135,28 @@ describe('extractMentionedIds', () => {
 
   it('ignores a handle that is not a current member', () => {
     assert.deepEqual(extractMentionedIds('@ghost', [ANA]), []);
+  });
+
+  describe('"@all"', () => {
+    it('is ignored without allowAll, the same as any other unmatched handle', () => {
+      assert.deepEqual(extractMentionedIds('@all', [ANA, BO]), []);
+    });
+
+    it('expands to every member with allowAll on', () => {
+      assert.deepEqual(extractMentionedIds('@all', [ANA, BO], { allowAll: true }), ['u1', 'u2']);
+    });
+
+    it('excludes the given id, for the sender who is always their own member row', () => {
+      assert.deepEqual(extractMentionedIds('@all', [ANA, BO], { allowAll: true, excludeId: 'u1' }), [
+        'u2',
+      ]);
+    });
+
+    it('does not duplicate someone individually mentioned as well as "@all"', () => {
+      assert.deepEqual(
+        extractMentionedIds('@ana, @all', [ANA, BO], { allowAll: true }),
+        ['u1', 'u2'],
+      );
+    });
   });
 });

@@ -223,6 +223,11 @@ const RESERVED_HANDLES = new Set([
   'null',
   'undefined',
   'anonymous',
+  // "@all" is the group @mention broadcast keyword (mentions.ts's
+  // MENTION_ALL_HANDLE) — a real profile holding this handle would make
+  // "@all" ambiguous between the two, so it is reserved the same way
+  // "you"/"me" already are for a different reason.
+  'all',
 ]);
 
 export type HandleProblem = 'empty' | 'too_short' | 'too_long' | 'bad_characters' | 'reserved';

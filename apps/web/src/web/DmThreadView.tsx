@@ -9,6 +9,7 @@ import {
   describeThreadEvent,
   extractMentionedIds,
   splitMentions,
+  MENTION_ALL_HANDLE,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
   MESSAGE_VIDEO_MIME_TYPES,
@@ -194,6 +195,11 @@ export default function DmThreadView({
     value: input,
     onChange: setInput,
     members: mentionCandidates,
+    // A group has a fixed membership to broadcast to; a direct thread is
+    // just the other person, and "@all" naming the one person you are
+    // already talking to offers nothing "@theirhandle" doesn't. See
+    // mentions.ts's own note on why the room never sets this at all.
+    allowAll: isGroup,
   });
 
   function openMentionedProfile(target: Mention) {
@@ -359,7 +365,10 @@ export default function DmThreadView({
     setSending(true);
     setError(null);
     try {
-      const mentionedUserIds = extractMentionedIds(body, mentionCandidates);
+      const mentionedUserIds = extractMentionedIds(body, mentionCandidates, {
+        allowAll: isGroup,
+        excludeId: myId,
+      });
       const sent = await gateway.sendDm(
         thread.id,
         body,
@@ -556,6 +565,7 @@ export default function DmThreadView({
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onOpenImage={(url, media, startTime) => setLightbox({ url, media, startTime })}
                 onOpenMention={openMentionedProfile}
+                allowAllMention={isGroup}
                 categories={categories}
                 onOpenPost={onOpenPost}
                 receipt={
@@ -671,7 +681,14 @@ export default function DmThreadView({
                 />
                 <span className="mention-picker-who">
                   <strong>{candidate.displayName}</strong>
-                  <span>@{candidate.handle}</span>
+                  {/* The one row with no real handle to show — "notify
+                      everyone" says what picking it does, the way every
+                      other row's "@handle" says who it reaches. */}
+                  <span>
+                    {candidate.handle === MENTION_ALL_HANDLE
+                      ? "Notify everyone in this group"
+                      : `@${candidate.handle}`}
+                  </span>
                 </span>
               </button>
             </li>
@@ -911,6 +928,7 @@ function DmBubble({
   onToggleReaction,
   onOpenImage,
   onOpenMention,
+  allowAllMention,
   categories,
   onOpenPost,
   receipt,
@@ -949,6 +967,8 @@ function DmBubble({
   onToggleReaction: (emoji: string) => void;
   onOpenImage: (url: string, media: MessageMedia, startTime?: number) => void;
   onOpenMention: (target: Mention) => void;
+  /** Recognize "@all" as a broadcast segment rather than plain text — see mentions.ts's own `allowAll`. A group's own value; a direct thread always passes false. */
+  allowAllMention: boolean;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
   /** Non-null on the one message that carries a read receipt, null on the rest. */
@@ -1141,27 +1161,36 @@ function DmBubble({
                         closes the sheet" / "the whole quote is one target
                         already") — a nested mention button would be a second
                         conflicting target in exactly the same way. */}
-                    {splitMentions(message.body, message.mentions).map((segment, i) =>
-                      segment.kind === "mention" ? (
-                        <button
-                          key={i}
-                          type="button"
-                          className="chat-mention"
-                          onClick={(e) => {
-                            // Stopped so this does not also register as the
-                            // bubble's own tap — see onBubbleClick, whose
-                            // "any button inside" guard already skips
-                            // jump-to-reply here, but the quote button right
-                            // above does the same for the identical reason.
-                            e.stopPropagation();
-                            onOpenMention(segment);
-                          }}
-                        >
-                          @{segment.handle}
-                        </button>
-                      ) : (
-                        <span key={i}>{segment.text}</span>
-                      ),
+                    {splitMentions(message.body, message.mentions, { allowAll: allowAllMention }).map(
+                      (segment, i) =>
+                        segment.kind === "mention" ? (
+                          <button
+                            key={i}
+                            type="button"
+                            className="chat-mention"
+                            onClick={(e) => {
+                              // Stopped so this does not also register as the
+                              // bubble's own tap — see onBubbleClick, whose
+                              // "any button inside" guard already skips
+                              // jump-to-reply here, but the quote button right
+                              // above does the same for the identical reason.
+                              e.stopPropagation();
+                              onOpenMention(segment);
+                            }}
+                          >
+                            @{segment.handle}
+                          </button>
+                        ) : segment.kind === "mention-all" ? (
+                          // Not a button: "@all" names everyone, not one
+                          // profile a tap could go to, so there is nowhere
+                          // for this to lead — highlighted the same as a
+                          // real mention, but inert.
+                          <span key={i} className="chat-mention chat-mention-all">
+                            @{segment.text}
+                          </span>
+                        ) : (
+                          <span key={i}>{segment.text}</span>
+                        ),
                     )}
                   </span>
                 )}
