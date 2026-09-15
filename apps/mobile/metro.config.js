@@ -22,15 +22,48 @@ const { getDefaultConfig } = require("expo/metro-config");
 // normal upward search from *every* file, including Expo's own internals —
 // `expo-asset` isn't flattened to the top level here, it sits nested at
 // node_modules/expo/node_modules/expo-asset, and only resolves because
-// Metro walks up from the importing file. If a real hoisting collision with
-// packages/core's own deps shows up once C2 adds the relative import, the
-// fix is `resolver.extraNodeModules` as a scoped fallback, not disabling
-// hierarchical lookup outright.
+// Metro walks up from the importing file.
+//
+// The real collision landed differently than that comment predicted: C2
+// initially installed `@supabase/supabase-js` directly into apps/mobile too,
+// on the assumption it needed its own copy. That produced two physically
+// distinct installs of the same package — one here, one hoisted to the repo
+// root because packages/core/package.json declares it as a direct
+// dependency — and `tsc` correctly treated their two `SupabaseClient`
+// classes as different types (protected members make structural typing
+// fail across separate installs). The fix was the opposite of adding
+// resolver config: apps/mobile does NOT install `@supabase/supabase-js` at
+// all, so both packages/core's import and apps/mobile/src/data/supabase.ts's
+// own import resolve to the exact same physical copy at the repo root.
+//
+// That copy lives outside both `projectRoot` and `watchFolders`, which
+// matters because Metro's file-serving layer (Haste) refuses to read
+// anything outside those roots — a targeted `resolver.extraNodeModules`
+// mapping for just `@supabase/supabase-js` got the specifier resolved, but
+// Metro still refused to serve the file, and the same problem recurred one
+// level deeper for supabase-js's own transitive deps (auth-js, then
+// auth-js's own dependency on `tslib`, hoisted to the root node_modules by
+// npm same as everything else). Chasing each transitive dependency into
+// watchFolders individually doesn't scale, so the root `node_modules`
+// directory itself is watched instead of any specific package inside it —
+// covers this whole hoisted dependency tree in one entry, with no
+// extraNodeModules override needed once Metro's default hierarchical
+// lookup can actually reach it.
+//
+// Deliberately the repo's `node_modules`, not the repo root itself: the
+// latter would also pull `apps/web` (its own node_modules, Next.js build
+// output) into Metro's watch set for no benefit. Metro's nearest-wins
+// resolution order means apps/mobile's own node_modules is still checked
+// before this fallback for every bare specifier, so watching it does not
+// risk apps/mobile picking up a different react/react-native than the one
+// it has installed locally.
 const projectRoot = __dirname;
-const coreRoot = path.resolve(projectRoot, "../../packages/core");
+const repoRoot = path.resolve(projectRoot, "../..");
+const coreRoot = path.resolve(repoRoot, "packages/core");
+const repoNodeModules = path.resolve(repoRoot, "node_modules");
 
 const config = getDefaultConfig(projectRoot);
 
-config.watchFolders = [coreRoot];
+config.watchFolders = [coreRoot, repoNodeModules];
 
 module.exports = config;
