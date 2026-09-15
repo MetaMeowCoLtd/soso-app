@@ -1,55 +1,70 @@
+import { NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import AuthScreens from "./src/auth/AuthScreens";
-import { ensureGuestSession } from "./src/data/auth";
-import { AppText } from "./src/ui/AppText";
-import { Screen } from "./src/ui/Screen";
+import { AppGateProvider, useAppGate } from "./src/gate/AppGate";
+import { RootNavigator } from "./src/navigation/RootNavigator";
 import { COLORS } from "./src/theme/tokens";
 
 /**
- * C4 checkpoint: the phone-OTP auth screens on device. Without real
- * Supabase credentials configured (EXPO_PUBLIC_SUPABASE_URL/_ANON_KEY),
- * submitting a phone number will honestly fail with "couldn't reach the
- * server" — sendCode's own try/catch turns getSupabase()'s synchronous
- * throw into that error rather than a crash, which is the same fallback
- * behaviour the web app has. That still exercises the full state machine
- * (phone -> code -> handle) and every screen's render path; a real SMS
- * round trip needs real credentials, which is a deployment concern, not a
- * C4 one.
+ * C5 checkpoint: App.tsx becomes the permanent app root rather than a
+ * rotating checkpoint placeholder (C1's map, C2's gateway banner, C3's
+ * style gallery, C4's bare auth screens all stood in for this in turn).
+ * Provider order, outside in:
  *
- * Replaces C3's StyleGallery as App's content — see that file's note; C5
- * is where a real navigator, not this file, decides what's on screen.
+ *  - SafeAreaProvider: needed by react-native-safe-area-context (src/ui/Screen.tsx, C3)
+ *  - GestureHandlerRootView: react-navigation's own requirement once any
+ *    screen uses gesture-handler — nothing does yet, but every native-stack
+ *    screen transition already depends on it being present at the root.
+ *  - AppGateProvider: resolves the gateway + account once (C2 + C4 logic,
+ *    combined) and decides auth vs. ready.
+ *  - NavigationContainer > RootNavigator: only mounted once ready, so the
+ *    stack's initial route never flashes past whatever a not-yet-authed
+ *    launch would have pushed.
  */
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(false);
-
   return (
     <SafeAreaProvider>
-      <Screen>
-        {authenticated ? (
-          <View style={styles.center}>
-            <AppText style={styles.done}>Authenticated ✓</AppText>
-          </View>
-        ) : (
-          <AuthScreens
-            account={null}
-            onAuthenticated={() => setAuthenticated(true)}
-            onSkip={async () => {
-              const ok = await ensureGuestSession();
-              if (ok) setAuthenticated(true);
-            }}
-          />
-        )}
-      </Screen>
-      <StatusBar style="dark" />
+      <GestureHandlerRootView style={styles.flex1}>
+        <AppGateProvider>
+          <AppContent />
+        </AppGateProvider>
+        <StatusBar style="dark" />
+      </GestureHandlerRootView>
     </SafeAreaProvider>
   );
 }
 
+function AppContent() {
+  const { status, refreshAccount, continueAsGuest } = useAppGate();
+
+  if (status.phase === "loading") {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (status.phase === "auth") {
+    return (
+      <View style={styles.flex1}>
+        <AuthScreens account={status.account} onAuthenticated={refreshAccount} onSkip={continueAsGuest} />
+      </View>
+    );
+  }
+
+  return (
+    <NavigationContainer>
+      <RootNavigator />
+    </NavigationContainer>
+  );
+}
+
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  done: { fontSize: 20, fontWeight: "700", color: COLORS.teal },
+  flex1: { flex: 1 },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.screenBackground },
 });
