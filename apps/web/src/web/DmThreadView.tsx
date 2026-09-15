@@ -7,11 +7,15 @@ import {
   conversationSubtitle,
   conversationTitle,
   describeThreadEvent,
+  extractMentionedIds,
+  splitMentions,
   ERROR_MESSAGES_EN,
   MESSAGE_IMAGE_MIME_TYPES,
   MESSAGE_VIDEO_MIME_TYPES,
   type CategoryConfig,
+  type DmMention,
   type DmReadReceipt,
+  type DmThreadMember,
   type Friend,
   type MessageMedia,
   type DmMessage,
@@ -35,6 +39,7 @@ import { useLongPress } from "./useLongPress";
 import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import { ChatTextarea } from "./ChatTextarea";
 import { useChatScroll } from "./useChatScroll";
+import { useMentionAutocomplete } from "./useMentionAutocomplete";
 import { useRefetchOnForeground } from "./useRefetchOnForeground";
 import { useSwipeToReply } from "./useSwipeToReply";
 import { useNowSeconds } from "./hooks";
@@ -91,6 +96,17 @@ interface DmThreadViewProps {
    * switch tabs, and neither is a conversation's business.
    */
   onOpenPost: (postId: string) => void;
+  /**
+   * Opens someone's profile, by handle. page.tsx owns that surface for the
+   * same reason it owns a shared pin's — but unlike a pin, a profile is
+   * deliberately NOT an exclusive full-screen surface (see its own z-index
+   * note in globals.css: the tab bar stays reachable, because looking at a
+   * person is closer to browsing than to a focused task). It cannot stack
+   * on top of this one the way a pin's overlay does, so tapping a mention
+   * closes this conversation first — the same "close, then open the next
+   * thing" pattern page.tsx already uses going from a profile to a post.
+   */
+  onOpenProfile: (handle: string) => void;
   onClose: () => void;
 }
 
@@ -120,6 +136,7 @@ export default function DmThreadView({
   myAvatarPath,
   categories,
   onOpenPost,
+  onOpenProfile,
   onThreadChanged,
   onClose,
 }: DmThreadViewProps) {
@@ -145,6 +162,47 @@ export default function DmThreadView({
   const [readState, setReadState] = useState<DmReadReceipt[]>([]);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const isGroup = thread.kind === "group";
+
+  /**
+   * The whole membership, for @mentions — seeded from `thread.members`
+   * (at most four; see `soso.dm_members_json`) and replaced once the full
+   * list arrives, the same two-step GroupDetailsSheet already uses for the
+   * same underlying call. A direct thread's "whole membership" is just the
+   * other person, which is why nothing here branches on `isGroup`: mentioning
+   * the one other side of a DM is harmless and needs no special case to
+   * forbid.
+   */
+  const [mentionCandidates, setMentionCandidates] = useState<DmThreadMember[]>(thread.members);
+  useEffect(() => {
+    let alive = true;
+    void gateway
+      .listDmThreadMembers(thread.id)
+      .then((rows) => {
+        if (alive) setMentionCandidates(rows);
+      })
+      .catch(() => {
+        // Leaves the handful the thread already carried. Autocomplete just
+        // offers fewer people than it should; nothing breaks.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [gateway, thread.id]);
+
+  const mention = useMentionAutocomplete({
+    inputRef,
+    value: input,
+    onChange: setInput,
+    members: mentionCandidates,
+  });
+
+  function openMentionedProfile(target: DmMention) {
+    // ProfileView cannot stack above an open conversation — see the prop's
+    // own comment — so the conversation closes first, the same order
+    // page.tsx itself uses going from a profile to a post.
+    onClose();
+    onOpenProfile(target.handle);
+  }
 
   const reload = useCallback(async () => {
     // Fetched alongside the messages rather than on its own schedule: the
@@ -301,7 +359,15 @@ export default function DmThreadView({
     setSending(true);
     setError(null);
     try {
-      const sent = await gateway.sendDm(thread.id, body, replyingTo?.id ?? null, attachment.media);
+      const mentionedUserIds = extractMentionedIds(body, mentionCandidates);
+      const sent = await gateway.sendDm(
+        thread.id,
+        body,
+        replyingTo?.id ?? null,
+        attachment.media,
+        null,
+        mentionedUserIds,
+      );
       setInput("");
       setReplyingTo(null);
       attachment.clear();
@@ -489,6 +555,7 @@ export default function DmThreadView({
                 onSwipeReply={() => startReply(message)}
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onOpenImage={(url, media, startTime) => setLightbox({ url, media, startTime })}
+                onOpenMention={openMentionedProfile}
                 categories={categories}
                 onOpenPost={onOpenPost}
                 receipt={
@@ -575,6 +642,43 @@ export default function DmThreadView({
         </div>
       )}
 
+      {/* Above the composer, in normal flow — the same placement the reply
+          bar and the attachment preview above it already use, rather than a
+          floating panel that would need its own z-index and positioning
+          math. It pushes the message list up by exactly its own height,
+          which is the one thing a picker that appears and disappears while
+          you type must never do to the text sitting above it. */}
+      {mention.open && mention.suggestions.length > 0 && (
+        <ul className="mention-picker" role="listbox" aria-label="Mention someone">
+          {mention.suggestions.map((candidate) => (
+            <li key={candidate.id}>
+              <button
+                type="button"
+                className="mention-picker-row"
+                role="option"
+                // Prevents the textarea from blurring at all when this is
+                // pressed — see the hook's own comment on why that matters:
+                // a blur firing first would clear the query out from under
+                // this same click before `select` ever got to read it.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => mention.select(candidate)}
+              >
+                <Avatar
+                  name={candidate.displayName}
+                  seed={candidate.handle}
+                  src={gateway.avatarUrl(candidate.avatarPath)}
+                  size={30}
+                />
+                <span className="mention-picker-who">
+                  <strong>{candidate.displayName}</strong>
+                  <span>@{candidate.handle}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <form
         className="chat-compose"
         onSubmit={(e) => {
@@ -610,7 +714,18 @@ export default function DmThreadView({
           ref={inputRef}
           value={input}
           onChange={setInput}
-          onSubmit={() => void send()}
+          onSubmit={() => {
+            // Enter picks the top match instead of sending, while the
+            // picker is open and has one — the same "Enter confirms the
+            // candidate" precedence ChatTextarea already gives an IME, for
+            // the same reason: this Enter belongs to what is currently
+            // being composed, not to the message as a whole.
+            if (mention.open && mention.suggestions.length > 0) {
+              mention.select(mention.suggestions[0]!);
+              return;
+            }
+            void send();
+          }}
           placeholder={
             attachment.previewUrl ? "Add a caption…" : replyingTo ? "Reply…" : "Message…"
           }
@@ -795,6 +910,7 @@ function DmBubble({
   onSwipeReply,
   onToggleReaction,
   onOpenImage,
+  onOpenMention,
   categories,
   onOpenPost,
   receipt,
@@ -832,6 +948,7 @@ function DmBubble({
   onSwipeReply: () => void;
   onToggleReaction: (emoji: string) => void;
   onOpenImage: (url: string, media: MessageMedia, startTime?: number) => void;
+  onOpenMention: (target: DmMention) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
   /** Non-null on the one message that carries a read receipt, null on the rest. */
@@ -1015,7 +1132,39 @@ function DmBubble({
                     onOpen={onOpenPost}
                   />
                 )}
-                {message.body && <span className="chat-bubble-text">{message.body}</span>}
+                {message.body && (
+                  <span className="chat-bubble-text">
+                    {/* Deliberately only here, not in the reply quote a few
+                        lines up or in the long-press sheet's clone of this
+                        same text: both of those already refuse to make an
+                        image tappable for the same reason ("a tap anywhere
+                        closes the sheet" / "the whole quote is one target
+                        already") — a nested mention button would be a second
+                        conflicting target in exactly the same way. */}
+                    {splitMentions(message.body, message.mentions).map((segment, i) =>
+                      segment.kind === "mention" ? (
+                        <button
+                          key={i}
+                          type="button"
+                          className="chat-mention"
+                          onClick={(e) => {
+                            // Stopped so this does not also register as the
+                            // bubble's own tap — see onBubbleClick, whose
+                            // "any button inside" guard already skips
+                            // jump-to-reply here, but the quote button right
+                            // above does the same for the identical reason.
+                            e.stopPropagation();
+                            onOpenMention(segment);
+                          }}
+                        >
+                          @{segment.handle}
+                        </button>
+                      ) : (
+                        <span key={i}>{segment.text}</span>
+                      ),
+                    )}
+                  </span>
+                )}
               </div>
 
               {message.reactions.length > 0 && (

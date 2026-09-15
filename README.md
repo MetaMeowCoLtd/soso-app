@@ -49,7 +49,7 @@ Supabase.
 | Local demo mode (no backend required) | Implemented |
 | Polls | Modeled, disabled. Requires separate options/votes tables. |
 | Local news and official notices | Modeled, disabled |
-| Group chats | Implemented, not verified against a live database. Up to 32 people, any member can add their own mutual follows. See [Group chats](#group-chats). |
+| Group chats | Implemented, not verified against a live database. Up to 32 people, any member can add their own mutual follows. @mentions a current member, with their own push notification. See [Group chats](#group-chats) and [User mentions](#user-mentions). |
 | Topic groups | Not implemented. Distinct from [Group chats](#group-chats) above, which are private and invite-only by construction; a topic group would be public and joinable, which is a different membership model and a different moderation problem. |
 | Presence and mutual-follow contacts | Implemented. Its own People tab; opt-in, off by default; see [Presence and people](#presence-and-people). |
 | Harassment reporting | Modeled, shipped disabled. Requires legal review before enabling; see the comment in `supabase/seed.sql`. |
@@ -1668,27 +1668,98 @@ other notification coming. Renames and departures are housekeeping the inbox
 already reflects; pushing every one to every member turns an active group
 into a notification faucet.
 
+### User mentions
+
+Type "@", pick someone from the people already in this conversation, and
+their name goes in — Instagram's own shape, in `dm_message_mentions`
+(migration 0048).
+
+**Who can be mentioned is not a new rule.** It is `soso.dm_is_member`,
+re-checked the moment a message is sent, applied to a new question — because
+a mention that could name someone outside the conversation would put a
+stranger's name, and via the push below a stranger's phone, in front of a
+group they were never added to. Naming a handle that is not a current member
+(a typo, a stranger, someone who has since left) is not an error: `send_dm`
+silently keeps whichever ids check out and drops the rest, the same
+"fewer mentions, not a failed message" choice `add_group_members` already
+makes for a bad id in its own array.
+
+**Matching "@handle" back out of the text is a client-side, pure-function
+job** (`splitMentions`/`extractMentionedIds` in
+`packages/core/src/domain/mentions.ts`), not a stored offset or a markup
+syntax in `body`. The same match runs in two directions with two different
+candidate lists, and the difference is deliberate:
+
+- **Composing** matches against the thread's CURRENT membership, because
+  that is what the server is about to check — matching against anyone else
+  would just collect ids `send_dm` was always going to throw away.
+- **Rendering** matches against the message's OWN persisted `mentions`,
+  fetched back from the database rather than re-derived from who is in the
+  group today. A member who leaves keeps every mention of them in the
+  history highlighted and tappable to their profile — the row has no
+  foreign key to membership, only to the message and the profile it names.
+
+**The composer's picker** (`useMentionAutocomplete.ts`) drives the same
+`<textarea>` `ChatTextarea` already owns, from outside it, through the ref
+its caller holds — `ChatTextarea` itself stays a plain growing text field
+with no idea mentions exist, which is what keeps the room and a post's
+replies, neither of which has anyone to mention, from carrying dead code for
+a feature they cannot use. The list appears as a normal-flow panel directly
+above the composer — the same placement the reply bar and attachment
+preview already use — rather than a floating overlay with its own z-index.
+Selecting a suggestion uses the standard `onMouseDown` + `preventDefault()`
+combobox trick to stop the field blurring before the click that was
+supposed to insert into it.
+
+**Tapping a mention in a sent message closes the conversation before
+opening the tapped person's profile.** `ProfileView` deliberately cannot
+stack above an open DM (see its own z-index note: looking at someone is
+closer to browsing than to a focused task, so the tab bar stays reachable
+underneath it, which a conversation's own exclusive full-screen surface
+would otherwise sit on top of) — so this follows the same "close, then open
+the next thing" order page.tsx already uses going from a profile to a post.
+
+**The push notification splits in two.** Everyone else in the conversation
+still gets the ordinary "Ana: message" preview; whoever was actually
+@mentioned gets "Ana mentioned you in Tuesday Football: message" instead —
+two calls to `sendPushToEndpoints` over two disjoint slices of the same
+recipient list, rather than one shared payload for everybody. Empty on
+almost every message (most messages mention nobody), and always empty for a
+system event, which is what makes this degrade to exactly the original
+single-payload behaviour whenever there is nothing to split.
+
+**Deliberately left out of this pass:** arrow-key highlight navigation in
+the picker (Enter selects the top match; tapping a specific row is the
+primary interaction on the phone-sized screens this app targets first), and
+a distinct "mentioned you" badge separate from the ordinary unread count —
+Instagram itself does not have one in a conversation list, and the request
+this shipped against was the mention itself, not a new counting surface.
+
 ### Not verified end-to-end
 
-Migration 0047 has **not been run against a live database** — this
-workspace has neither the Supabase CLI nor a running Docker daemon, so
-`supabase db reset` could not be executed. The TypeScript is type-checked and
-the naming and event-sentence logic is unit-tested (`conversation.test.ts`);
-the SQL is reviewed but unexecuted, and the screens were verified against
-fixture data rather than a real backend.
+Migrations 0047 and 0048 have **not been run against a live database** —
+this workspace has neither the Supabase CLI nor a running Docker daemon, so
+`supabase db reset` could not be executed. The TypeScript is type-checked,
+the naming/event-sentence logic (`conversation.test.ts`) and the mention
+matching (`mentions.test.ts`) are unit-tested; the SQL is reviewed but
+unexecuted, and the screens were verified against fixture data rather than a
+real backend.
 
-`supabase/tests/group_chats.sql` exists for exactly this gap: it creates four
-accounts and exercises creating, sending, replying, reacting, adding,
-renaming, removing, leaving, ownership hand-off, thread deletion, the member
-cap, refusal of a one-person group, what a non-member can reach, and the
-row-level security policies as the `authenticated` role. Run it against a
-local stack before relying on any of the above:
+`supabase/tests/group_chats.sql` and `supabase/tests/group_mentions.sql`
+exist for exactly this gap. Between them: creating, sending, replying,
+reacting, adding, renaming, removing, leaving, ownership hand-off, thread
+deletion, the member cap, refusal of a one-person group, a mention naming a
+non-member or the sender being dropped rather than rejected, a mention
+surviving the mentioned person leaving the group, a mention from one thread
+not leaking into another, and the row-level security policies as the
+`authenticated` role. Run them against a local stack before relying on any
+of the above:
 
 ```bash
-supabase db reset && psql "$(supabase status -o env | grep DB_URL | cut -d= -f2- | tr -d '"')" -v ON_ERROR_STOP=1 -f supabase/tests/group_chats.sql
+supabase db reset && psql "$(supabase status -o env | grep DB_URL | cut -d= -f2- | tr -d '"')" -v ON_ERROR_STOP=1 -f supabase/tests/group_chats.sql -f supabase/tests/group_mentions.sql
 ```
 
-A clean run ends with `OK - every assertion passed`.
+A clean run ends with `OK - every assertion passed`, once per file.
 
 ## Presence and people
 

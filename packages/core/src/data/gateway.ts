@@ -577,6 +577,13 @@ export interface SosoGateway {
    * thread; the server resolves it into `replyTo`, exactly as
    * `sendChatMessage` does for the room. The two are the same call shape
    * again now that neither one is moving ciphertext.
+   *
+   * `mentionedUserIds` is a courtesy, not the authority on who gets
+   * @mentioned — migration 0048's `send_dm` re-derives the real set itself
+   * from current thread membership and silently drops anything else, so
+   * passing a stale or fabricated id here costs nothing worse than a
+   * mention that does not land. `extractMentionedIds` (core) is how a
+   * caller should build this from the composed text.
    */
   sendDm(
     threadId: string,
@@ -584,6 +591,7 @@ export interface SosoGateway {
     replyToId?: string | null,
     media?: MessageMedia | null,
     sharedPostId?: string | null,
+    mentionedUserIds?: readonly string[],
   ): Promise<DmMessage>;
 
   /** Moves your read cursor to now, clearing the thread's unread count. */

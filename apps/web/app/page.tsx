@@ -1578,6 +1578,7 @@ function Map({
           myAvatarPath={myAvatarPath}
           categories={categories}
           onOpenPost={(postId) => void openPostById(postId)}
+          onOpenProfile={openProfile}
           // A rename, a new photo or a membership change comes back as the
           // whole thread, so the header above the conversation updates without
           // a refetch — and the inbox behind it re-reads when this closes.

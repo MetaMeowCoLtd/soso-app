@@ -466,16 +466,32 @@ async function handleDmMessage(
     return new Response(JSON.stringify({ sent: 0, reason: "blocked" }), { status: 200 });
   }
 
-  const [{ data: sender }, { data: target }, { data: endpoints, error: endpointsError }] = await Promise.all([
+  const [
+    { data: sender },
+    { data: target },
+    { data: endpoints, error: endpointsError },
+    { data: mentionRows, error: mentionsError },
+  ] = await Promise.all([
     supabase.from("profiles").select("display_name").eq("id", payload.sender_id).maybeSingle(),
     payload.event_target_id
       ? supabase.from("profiles").select("display_name").eq("id", payload.event_target_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase.from("push_endpoints").select("endpoint, p256dh, auth").in("user_id", recipientIds),
+    supabase.from("push_endpoints").select("user_id, endpoint, p256dh, auth").in("user_id", recipientIds),
+    // Who this message @mentioned, so they get a distinct notification body
+    // below rather than the same one as everyone else in the conversation.
+    // A system event can never carry a mention (`dm_message_mentions` is
+    // only ever written by send_dm's own message path), so this is wasted
+    // on the "added" branch above -- cheap enough, and simpler than a
+    // parallel Promise.all just for the ordinary-message case.
+    supabase.from("dm_message_mentions").select("user_id").eq("message_id", payload.message_id),
   ]);
 
   if (endpointsError) {
     console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
+    return new Response("Internal error", { status: 500 });
+  }
+  if (mentionsError) {
+    console.error("[notify-new-pin] dm_message_mentions query failed:", mentionsError);
     return new Response("Internal error", { status: 500 });
   }
 
@@ -493,8 +509,9 @@ async function handleDmMessage(
   // built from a member list this function has not fetched, and fetching one
   // to decorate a notification is not work a push should be doing.
   const groupName = isGroup ? (thread.title as string | null) : null;
+  const deepLink = isGroup ? { dmThreadId: payload.thread_id } : { dmSenderId: payload.sender_id };
 
-  const notificationBody = JSON.stringify({
+  const ordinaryBody = JSON.stringify({
     title: "SoSo",
     body:
       payload.event_kind === "added"
@@ -512,14 +529,46 @@ async function handleDmMessage(
     // what every deployed service worker already understands. Sending the
     // thread id for a DM as well would be tidier and would break the tap on
     // any client that has not updated.
-    ...(isGroup ? { dmThreadId: payload.thread_id } : { dmSenderId: payload.sender_id }),
+    ...deepLink,
   });
 
-  const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
+  // WHO WAS @MENTIONED GETS A DIFFERENT NOTIFICATION, EVERYONE ELSE GETS THE
+  // ORDINARY ONE. `endpoints` came back with `user_id` on every row for
+  // exactly this: `sendPushToEndpoints` still only ever sends ONE payload
+  // per call, so two different bodies for the same message means two calls
+  // over two different slices of the same endpoint list, not one call with
+  // per-recipient branching inside it.
+  //
+  // Empty on almost every message (`mentionRows` is empty far more often
+  // than not) and always empty for a system event, which is why this whole
+  // block degrades to exactly today's single-call behaviour whenever there
+  // is nothing to split.
+  const mentionedIds = new Set((mentionRows ?? []).map((r) => r.user_id as string));
+  const allEndpoints = endpoints ?? [];
+  const mentionedEndpoints = allEndpoints.filter((e) => mentionedIds.has(e.user_id));
+  const otherEndpoints =
+    mentionedIds.size === 0 ? allEndpoints : allEndpoints.filter((e) => !mentionedIds.has(e.user_id));
+
+  const mentionedBody =
+    mentionedEndpoints.length > 0
+      ? JSON.stringify({
+          title: "SoSo",
+          body: mentionNotificationBody(senderName, groupName, payload.body, payload.has_image, payload.has_post, DM_PREVIEW_LIMIT),
+          ...deepLink,
+        })
+      : null;
+
+  const results = await Promise.all([
+    mentionedBody ? sendPushToEndpoints(supabase, mentionedEndpoints, mentionedBody) : Promise.resolve({ sent: 0, stale: 0 }),
+    otherEndpoints.length > 0 ? sendPushToEndpoints(supabase, otherEndpoints, ordinaryBody) : Promise.resolve({ sent: 0, stale: 0 }),
+  ]);
+  const result = { sent: results[0].sent + results[1].sent, stale: results[0].stale + results[1].stale };
+
   console.log("[notify-new-pin] dm notification complete", {
     threadId: payload.thread_id,
     kind: thread.kind,
     recipients: recipientIds.length,
+    mentioned: mentionedEndpoints.length,
     ...result,
   });
   return new Response(JSON.stringify(result), { status: 200 });
@@ -708,6 +757,31 @@ function messageNotificationBody(
   }
   const marker = hasImage ? "📷 " : hasPost ? "📍 " : "";
   return `${name}: ${marker}${text}`;
+}
+
+/**
+ * The notification for whoever this message @mentioned — migration 0048.
+ *
+ * A SEPARATE FUNCTION rather than a parameter added to `messageNotificationBody`,
+ * because it does not need that one's "empty text" branches at all: a mention
+ * only ever exists because the client matched "@handle" IN THE BODY TEXT
+ * (`extractMentionedIds`), so a message that carries one can never have an
+ * empty body the way an image- or pin-only message can. Reusing the general
+ * function here would mean carrying three unreachable branches along for a
+ * case that cannot occur, for the sake of not writing four lines twice.
+ */
+function mentionNotificationBody(
+  senderName: string,
+  groupName: string | null,
+  body: string,
+  hasImage: boolean,
+  hasPost: boolean,
+  limit: number,
+): string {
+  const text = body.length > limit ? `${body.slice(0, limit)}…` : body;
+  const marker = hasImage ? "📷 " : hasPost ? "📍 " : "";
+  const where = groupName ? ` in ${groupName}` : "";
+  return `${senderName} mentioned you${where}: ${marker}${text}`;
 }
 
 /**

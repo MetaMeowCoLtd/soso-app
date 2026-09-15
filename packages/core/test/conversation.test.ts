@@ -77,6 +77,7 @@ function event(kind: DmEventKind, over: Partial<DmMessage> = {}): DmMessage {
     mine: false,
     replyTo: null,
     reactions: [],
+    mentions: [],
     media: null,
     sharedPost: null,
     eventKind: kind,

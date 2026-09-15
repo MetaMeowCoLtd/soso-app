@@ -498,6 +498,27 @@ button, input, textarea { font:inherit; } button { cursor:pointer; } button:focu
 .chat-reply-bar-text { color:var(--muted); font-size:.81rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .chat-reply-bar-cancel { flex-shrink:0; display:grid; place-items:center; width:24px; height:24px; border:0; border-radius:50%; background:#e9edeb; color:var(--muted); font-size:.68rem; }
 
+/* The @mention picker: a normal-flow sibling directly above the composer,
+   the same placement the reply bar above it uses, and for the same reason —
+   no z-index or absolute-positioning math, and it pushes the message list up
+   by its own height rather than floating over the last few bubbles. */
+.mention-picker { list-style:none; margin:0; max-height:220px; overflow-y:auto; background:#fff; border-top:1px solid var(--hairline); }
+.mention-picker-row { display:flex; align-items:center; gap:10px; width:100%; padding:8px 14px; border:0; background:transparent; text-align:left; transition:background .14s; }
+.mention-picker-row:hover { background:#f2f5f3; }
+.mention-picker-who { min-width:0; display:flex; flex-direction:column; gap:1px; }
+.mention-picker-who strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--deep); font-size:.88rem; font-weight:750; }
+.mention-picker-who span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:.76rem; }
+
+/* An @mention inside a sent bubble: bold and coloured, tappable to that
+   person's profile — never a boxed "pill", which reads as heavier than
+   Instagram's own inline-coloured-text treatment and fights the bubble's
+   own rounded shape at the font sizes chat text renders at. Colour flips
+   for the same reason `.chat-bubble-quote` already flips background: the
+   app's teal reads fine on the light "theirs" bubble and disappears into
+   the same teal used as "mine"'s own background. */
+.chat-mention { display:inline; padding:0; border:0; background:transparent; color:var(--teal); font:inherit; font-weight:800; cursor:pointer; }
+.chat-row.mine .chat-mention { color:var(--mint); }
+
 /* Fixed footer, not part of the scrolling list — the same "scrollable
    content plus a pinned bottom row" shape .pin-preview-body already uses
    elsewhere in this file, applied here to a compose row instead of a

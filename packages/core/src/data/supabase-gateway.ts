@@ -858,6 +858,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       replyToId?: string | null,
       media?: MessageMedia | null,
       sharedPostId?: string | null,
+      mentionedUserIds?: readonly string[],
     ): Promise<DmMessage> {
       const { data, error } = await client.rpc('send_dm', {
         p_thread_id: threadId,
@@ -870,6 +871,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_media_kind: media?.kind ?? null,
         p_poster_path: media?.posterPath ?? null,
         p_duration_ms: media?.durationMs ?? null,
+        p_mentioned_user_ids: mentionedUserIds ? [...mentionedUserIds] : [],
       });
       if (error) throw toSosoError(error);
       return decodeDmMessage(data as WireDmMessage);

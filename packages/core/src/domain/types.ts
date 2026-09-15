@@ -1485,6 +1485,32 @@ export interface DmMessageReaction {
   mine: boolean;
 }
 
+/**
+ * One `@handle` addressed at a specific person inside a message.
+ *
+ * `handle`, not just `id`, because it is what a client actually matches
+ * against `body` to find where the mention sits — see
+ * `splitMentions` in `mentions.ts`. Persisted per message (migration 0048)
+ * rather than re-derived from current membership on every render, so a
+ * mention keeps highlighting and pointing at the right profile even after
+ * that person has since left the group.
+ */
+export interface DmMention {
+  id: string;
+  handle: string;
+  name: string;
+}
+
+export interface WireDmMention {
+  id: string;
+  handle: string;
+  name: string;
+}
+
+export function decodeDmMention(w: WireDmMention): DmMention {
+  return { id: w.id, handle: w.handle, name: w.name };
+}
+
 export interface DmMessage {
   id: string;
   threadId: string;
@@ -1506,6 +1532,12 @@ export interface DmMessage {
   /** Null once the quoted message is deleted (ON DELETE SET NULL), same as no reply at all. */
   replyTo: DmReplyPreview | null;
   reactions: DmMessageReaction[];
+  /**
+   * Everyone this message addressed by @handle, validated server-side
+   * against thread membership at send time. Empty on almost every message,
+   * and on every system event.
+   */
+  mentions: DmMention[];
   /** Null for a plain text message. `body` may be empty when this is set. */
   media: MessageMedia | null;
   /** Null unless a post was shared. `body` may be empty when this is set. */
@@ -1553,6 +1585,7 @@ export interface WireDmMessage {
       } & WireMessageMedia)
     | null;
   reactions?: { emoji: string; count: number | string; mine: boolean }[] | null;
+  mentions?: WireDmMention[] | null;
   image_path?: string | null;
   image_width?: number | string | null;
   image_height?: number | string | null;
@@ -1593,6 +1626,7 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
       count: Number(r.count) || 0,
       mine: r.mine,
     })),
+    mentions: (w.mentions ?? []).map(decodeDmMention),
     media: decodeMessageMedia(w),
     sharedPost: decodeSharedPost(w.shared_post),
     eventKind: decodeEventKind(w.event_kind),
