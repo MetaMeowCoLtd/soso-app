@@ -4,51 +4,52 @@ import { Camera, Map, type MapRef, type StyleSpecification } from "@maplibre/map
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 
-import type { Bounds, Pin } from "../core";
+import type { Bounds, Pin, PostDetail, ReportReason } from "../core";
 import { useGateway } from "../gate/AppGate";
 import { CountBadgeMarker } from "../map/CountBadge";
 import { loadCuteMapStyle } from "../map/mapStyle";
 import { MyLocationMarker } from "../map/MyLocationMarker";
+import PinPreview from "../map/PinPreview";
 import { PinMarker } from "../map/PinMarker";
-import { DEFAULT_CENTER, DEFAULT_ZOOM } from "../map/region";
+import PoiPreview, { type SelectedPoi } from "../map/PoiPreview";
+import { DEFAULT_CENTER, DEFAULT_ZOOM, type Coordinates } from "../map/region";
+import ReportForm from "../map/ReportForm";
+import { useCategories } from "../map/useCategories";
 import { useFeed } from "../map/useFeed";
 import type { RootStackParamList } from "../navigation/types";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
-import { Button } from "../ui/Button";
 
 /** Layer ids from mapStyle.ts's soso_shops/poi_transit — ported from apps/web/src/web/SosoMap.tsx's POI_LAYERS. */
 const POI_LAYERS = ["soso_shops", "poi_transit"];
 
 /**
  * Ported from apps/web/src/web/SosoMap.tsx + hooks.ts's `useFeed`, wired
- * directly into this tab rather than kept as a separate presentational
- * component the way the web version's `SosoMap` is — this app has no
- * equivalent yet of the page.tsx-level state (`placing`, `focusAt`,
- * `flyToSignal`, composer) that justified that split on web; C7 is where
- * the report composer arrives and this likely gets factored the same way
- * once there's a second reason to.
+ * directly into this tab — see this file's C6 note on why there's no
+ * separate presentational map component yet. C7 adds the pin-detail /
+ * POI / report-composer overlays that were the map's other job on web
+ * (`selectedPin`/`selectedPoi`/`placing` in that file's terms).
  *
- * The three FeedView modes port directly: `idle` renders nothing but a
- * "zoom in" hint, `counts` renders `CountBadgeMarker`s, `pins` renders
- * `PinMarker`s. `nowSeconds` drives freshness fade the same way
- * `useNowSeconds` does on web, ticking every 15s rather than every render.
- *
- * Tapping a pin here doesn't open a real preview yet — PinPreview.tsx is
- * explicitly C7 work. It logs the pin's id (this checkpoint's own verify
- * criterion) and surfaces it as `tappedPin`, whose action row exercises the
- * same routes C5 wired against a hardcoded demo id, now with a real one.
+ * Tapping the empty map (no pin, no POI under the finger) opens the report
+ * composer at that point, matching web's `onMapClick` — every other tap
+ * path (a pin, a POI symbol) is checked first, same order as
+ * apps/web/src/web/SosoMap.tsx's `ClickHandler`.
  */
 export default function MapTabScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const gateway = useGateway();
-  const { view, setViewport } = useFeed(gateway, null);
+  const { view, setViewport, refresh } = useFeed(gateway, null);
+  const { categories } = useCategories(gateway);
   const mapRef = useRef<MapRef>(null);
 
   const [style, setStyle] = useState<StyleSpecification | null>(null);
   const [styleError, setStyleError] = useState<string | null>(null);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
-  const [tappedPin, setTappedPin] = useState<Pin | null>(null);
+
+  const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<PostDetail | null>(null);
+  const [selectedPoi, setSelectedPoi] = useState<SelectedPoi | null>(null);
+  const [placing, setPlacing] = useState<Coordinates | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,18 +70,48 @@ export default function MapTabScreen() {
     return () => clearInterval(id);
   }, []);
 
-  async function handleMapPress(point: [number, number]) {
-    const map = mapRef.current;
-    if (!map) return;
-    // No coordinate-space mismatch to work around here, unlike apps/web's
-    // ClickHandler: that needs `gl.project()` specifically because Leaflet
-    // and MapLibre GL JS are two separate map instances glued together
-    // (SosoMap.tsx:381-397). MapLibre Native owns input directly, so the
-    // press event's own pixel point is already in the right space.
-    const features = await map.queryRenderedFeatures(point, { layers: POI_LAYERS }).catch(() => []);
-    if (features.length > 0) {
-      console.log("[soso] POI tapped:", features[0]?.properties);
+  // Reloaded whenever a different pin is tapped — mirrors apps/web's
+  // page.tsx fetching `postDetail` on `selectedPin` change.
+  useEffect(() => {
+    if (!selectedPin) {
+      setSelectedDetail(null);
+      return;
     }
+    let cancelled = false;
+    gateway.postDetail(selectedPin.id).then((detail) => {
+      if (!cancelled) setSelectedDetail(detail);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [gateway, selectedPin]);
+
+  async function handleMapPress(point: [number, number], lngLat: [number, number]) {
+    if (placing) return; // Composer already open — matches web's `{!placing && <ClickHandler/>}`.
+    const map = mapRef.current;
+    const features = map ? await map.queryRenderedFeatures(point, { layers: POI_LAYERS }).catch(() => []) : [];
+    const feature = features[0];
+    if (feature) {
+      const name = poiDisplayName(feature.properties ?? {});
+      setSelectedPin(null);
+      setSelectedPoi({ name: name || "Unnamed place", at: { latitude: lngLat[1], longitude: lngLat[0] } });
+      return;
+    }
+    setSelectedPin(null);
+    setSelectedPoi(null);
+    setPlacing({ latitude: lngLat[1], longitude: lngLat[0] });
+  }
+
+  async function handleVote(postId: string, vote: 1 | -1) {
+    await gateway.votePost(postId, vote);
+  }
+
+  async function handleReport(postId: string, reason: ReportReason) {
+    await gateway.reportPost(postId, reason);
+  }
+
+  async function handleResolve(postId: string) {
+    await gateway.resolvePost(postId);
   }
 
   if (styleError) {
@@ -110,7 +141,7 @@ export default function MapTabScreen() {
           const bounds: Bounds = { west, south, east, north };
           setViewport(bounds, event.nativeEvent.zoom);
         }}
-        onPress={(event) => void handleMapPress(event.nativeEvent.point)}
+        onPress={(event) => void handleMapPress(event.nativeEvent.point, event.nativeEvent.lngLat)}
       >
         <Camera initialViewState={{ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM }} />
         <MyLocationMarker />
@@ -124,46 +155,85 @@ export default function MapTabScreen() {
                 pin={pin}
                 nowSeconds={nowSeconds}
                 onPress={(tapped) => {
-                  console.log("[soso] pin tapped:", tapped.id);
-                  setTappedPin(tapped);
+                  setSelectedPoi(null);
+                  setPlacing(null);
+                  setSelectedPin(tapped);
                 }}
               />
             ))}
       </Map>
 
-      {view.mode === "idle" && (
+      {view.mode === "idle" && !placing && !selectedPin && !selectedPoi && (
         <View style={styles.idleHint} pointerEvents="none">
           <AppText style={styles.idleHintText}>Zoom in to see reports</AppText>
         </View>
       )}
 
-      {tappedPin && (
-        <View style={styles.actionBar}>
-          <AppText style={styles.actionBarTitle}>{tappedPin.category}</AppText>
-          <View style={styles.actionRow}>
-            <Button
-              label="Thread"
-              variant="secondary"
-              onPress={() => navigation.navigate("ThoughtThread", { postId: tappedPin.id, mode: "post" })}
-            />
-            {tappedPin.category === "board" && (
-              <Button
-                label="Board"
-                variant="secondary"
-                onPress={() => navigation.navigate("BoardCanvas", { pinId: tappedPin.id })}
-              />
-            )}
-            <Button
-              label="Share"
-              variant="secondary"
-              onPress={() => navigation.navigate("SharePinSheet", { postId: tappedPin.id })}
-            />
-            <Button label="Close" onPress={() => setTappedPin(null)} />
-          </View>
+      {placing && (
+        <View style={styles.overlay}>
+          <ReportForm
+            categories={categories}
+            location={placing}
+            onCancel={() => setPlacing(null)}
+            onSubmit={async (input) => {
+              const pin = await gateway.createPost(input);
+              setPlacing(null);
+              refresh();
+              return pin;
+            }}
+          />
+        </View>
+      )}
+
+      {!placing && selectedPoi && (
+        <View style={styles.overlay}>
+          <PoiPreview
+            poi={selectedPoi}
+            onClose={() => setSelectedPoi(null)}
+            onAddPin={(at) => {
+              setSelectedPoi(null);
+              setPlacing(at);
+            }}
+          />
+        </View>
+      )}
+
+      {!placing && selectedPin && (
+        <View style={styles.overlay}>
+          <PinPreview
+            pin={selectedPin}
+            detail={selectedDetail}
+            categories={categories}
+            nowSeconds={nowSeconds}
+            onClose={() => setSelectedPin(null)}
+            onVote={handleVote}
+            onReport={handleReport}
+            onResolve={handleResolve}
+            onShare={(postId) => navigation.navigate("SharePinSheet", { postId })}
+            onOpenThread={(postId) => navigation.navigate("ThoughtThread", { postId, mode: "post" })}
+          />
         </View>
       )}
     </View>
   );
+}
+
+/**
+ * Mirrors soso_shops/poi_transit's own `text-field` style expression —
+ * ported from apps/web/src/web/SosoMap.tsx's `poiDisplayName`. There's no
+ * way to evaluate a MapLibre style expression directly against a queried
+ * feature, so this reproduces the same name/nonlatin-name priority by hand.
+ */
+function poiDisplayName(properties: Record<string, unknown>): string {
+  const nonlatin = properties["name:nonlatin"];
+  if (typeof nonlatin === "string" && nonlatin) {
+    const latin = properties["name:latin"];
+    return typeof latin === "string" && latin ? `${latin} / ${nonlatin}` : nonlatin;
+  }
+  const nameEn = properties["name_en"];
+  if (typeof nameEn === "string" && nameEn) return nameEn;
+  const name = properties["name"];
+  return typeof name === "string" && name ? name : "";
 }
 
 const styles = StyleSheet.create({
@@ -185,15 +255,10 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     fontSize: 13,
   },
-  actionBar: {
+  overlay: {
     position: "absolute",
     bottom: 24,
     left: 16,
     right: 16,
-    backgroundColor: COLORS.glass,
-    borderRadius: 16,
-    padding: 12,
   },
-  actionBarTitle: { fontWeight: "700", marginBottom: 8, textTransform: "capitalize" },
-  actionRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
 });

@@ -27,6 +27,14 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["@maplibre/maplibre-react-native"]
+    "plugins": [
+      "@maplibre/maplibre-react-native",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Soso uses your location to show your position on the map and to confirm you're near what you're reporting."
+        }
+      ]
+    ]
   }
 }
