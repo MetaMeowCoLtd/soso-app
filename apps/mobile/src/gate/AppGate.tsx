@@ -58,7 +58,22 @@ export function AppGateProvider({ children }: { children: ReactNode }) {
   const [gateway, setGatewayState] = useState<SosoGateway | null>(null);
   const [mode, setMode] = useState<GatewayMode | null>(null);
 
-  const evaluate = useCallback(async (resolvedGateway: SosoGateway) => {
+  // Demo mode has no real backend and no Supabase auth session at all —
+  // every write in demo-gateway.ts attributes to a single per-device
+  // pseudo-user (getMe(), an AsyncStorage-persisted UUID), with nothing
+  // resembling sign-in. `loadAccount`/`onAuthChange` in data/auth.ts call
+  // `getSupabase()` directly and UNCONDITIONALLY — that throws
+  // synchronously ("supabaseUrl is required") the moment it's actually
+  // called against an empty URL, the exact hazard that file's own comments
+  // warn about on `verifyCode`. The fix isn't a try/catch here: it's never
+  // calling into real Supabase auth at all while running the demo gateway,
+  // which is also the semantically correct behaviour — demo mode has no
+  // account to gate on, so it goes straight to "ready".
+  const evaluate = useCallback(async (resolvedMode: GatewayMode) => {
+    if (resolvedMode === "demo") {
+      setStatus({ phase: "ready" });
+      return;
+    }
     const [account, guest] = await Promise.all([loadAccount(), isGuest()]);
     // A verified account still short of picking a handle is mid-signup —
     // AuthScreens itself routes to the handle step for that case, so it
@@ -77,7 +92,7 @@ export function AppGateProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       setGatewayState(resolved);
       setMode(resolvedMode);
-      await evaluate(resolved);
+      await evaluate(resolvedMode);
     });
     return () => {
       cancelled = true;
@@ -85,17 +100,19 @@ export function AppGateProvider({ children }: { children: ReactNode }) {
   }, [evaluate]);
 
   // Re-evaluate on sign-in/sign-out fired from anywhere else in the app —
-  // e.g. a future "sign out" action in ProfileSettings (C8).
+  // e.g. a future "sign out" action in ProfileSettings (C8). Only
+  // subscribed in supabase mode, for the same reason `evaluate` short-
+  // circuits above: `onAuthChange` also calls `getSupabase()` directly.
   useEffect(() => {
-    if (!gateway) return;
+    if (mode !== "supabase") return;
     return onAuthChange(() => {
-      void evaluate(gateway);
+      void evaluate(mode);
     });
-  }, [gateway, evaluate]);
+  }, [mode, evaluate]);
 
   const refreshAccount = useCallback(async () => {
-    if (gateway) await evaluate(gateway);
-  }, [gateway, evaluate]);
+    if (mode) await evaluate(mode);
+  }, [mode, evaluate]);
 
   const continueAsGuest = useCallback(async () => {
     const ok = await ensureGuestSession();

@@ -8,7 +8,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.soso.mobile"
+      "bundleIdentifier": "com.soso.mobile",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Soso uses your location to show your position on the map and to confirm you're near what you're reporting."
+      }
     },
     "android": {
       "package": "com.soso.mobile",
@@ -18,7 +21,8 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
