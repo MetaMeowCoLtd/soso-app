@@ -273,6 +273,7 @@ function roomMessage(over: Partial<ChatMessage> = {}): ChatMessage {
     mine: false,
     replyTo: null,
     reactions: [],
+    mentions: [],
     media: null,
     sharedPost: null,
     seenBy: 0,

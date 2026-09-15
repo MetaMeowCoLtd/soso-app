@@ -39,7 +39,7 @@ Supabase.
 | Seat availability (restaurant, cafe) | Implemented |
 | Suspicious activity reporting | Implemented, enabled |
 | Location-optional posts (Threads-style feed, no pin) | Implemented as its own category, "thought" (migration 0030). "update" played this role until migration 0027 gave it a real map pin instead — see [Location-optional posts](#location-optional-posts). |
-| Shared chat (one global room) | Implemented. Bubbles with reactions, replies, and a long-press action sheet. See [Shared chat](#shared-chat). |
+| Shared chat (one global room) | Implemented. Bubbles with reactions, replies, and a long-press action sheet. @mentions a mutual follow, with their own push notification. See [Shared chat](#shared-chat) and [User mentions in the room](#user-mentions-in-the-room). |
 | Direct messages | Implemented, not verified against a live database. Mutual follows only. Stored server-side and readable by the server — see [What the server can read](#what-the-server-can-read). |
 | Per-category expiry (TTL) | Implemented. Server-assigned; the client cannot extend it. |
 | Server-side validation (proximity, rate limits, body length, subtype) | Implemented. Enforced in Postgres, not in the client. |
@@ -1217,6 +1217,83 @@ destructive action does not belong one stray tap away from a conversation.
 
 `subscribeChatMessagesChanged` covers both tables, so someone else's
 reaction arrives the same way their message does.
+
+### User mentions in the room
+
+The same Instagram-style "@" picker [Group chats](#group-chats) has
+(`useMentionAutocomplete.ts`, `splitMentions`/`extractMentionedIds`), reused
+rather than rebuilt — `chat_message_mentions` and
+`soso.chat_mentions_json` (migration 0049) are the room's own table and
+helper, structurally identical to `dm_message_mentions`'s, kept separate
+because a mention row references the message it was made in and the room's
+messages live in a different table (`chat_messages`) with a different
+primary key space from `dm_messages` — see the migration's own header for
+why that is two small tables rather than one polymorphic one.
+
+**Who can be mentioned is a different question here, and has to be.** A
+DM/group mention is checked against thread membership, because a thread
+has one. The room does not — it is global, with no "the people in this
+conversation" to bound a mention against. The boundary used instead is
+`soso.is_mutual_follow`: the same "you follow each other" relationship
+that already gates opening a DM, reused rather than invented, so a mention
+(and the push it sends) cannot reach a total stranger who has never
+interacted with the sender. This is deliberately not `soso.dm_can_message`,
+which also checks blocks — the room's own read policy has never filtered by
+block at all (`chat_messages_read` is `using (true)`, unconditionally,
+since migration 0015), so validating a mention more strictly than the
+room's own messages already are would be a stranger inconsistency than the
+one it is trying to avoid.
+
+**The candidate list is `Friend[]`** (the sender's own mutual follows,
+already held by `usePresence` for the People tab), not `DmThreadMember[]`
+— there is no membership to seed it from. `useMentionAutocomplete` takes a
+`MentionCandidate` shape rather than `DmThreadMember` specifically so
+either list can be passed to it.
+
+**Reading a room mention has no member check at all.**
+`chat_message_mentions_read` is `using (true)`, matching `chat_messages`
+and `chat_message_reactions` themselves — anyone signed in can see who was
+mentioned in any room message, the same as they can already see the
+message itself.
+
+**Tapping a mention opens the profile directly**, with nothing closed
+first — unlike a DM/group's own version of this, which closes the
+conversation before opening the profile because `ProfileView` cannot stack
+above `.dm-thread`. `.chat-tab` is a plain tab (z-index:1), not an
+exclusive overlay, and `.profile-view` (z-index:4) already paints above
+it.
+
+**The push notification splits the same way** (`handleChatMessage` in
+`supabase/functions/notify-new-pin/index.ts`): whoever was @mentioned gets
+"X mentioned you: message" and everyone else gets the ordinary preview, two
+calls to `sendPushToEndpoints` over disjoint endpoint slices. One thing is
+different from the DM/group version: a mention is added to the recipient
+set the same way a direct reply already was, **exempt from the room's own
+burst suppression and 24-hour active-participant window** — those exist to
+stop every ordinary message from paging everyone, but a mention is a
+deliberate address to one specific person, and making them wait until they
+looked "active" would defeat the point of naming them at all.
+
+### Not verified end-to-end
+
+Migration 0049 has **not been run against a live database** — this
+workspace has neither the Supabase CLI nor a running Docker daemon, so
+`supabase db reset` could not be executed. The TypeScript is type-checked
+and the room's UI wiring was exercised against fixture data;
+`supabase/tests/room_mentions.sql` exists for the database half of this gap
+and mirrors `group_mentions.sql`'s structure, covering: a mutual-follow
+mention persisting and surviving the follow later breaking, a one-sided (not
+mutual) follow and a total stranger both being dropped rather than
+rejected, self-mentions and duplicates collapsing, a room mention never
+leaking into `dm_message_mentions` (or a DM one into
+`chat_message_mentions`), and — the one assertion with no DM/group
+counterpart — a total stranger successfully *reading* a mention row under
+RLS, since the room's own read policy has no membership to restrict it by.
+Run it against a local stack before relying on any of the above:
+
+```bash
+supabase db reset && psql "$(supabase status -o env | grep DB_URL | cut -d= -f2- | tr -d '"')" -v ON_ERROR_STOP=1 -f supabase/tests/room_mentions.sql
+```
 
 ## Direct messages
 

@@ -1406,6 +1406,8 @@ function Map({
           gateway={gateway}
           demoMode={mode !== "supabase"}
           myId={presence.me?.id ?? null}
+          friends={presence.friends}
+          onOpenProfile={openProfile}
           onOpenThread={setDmThread}
           openRoomRequested={roomRequested}
           onRoomOpened={clearRoomRequest}

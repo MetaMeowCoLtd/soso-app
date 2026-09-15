@@ -824,20 +824,40 @@ async function handleChatMessage(
   }
 
   // Anything else said in the last minute means this is mid-conversation, and
-  // only a direct reply gets through.
-  const { count: recentCount, error: burstError } = await supabase
-    .from("chat_messages")
-    .select("id", { count: "exact", head: true })
-    .gte("created_at", new Date(now - CHAT_BURST_WINDOW_MS).toISOString())
-    .neq("id", payload.id);
+  // only a direct reply gets through. Run alongside the mentions lookup below
+  // rather than after it — neither depends on the other.
+  const [
+    { count: recentCount, error: burstError },
+    { data: mentionRows, error: mentionsError },
+  ] = await Promise.all([
+    supabase
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", new Date(now - CHAT_BURST_WINDOW_MS).toISOString())
+      .neq("id", payload.id),
+    // Who this message @mentioned (migration 0049) — empty on almost every
+    // message, same as the DM handler's identical query next door.
+    supabase.from("chat_message_mentions").select("user_id").eq("message_id", payload.id),
+  ]);
   if (burstError) {
     console.error("[notify-new-pin] chat burst check failed:", burstError);
     return new Response("Internal error", { status: 500 });
   }
+  if (mentionsError) {
+    console.error("[notify-new-pin] chat_message_mentions query failed:", mentionsError);
+    return new Response("Internal error", { status: 500 });
+  }
   const midBurst = (recentCount ?? 0) > 0;
+  const mentionedIds = new Set((mentionRows ?? []).map((r) => r.user_id as string));
 
   const recipients = new Set<string>();
   if (repliedToAuthor) recipients.add(repliedToAuthor);
+  // @mentioned reaches its target the same way a reply does — a deliberate
+  // address to one specific person, not something that should wait for them
+  // to already look "active" in the last day the way an ordinary chatter
+  // does. Migration 0049's own mutual-follow check is what keeps this from
+  // being a way to notify a total stranger.
+  for (const id of mentionedIds) recipients.add(id);
 
   if (!midBurst) {
     const { data: recent, error: recentError } = await supabase
@@ -890,7 +910,9 @@ async function handleChatMessage(
 
   const [{ data: author }, { data: endpoints, error: endpointsError }] = await Promise.all([
     supabase.from("profiles").select("handle, display_name").eq("id", payload.author_id).maybeSingle(),
-    supabase.from("push_endpoints").select("endpoint, p256dh, auth").in("user_id", ids),
+    // `user_id` on every row, same reason the DM handler asks for it: it is
+    // what splits this audience into "was @mentioned" and "was not" below.
+    supabase.from("push_endpoints").select("user_id, endpoint, p256dh, auth").in("user_id", ids),
   ]);
   if (endpointsError) {
     console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
@@ -906,26 +928,56 @@ async function handleChatMessage(
     CHAT_PREVIEW_LIMIT,
   );
 
-  const notificationBody = JSON.stringify({
+  // WHO WAS @MENTIONED GETS A DIFFERENT NOTIFICATION, EVERYONE ELSE GETS THE
+  // ORDINARY ONE — the same split the DM handler makes, applied to `ids`
+  // rather than to thread membership since the room has none. `mentionedIds`
+  // was already folded into `recipients` above so a mentioned person is
+  // never absent from `ids` in the first place; this only decides which body
+  // each endpoint gets, not who is notified at all.
+  const otherIds = ids.filter((id) => !mentionedIds.has(id));
+  const mentionedEndpoints = (endpoints ?? []).filter((e) => mentionedIds.has(e.user_id));
+  const otherEndpoints = (endpoints ?? []).filter((e) => !mentionedIds.has(e.user_id));
+
+  const otherBody = JSON.stringify({
     title: "SoSo",
-    // "replied to you" only when that is the whole audience — saying it to a
-    // room that also received this as ordinary chatter would be wrong for
-    // everyone but one person, and the payload is shared by all of them.
-    // The reply wording replaces the name `summary` already starts with,
-    // rather than being prefixed onto it, so it never reads "Alex replied
-    // to you: Alex: hello".
+    // "replied to you" only when that is the whole NON-MENTIONED audience —
+    // saying it to a room that also received this as ordinary chatter would
+    // be wrong for everyone but one person, and the payload is shared by all
+    // of them. Scoped to `otherIds` rather than `ids` so a message that both
+    // replies to and @mentions the same person gives them the mention
+    // wording, not this one. The reply wording replaces the name `summary`
+    // already starts with, rather than being prefixed onto it, so it never
+    // reads "Alex replied to you: Alex: hello".
     body:
-      repliedToAuthor && ids.length === 1
+      repliedToAuthor && otherIds.length === 1 && otherIds[0] === repliedToAuthor
         ? summary.replace(`${name}: `, `${name} replied to you: `)
         : summary,
     // Opens the Chat tab — see sw.js, and page.tsx's `?chat=` handling.
     chat: true,
   });
 
-  const result = await sendPushToEndpoints(supabase, endpoints ?? [], notificationBody);
+  const mentionedBody =
+    mentionedEndpoints.length > 0
+      ? JSON.stringify({
+          title: "SoSo",
+          // No group name to fold in here, unlike the DM/group version of
+          // this same body — the room is the one conversation this app has
+          // that was never a `dm_threads` row to name in the first place.
+          body: mentionNotificationBody(name, null, payload.body, payload.has_image, payload.has_post, CHAT_PREVIEW_LIMIT),
+          chat: true,
+        })
+      : null;
+
+  const results = await Promise.all([
+    mentionedBody ? sendPushToEndpoints(supabase, mentionedEndpoints, mentionedBody) : Promise.resolve({ sent: 0, stale: 0 }),
+    otherEndpoints.length > 0 ? sendPushToEndpoints(supabase, otherEndpoints, otherBody) : Promise.resolve({ sent: 0, stale: 0 }),
+  ]);
+  const result = { sent: results[0].sent + results[1].sent, stale: results[0].stale + results[1].stale };
+
   console.log("[notify-new-pin] chat notification complete", {
     messageId: payload.id,
     notified: ids.length,
+    mentioned: mentionedEndpoints.length,
     midBurst,
     ...result,
   });

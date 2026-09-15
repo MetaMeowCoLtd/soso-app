@@ -1834,6 +1834,9 @@ export function createDemoGateway(): SosoGateway {
           mine,
           replyTo: preview,
           reactions: chatReactionsFor(m.id, me),
+          // Nothing ever gets stored here — see sendChatMessage's own note
+          // on why demo mode's @mentions have nowhere to go.
+          mentions: [],
           media: demoMessageImage(m),
           sharedPost: demoSharedPost(m.sharedPostId),
           // Counts readers OTHER than the author, matching the real

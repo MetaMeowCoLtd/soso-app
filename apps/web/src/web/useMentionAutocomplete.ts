@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
-import type { DmThreadMember } from "soso-core";
+import type { AvatarPath } from "soso-core";
 
 /**
  * The Instagram-style "@" picker: typing "@" followed by letters opens a
@@ -9,13 +9,20 @@ import type { DmThreadMember } from "soso-core";
  * replaces what was typed, wherever the caret happens to be.
  *
  * WHY THIS IS NOT PART OF `ChatTextarea`. That component is a plain growing
- * textarea shared by the room, DMs, groups and a post's replies — none of
- * which except DMs/groups have anyone to mention. Baking mention-picking
- * into it would mean every caller either carries dead candidate-matching
- * code or threads an "enabled" flag through a component whose whole job is
- * to be a text field. This hook instead drives the SAME `<textarea>` from
- * outside, through the ref its caller already holds, so `ChatTextarea`
- * never needs to know mentions exist.
+ * textarea shared by the room, DMs, groups and a post's replies — and a
+ * post's replies still have nobody to mention. Baking mention-picking into
+ * it would mean every caller either carries dead candidate-matching code or
+ * threads an "enabled" flag through a component whose whole job is to be a
+ * text field. This hook instead drives the SAME `<textarea>` from outside,
+ * through the ref its caller already holds, so `ChatTextarea` never needs
+ * to know mentions exist.
+ *
+ * WHO COUNTS AS A CANDIDATE differs by caller, which is the whole reason
+ * `members` is typed as `MentionCandidate`, not `DmThreadMember`: a DM or
+ * group passes its thread membership, while the room (ChatPanel) — which
+ * has no membership at all — passes `Friend[]`, the sender's own mutual
+ * follows, matching what `send_chat_message` validates a mention against
+ * server-side (migration 0049).
  *
  * HOW THE ACTIVE QUERY IS FOUND: read the caret position, look at the text
  * immediately before it, and ask whether it ends in "@" plus a run of
@@ -35,6 +42,20 @@ export interface MentionQuery {
   text: string;
 }
 
+/**
+ * The least this hook needs to know about a candidate. Deliberately not
+ * `DmThreadMember` — that type also carries `role` and `blocked`, which mean
+ * nothing to a room composer whose candidates are `Friend`s (mutual
+ * follows), not thread members. Both shapes already have everything below,
+ * so either can be passed here as-is.
+ */
+export interface MentionCandidate {
+  id: string;
+  handle: string;
+  displayName: string;
+  avatarPath: AvatarPath;
+}
+
 const QUERY_PATTERN = /(?:^|[^a-z0-9_])@([a-z0-9_]{0,20})$/i;
 
 /** Shown at once — Instagram's own list is this short before it starts scrolling. */
@@ -49,13 +70,17 @@ export function useMentionAutocomplete({
   inputRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
   onChange: (value: string) => void;
-  /** Candidates, thread members only — see the module comment on why this is not everyone. */
-  members: readonly DmThreadMember[];
+  /**
+   * Candidates only — never "everyone", which is why the caller decides
+   * what this list is: a DM/group's members, or a room composer's mutual
+   * follows. Either way, this hook has no opinion beyond `MentionCandidate`.
+   */
+  members: readonly MentionCandidate[];
 }): {
-  suggestions: DmThreadMember[];
+  suggestions: MentionCandidate[];
   /** True while a query is active, whether or not it currently has any matches. */
   open: boolean;
-  select: (member: DmThreadMember) => void;
+  select: (member: MentionCandidate) => void;
   dismiss: () => void;
 } {
   const [query, setQuery] = useState<MentionQuery | null>(null);
@@ -123,7 +148,7 @@ export function useMentionAutocomplete({
   }, [query, members]);
 
   const select = useCallback(
-    (member: DmThreadMember) => {
+    (member: MentionCandidate) => {
       if (!query) return;
       const el = inputRef.current;
       const caret = el?.selectionStart ?? value.length;

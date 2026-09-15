@@ -4,17 +4,22 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { createPortal } from "react-dom";
 import {
   applyReactionToggle,
+  extractMentionedIds,
+  splitMentions,
   ERROR_MESSAGES_EN,
   ROOM_NAME,
   ROOM_SUBTITLE,
   MESSAGE_IMAGE_MIME_TYPES,
   MESSAGE_VIDEO_MIME_TYPES,
   type CategoryConfig,
+  type Friend,
+  type Mention,
   type MessageMedia,
   type ChatMessage,
   type DmThread,
   type SosoGateway,
 } from "soso-core";
+import { Avatar } from "./Avatar";
 import DmInbox from "./DmInbox";
 import { MessageActionSheet, pressedBubbleRect } from "./MessageActionSheet";
 import {
@@ -25,6 +30,7 @@ import {
 } from "./MessageMediaView";
 import SharedPostCard from "./SharedPostCard";
 import { useMediaAttachment } from "./useMediaAttachment";
+import { useMentionAutocomplete } from "./useMentionAutocomplete";
 import { useLongPress } from "./useLongPress";
 import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import { ChatTextarea } from "./ChatTextarea";
@@ -84,6 +90,24 @@ interface ChatPanelProps {
 
   /** Null until the profile loads, and always in demo mode. */
   myId: string | null;
+  /**
+   * Your own mutual follows — usePresence's own list, already held by
+   * page.tsx for the friends tab and the new-group flow. This is the
+   * room's @mention candidate pool: the room has no membership the way a
+   * group does, so "someone you follow each other with" is the boundary
+   * instead, the same one `send_chat_message` validates a mention against
+   * server-side (migration 0049). See useMentionAutocomplete's own note on
+   * why it takes this instead of `DmThreadMember[]`.
+   */
+  friends: Friend[];
+  /**
+   * Opens a profile by handle. Passed straight through to `openProfile`,
+   * the same way FeedTab and PeopleTab already do — unlike DmThreadView's
+   * own version of this prop, nothing needs to close first: `.chat-tab` is
+   * a plain tab (z-index:1), not an exclusive overlay like `.dm-thread`
+   * (z-index:20), and `.profile-view` (z-index:4) already paints above it.
+   */
+  onOpenProfile: (handle: string) => void;
   /** Opens a conversation full-screen; page.tsx owns that surface. */
   onOpenThread: (thread: DmThread) => void;
   /**
@@ -173,6 +197,8 @@ export default function ChatPanel({
   categories,
   onOpenPost,
   myId,
+  friends,
+  onOpenProfile,
   onOpenThread,
   openRoomRequested,
   onRoomOpened,
@@ -220,6 +246,17 @@ export default function ChatPanel({
   const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia; startTime?: number } | null>(
     null,
   );
+
+  const mention = useMentionAutocomplete({
+    inputRef,
+    value: input,
+    onChange: setInput,
+    members: friends,
+  });
+
+  function openMentionedProfile(target: Mention) {
+    onOpenProfile(target.handle);
+  }
 
   const reload = useCallback(async () => {
     try {
@@ -366,7 +403,8 @@ export default function ChatPanel({
     setError(null);
     const replyToId = replyingTo?.id ?? null;
     try {
-      const message = await gateway.sendChatMessage(body, replyToId, attachment.media);
+      const mentionedUserIds = extractMentionedIds(body, friends);
+      const message = await gateway.sendChatMessage(body, replyToId, attachment.media, null, mentionedUserIds);
       setInput("");
       setReplyingTo(null);
       attachment.clear();
@@ -558,6 +596,7 @@ export default function ChatPanel({
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onSwipeReply={() => startReply(message)}
                 onOpenImage={(url, media, startTime) => setLightbox({ url, media, startTime })}
+                onOpenMention={openMentionedProfile}
                 categories={categories}
                 onOpenPost={onOpenPost}
                 receipt={
@@ -627,6 +666,39 @@ export default function ChatPanel({
         </div>
       )}
 
+      {/* Above the composer, in normal flow, the same way DmThreadView's own
+          picker sits above its compose bar — see that component's note on
+          why a floating panel would be the wrong call here. */}
+      {mention.open && mention.suggestions.length > 0 && (
+        <ul className="mention-picker" role="listbox" aria-label="Mention someone">
+          {mention.suggestions.map((candidate) => (
+            <li key={candidate.id}>
+              <button
+                type="button"
+                className="mention-picker-row"
+                role="option"
+                // Prevents the textarea from blurring before this click's
+                // own select() runs — see useMentionAutocomplete's note on
+                // why every picker row needs this.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => mention.select(candidate)}
+              >
+                <Avatar
+                  name={candidate.displayName}
+                  seed={candidate.handle}
+                  src={gateway.avatarUrl(candidate.avatarPath)}
+                  size={30}
+                />
+                <span className="mention-picker-who">
+                  <strong>{candidate.displayName}</strong>
+                  <span>@{candidate.handle}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <form
         className="chat-compose"
         onSubmit={(e) => {
@@ -667,7 +739,16 @@ export default function ChatPanel({
           ref={inputRef}
           value={input}
           onChange={setInput}
-          onSubmit={() => void send()}
+          onSubmit={() => {
+            // Enter picks the top match instead of sending, while the
+            // picker is open and has one — see DmThreadView's identical
+            // precedence for why.
+            if (mention.open && mention.suggestions.length > 0) {
+              mention.select(mention.suggestions[0]!);
+              return;
+            }
+            void send();
+          }}
           placeholder={
             attachment.previewUrl
               ? "Add a caption…"
@@ -799,6 +880,7 @@ function ChatMessageRow({
   onToggleReaction,
   onSwipeReply,
   onOpenImage,
+  onOpenMention,
   categories,
   onOpenPost,
   receipt,
@@ -819,6 +901,7 @@ function ChatMessageRow({
   onToggleReaction: (emoji: string) => void;
   onSwipeReply: () => void;
   onOpenImage: (url: string, media: MessageMedia, startTime?: number) => void;
+  onOpenMention: (target: Mention) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
   /** Non-null on the one message that carries a read receipt, null on the rest. */
@@ -1040,7 +1123,35 @@ function ChatMessageRow({
                     rendered empty — an empty span still has line-height, and
                     the gap under the picture would look like a missing
                     caption. */}
-                {message.body && <span className="chat-bubble-text">{message.body}</span>}
+                {message.body && (
+                  <span className="chat-bubble-text">
+                    {/* Deliberately only here, not in the reply quote a few
+                        lines up or in the long-press sheet's clone of this
+                        same text — see DmBubble's identical choice and its
+                        own note on why a nested mention button would be a
+                        second, conflicting tap target there. */}
+                    {splitMentions(message.body, message.mentions).map((segment, i) =>
+                      segment.kind === "mention" ? (
+                        <button
+                          key={i}
+                          type="button"
+                          className="chat-mention"
+                          onClick={(e) => {
+                            // Stopped so this does not also register as the
+                            // bubble's own tap — see onBubbleClick's "any
+                            // button inside" guard.
+                            e.stopPropagation();
+                            onOpenMention(segment);
+                          }}
+                        >
+                          @{segment.handle}
+                        </button>
+                      ) : (
+                        <span key={i}>{segment.text}</span>
+                      ),
+                    )}
+                  </span>
+                )}
               </div>
 
               {message.reactions.length > 0 && (
