@@ -66,4 +66,14 @@ const config = getDefaultConfig(projectRoot);
 
 config.watchFolders = [coreRoot, repoNodeModules];
 
+// Standard react-native-svg-transformer wiring: .svg moves from "asset"
+// (copied as a static file, imported as a number/URI) to "source" (run
+// through SVGR, imported as a React component) — see src/theme/Icon.tsx for
+// why the icon set needs the latter: every icon file was recoloured to
+// `currentColor` on copy into assets/icons, which only means anything once
+// react-native-svg resolves it against the component's own `color` prop.
+config.transformer.babelTransformerPath = require.resolve("react-native-svg-transformer");
+config.resolver.assetExts = config.resolver.assetExts.filter((ext) => ext !== "svg");
+config.resolver.sourceExts = [...config.resolver.sourceExts, "svg"];
+
 module.exports = config;
