@@ -29,7 +29,21 @@ export type RootStackParamList = {
   BoardCanvas: { pinId: string };
   ThoughtThread: { postId: string; mode: "post" | "comments" };
   ProfileView: { handle: string };
-  ConnectionsView: { userId: string; initialTab?: "followers" | "following" };
+  /**
+   * Carries the header info (handle/displayName/counts) the web version's
+   * `ConnectionsView` takes as props from the profile that opened it —
+   * `onOpenConnections(profile, tab)` in ProfileView.tsx — rather than just
+   * a bare userId, so the screen doesn't refetch a profile it was just
+   * shown for header text alone.
+   */
+  ConnectionsView: {
+    userId: string;
+    handle: string;
+    displayName: string;
+    followers: number;
+    following: number;
+    initialTab: "followers" | "following";
+  };
   ProfileSettings: undefined;
   SharePinSheet: { postId: string };
   NewGroupSheet: undefined;
