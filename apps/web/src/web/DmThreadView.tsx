@@ -138,7 +138,9 @@ export default function DmThreadView({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachment = useMediaAttachment(gateway, { kind: "dm", threadId: thread.id });
-  const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia } | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia; startTime?: number } | null>(
+    null,
+  );
   /** How far each other member has read. Empty until fetched, and for anyone who never has. */
   const [readState, setReadState] = useState<DmReadReceipt[]>([]);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -486,7 +488,7 @@ export default function DmThreadView({
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onSwipeReply={() => startReply(message)}
                 onToggleReaction={(emoji) => void react(message, emoji)}
-                onOpenImage={(url, media) => setLightbox({ url, media })}
+                onOpenImage={(url, media, startTime) => setLightbox({ url, media, startTime })}
                 categories={categories}
                 onOpenPost={onOpenPost}
                 receipt={
@@ -639,6 +641,7 @@ export default function DmThreadView({
             url={lightbox.url}
             media={lightbox.media}
             gateway={gateway}
+            startTime={lightbox.startTime}
             onSave={() => saveMessageMedia(gateway, lightbox.media)}
             onClose={() => setLightbox(null)}
           />,
@@ -828,7 +831,7 @@ function DmBubble({
   onOpenMenu: (rect: DOMRect) => void;
   onSwipeReply: () => void;
   onToggleReaction: (emoji: string) => void;
-  onOpenImage: (url: string, media: MessageMedia) => void;
+  onOpenImage: (url: string, media: MessageMedia, startTime?: number) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
   /** Non-null on the one message that carries a read receipt, null on the rest. */

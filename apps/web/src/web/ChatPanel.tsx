@@ -217,7 +217,9 @@ export default function ChatPanel({
   // The URL of the image currently open full-screen, or null. Holds the URL
   // rather than the path because the thumbnail that opened it already had
   // one minted — see MessageMediaLightbox.
-  const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia } | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; media: MessageMedia; startTime?: number } | null>(
+    null,
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -555,7 +557,7 @@ export default function ChatPanel({
                 onOpenMenu={(rect) => setMenu({ message, rect })}
                 onToggleReaction={(emoji) => void react(message, emoji)}
                 onSwipeReply={() => startReply(message)}
-                onOpenImage={(url, media) => setLightbox({ url, media })}
+                onOpenImage={(url, media, startTime) => setLightbox({ url, media, startTime })}
                 categories={categories}
                 onOpenPost={onOpenPost}
                 receipt={
@@ -702,6 +704,7 @@ export default function ChatPanel({
             url={lightbox.url}
             media={lightbox.media}
             gateway={gateway}
+            startTime={lightbox.startTime}
             onSave={() => saveMessageMedia(gateway, lightbox.media)}
             onClose={() => setLightbox(null)}
           />,
@@ -815,7 +818,7 @@ function ChatMessageRow({
   onOpenMenu: (rect: DOMRect) => void;
   onToggleReaction: (emoji: string) => void;
   onSwipeReply: () => void;
-  onOpenImage: (url: string, media: MessageMedia) => void;
+  onOpenImage: (url: string, media: MessageMedia, startTime?: number) => void;
   categories: CategoryConfig[];
   onOpenPost: (postId: string) => void;
   /** Non-null on the one message that carries a read receipt, null on the rest. */

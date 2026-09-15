@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { messageImageDisplaySize, type MessageMedia, type SosoGateway } from "soso-core";
 import { Icon, ICONS } from "./Icon";
 import { cachedMediaBlob, cachedMediaUrl, storeMedia } from "./mediaCache";
@@ -421,7 +421,7 @@ export function MessageMediaView({
    * (a reply quote). Hands back the image as well as the URL, because the
    * viewer needs the object path to save it and only this component has it.
    */
-  onOpen?: (url: string, image: MessageMedia) => void;
+  onOpen?: (url: string, image: MessageMedia, startTime?: number) => void;
 }) {
   const isVideo = image.kind === "video";
   // A video shows its POSTER in the list and only fetches the clip itself
@@ -429,6 +429,12 @@ export function MessageMediaView({
   // minting a URL for a 20 MB object, and letting the browser start
   // buffering it, for every clip in a scrolling conversation would be
   // expensive in a way nobody asked for.
+  //
+  // "Someone asks" now includes "scrolled it into view" — see AutoplayVideo
+  // below — so that statement is no longer quite the whole story for the
+  // main bubble. It is still exactly true for a reply quote or the
+  // long-press sheet's clone, which is why those keep this poster-first,
+  // tap-to-fetch behaviour: `onOpen` is what tells the two apart.
   const thumbPath = isVideo ? image.posterPath! : image.path;
   const { url, loading } = useMessageImageUrl(gateway, thumbPath);
   const size = messageImageDisplaySize(image, availableWidth, maxHeight);
@@ -451,6 +457,22 @@ export function MessageMediaView({
       <span className="message-image message-image-missing" style={style}>
         {isVideo ? "Video unavailable" : "Image unavailable"}
       </span>
+    );
+  }
+
+  // The main bubble in a scrolling conversation — the one surface with
+  // somewhere for "in view" to mean something. A reply quote and the
+  // long-press sheet's clone pass no `onOpen` and fall through to the
+  // tap-to-play button below instead, unchanged.
+  if (isVideo && onOpen) {
+    return (
+      <AutoplayVideo
+        gateway={gateway}
+        media={image}
+        poster={url}
+        size={size}
+        onOpen={(startTime) => onOpen(url, image, startTime)}
+      />
     );
   }
 
@@ -507,10 +529,153 @@ function formatClipLength(durationMs: number): string {
 }
 
 /**
+ * Whether `ref`'s element currently has at least `threshold` of its area on
+ * screen inside the conversation's own scroll container.
+ *
+ * Backs autoplay, on the same policy every video-feed app uses — TikTok,
+ * Instagram, Twitter: a clip starts once it is genuinely on screen and stops
+ * the moment it scrolls away, rather than the instant it merely mounts.
+ *
+ * IntersectionObserver rather than a scroll listener: the browser's own
+ * batched, off-main-thread answer to "is this visible", instead of a
+ * bounding-rect calculation re-run on every scroll frame for every clip in
+ * the list at once.
+ */
+function useInView(threshold: number): [RefObject<HTMLButtonElement | null>, boolean] {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => setInView(entries[0]!.isIntersecting), {
+      threshold,
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [threshold]);
+
+  return [ref, inView];
+}
+
+/**
+ * At least this much of a clip has to be on screen before it starts, so a
+ * sliver poking in at the very edge of the viewport does not set it off —
+ * the same reason a message only counts as "read" once it is substantially
+ * shown (see useChatScroll).
+ */
+const AUTOPLAY_THRESHOLD = 0.6;
+
+/**
+ * A clip in the scrolling conversation: plays muted and looping the moment
+ * it is mostly on screen, pauses the moment it isn't, and hands off to the
+ * full viewer — with sound and controls — on tap.
+ *
+ * MUTED IS NOT OPTIONAL, on two grounds that would each be sufficient alone.
+ * Every browser refuses an autoplay attempt that carries sound unless it was
+ * started by an explicit user gesture, and scrolling is not one — an
+ * unmuted attempt would simply not play, silently, and read as a broken
+ * video rather than as a muted one. And a scrolling conversation with a
+ * dozen clips playing sound at once, or even one playing quietly into a
+ * room nobody asked it to, is not something a chat app should ever do
+ * unprompted.
+ *
+ * THIS DOES FETCH THE CLIP FOR EVERY VIDEO THAT SCROLLS INTO VIEW, which is
+ * a real cost `MessageMediaView`'s own module comment argues against for
+ * the tap-to-play path a reply quote still uses. The trade is deliberate
+ * here and does not apply there: autoplaying an unfetched clip is not
+ * possible, and PAUSING rather than unmounting the moment a clip leaves
+ * view is what keeps the actual cost to "the ones you scrolled past" —
+ * fetched once, replayed for free every time you scroll back — rather than
+ * "every clip in the thread at once".
+ *
+ * The clip's own play position is handed back on tap (`onOpen`), so opening
+ * the full viewer continues from where the muted preview was rather than
+ * restarting a clip that was already halfway through.
+ */
+function AutoplayVideo({
+  gateway,
+  media,
+  poster,
+  size,
+  onOpen,
+}: {
+  gateway: SosoGateway;
+  media: MessageMedia;
+  poster: string;
+  size: { width: number; height: number };
+  onOpen: (startTime: number) => void;
+}) {
+  const [buttonRef, inView] = useInView(AUTOPLAY_THRESHOLD);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  // Latched, not just `inView` itself: once a clip has been on screen it
+  // keeps its fetched URL, so scrolling back to it resumes immediately
+  // rather than re-minting a URL and re-buffering from nothing.
+  const [everSeen, setEverSeen] = useState(false);
+  useEffect(() => {
+    if (inView) setEverSeen(true);
+  }, [inView]);
+
+  const { url: clipUrl } = useMessageImageUrl(gateway, everSeen ? media.path : null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (inView) {
+      // The promise rejects when the browser changes its mind between this
+      // call and the frame actually decoding — a load interrupted by
+      // scrolling straight past, a tab that lost focus mid-request — and
+      // is never something to surface as though the app had failed.
+      void el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+  }, [inView, clipUrl]);
+
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      className="message-image message-image-button"
+      style={{ width: size.width, height: size.height }}
+      onClick={() => onOpen(videoRef.current?.currentTime ?? 0)}
+      aria-label="Open video"
+    >
+      {clipUrl ? (
+        <video
+          ref={videoRef}
+          src={clipUrl}
+          poster={poster}
+          width={size.width}
+          height={size.height}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+        />
+      ) : (
+        // Before the clip has ever been in view, or while its URL is still
+        // being minted: the same still frame either way, so there is
+        // nothing on screen that later needs to be swapped out from under
+        // whoever is looking at it.
+        <img src={poster} alt="" width={size.width} height={size.height} />
+      )}
+      {media.durationMs !== null && (
+        <span className="message-video-duration" aria-hidden="true">
+          {formatClipLength(media.durationMs)}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/**
  * The clip itself, mounted only after a tap.
  *
  * Its URL is minted here rather than alongside the poster, which is the
- * point: nothing fetches a video's bytes until someone asks for it.
+ * point: nothing fetches a video's bytes until someone asks for it. Used
+ * only by the tap-to-play fallback (a reply quote, the long-press sheet's
+ * clone) — the main bubble autoplays instead, via `AutoplayVideo` above.
  *
  * `controls` is the browser's own, deliberately. A custom control bar would
  * mean reimplementing scrubbing, fullscreen, AirPlay and Picture-in-Picture,
@@ -570,6 +735,7 @@ export function MessageMediaLightbox({
   url,
   media,
   gateway,
+  startTime,
   onSave,
   onClose,
 }: {
@@ -582,6 +748,14 @@ export function MessageMediaLightbox({
   media?: MessageMedia;
   /** Needed only to mint a clip's URL, so it is optional alongside `media`. */
   gateway?: SosoGateway;
+  /**
+   * Where to pick up playback, for a video opened from its own autoplaying
+   * bubble — the muted loop was already partway through, and restarting a
+   * clip somebody has already been watching for its own tap would read as
+   * the tap having gone wrong. Ignored for an image, and for a video opened
+   * from anywhere that was not itself already playing.
+   */
+  startTime?: number;
   /** Omitted where saving is not offered; the button disappears rather than failing. */
   onSave?: () => Promise<SaveOutcome>;
   onClose: () => void;
@@ -657,7 +831,7 @@ export function MessageMediaLightbox({
         </button>
       </div>
       {media?.kind === "video" && gateway ? (
-        <LightboxVideo gateway={gateway} media={media} poster={url} />
+        <LightboxVideo gateway={gateway} media={media} poster={url} startTime={startTime} />
       ) : (
         <img src={url} alt="" />
       )}
@@ -679,10 +853,12 @@ function LightboxVideo({
   gateway,
   media,
   poster,
+  startTime,
 }: {
   gateway: SosoGateway;
   media: MessageMedia;
   poster: string;
+  startTime?: number;
 }) {
   const { url, loading } = useMessageImageUrl(gateway, media.path);
 
@@ -700,6 +876,18 @@ function LightboxVideo({
       // player — which here would mean a second viewer on top of this one.
       playsInline
       preload="metadata"
+      // Seeking has to wait for metadata: a currentTime assignment before
+      // duration is known is silently ignored rather than queued, so it is
+      // set here instead of as a plain prop. Guarded to a positive, finite
+      // value — `startTime` is a `currentTime` read from a still-loading
+      // preview in the rare case the two races, and NaN or a small negative
+      // rounding artefact should just mean "start from the top" rather than
+      // throw out of this handler.
+      onLoadedMetadata={(e) => {
+        if (startTime && Number.isFinite(startTime) && startTime > 0) {
+          e.currentTarget.currentTime = startTime;
+        }
+      }}
     />
   );
 }
