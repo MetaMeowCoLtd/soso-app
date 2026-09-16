@@ -18,6 +18,7 @@ import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
+import { Screen } from "../ui/Screen";
 import { ConversationAvatar } from "./ConversationAvatar";
 
 /**
@@ -155,7 +156,11 @@ export default function GroupDetailsSheet({ thread, gateway, friends, myId, myAv
   if (mode === "add") {
     return (
       <Modal visible animationType="slide" onRequestClose={() => setMode("detail")}>
-        <View style={styles.sheet}>
+        {/* A raw RN Modal, unlike a React Navigation screen, gets no safe-area
+            treatment on its own — its header sat flush under the notch/status
+            bar until this wrapped it in the same SafeAreaView every other
+            full-screen surface in this app uses. */}
+        <Screen edges={["top", "bottom"]}>
           <View style={styles.head}>
             <Pressable onPress={() => { setMode("detail"); setPicked([]); setQuery(""); }} accessibilityLabel="Back">
               <Icon src={ICONS.chevronLeft} size={17} color={COLORS.ink} />
@@ -200,14 +205,14 @@ export default function GroupDetailsSheet({ thread, gateway, friends, myId, myAv
               })
             )}
           </ScrollView>
-        </View>
+        </Screen>
       </Modal>
     );
   }
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
-      <View style={styles.sheet}>
+      <Screen edges={["top", "bottom"]}>
         <View style={styles.head}>
           <Pressable onPress={onClose} accessibilityLabel="Back">
             <Icon src={ICONS.chevronLeft} size={17} color={COLORS.ink} />
@@ -297,7 +302,7 @@ export default function GroupDetailsSheet({ thread, gateway, friends, myId, myAv
             )}
           </View>
         </ScrollView>
-      </View>
+      </Screen>
 
       {photo.cropping && <AvatarCropper image={photo.cropping} busy={photo.rendering || busy} onConfirm={photo.applyCrop} onCancel={photo.closeCropper} />}
     </Modal>
@@ -305,7 +310,6 @@ export default function GroupDetailsSheet({ thread, gateway, friends, myId, myAv
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, backgroundColor: COLORS.surface },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 },
   headTitle: { fontSize: 16, fontWeight: "700" },
   headAction: { color: COLORS.teal, fontWeight: "700" },

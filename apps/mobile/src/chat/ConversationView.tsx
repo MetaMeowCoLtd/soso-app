@@ -1,6 +1,6 @@
 import * as Clipboard from "expo-clipboard";
 import { useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import { ERROR_MESSAGES_EN, extractMentionedIds, type CategoryConfig, type Mention, type MessageMedia, type SosoGateway } from "../core";
 import { MessageMediaLightbox, MessageMediaView } from "../media/MessageMediaView";
@@ -223,7 +223,13 @@ export function ConversationView({
   }
 
   return (
-    <View style={styles.flex1}>
+    // Same reasoning as ThoughtComposer: this view already fills exactly
+    // the space its parent (the tab's content area, or the full-screen DM
+    // stack screen) gives it, composer pinned to the bottom by flex layout
+    // alone — `behavior="padding"` just grows that bottom space by the
+    // keyboard's height, with nothing to offset for a header or tab bar by
+    // hand, since neither is inside this view to begin with.
+    <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       {header}
 
       {!loaded ? (
@@ -379,7 +385,7 @@ export function ConversationView({
       {lightboxRow?.media && (
         <MessageMediaLightbox visible media={lightboxRow.media} gateway={gateway} onClose={() => setLightboxRow(null)} />
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

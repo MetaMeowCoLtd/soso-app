@@ -88,8 +88,8 @@ export function MessageBubble({
                     disabled={!onJumpToReply}
                     accessibilityLabel="Go to the message this replies to"
                   >
-                    <AppText style={styles.quoteAuthor}>{row.replyTo.authorLabel}</AppText>
-                    <AppText style={styles.quoteBody} numberOfLines={2}>
+                    <AppText style={[styles.quoteAuthor, mine && styles.quoteTextMine]}>{row.replyTo.authorLabel}</AppText>
+                    <AppText style={[styles.quoteBody, mine && styles.quoteTextMine]} numberOfLines={2}>
                       {row.replyTo.body || (row.replyTo.media ? attachmentWord(row.replyTo.media) : row.replyTo.hasPost ? "Pin" : "")}
                     </AppText>
                   </Pressable>
@@ -100,10 +100,10 @@ export function MessageBubble({
                 {row.sharedPost && <SharedPostCard post={row.sharedPost} categories={categories} onOpen={onOpenPost} />}
 
                 {row.body && (
-                  <AppText style={styles.bodyText}>
+                  <AppText style={[styles.bodyText, mine && styles.bodyTextMine]}>
                     {splitByMentions(row.body, row.mentions).map((segment, i) =>
                       segment.kind === "mention" ? (
-                        <AppText key={i} style={styles.mention} onPress={() => onOpenMention(segment.mention)}>
+                        <AppText key={i} style={[styles.mention, mine && styles.mentionMine]} onPress={() => onOpenMention(segment.mention)}>
                           @{segment.mention.handle}
                         </AppText>
                       ) : (
@@ -175,11 +175,19 @@ const styles = StyleSheet.create({
   bubble: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, gap: 4 },
   bubbleMine: { backgroundColor: COLORS.teal },
   bubbleTheirs: { backgroundColor: "rgba(20,50,43,0.06)" },
+  // Matches web's `.chat-row.mine .chat-bubble { color:#fff }` — a "mine"
+  // bubble's background is COLORS.teal (below), and CSS's `color:inherit`
+  // is what carries that white down into the body text, mentions, and
+  // reply-quote there. RN's Text doesn't inherit across sibling styles the
+  // way the DOM does, so each of those needs its own "mine" variant instead.
   bodyText: { fontSize: 15, color: COLORS.ink },
-  mention: { color: COLORS.deep, fontWeight: "700" },
+  bodyTextMine: { color: "#ffffff" },
+  mention: { color: COLORS.teal, fontWeight: "700" },
+  mentionMine: { color: COLORS.mint },
   quote: { borderLeftWidth: 2, borderLeftColor: COLORS.muted, paddingLeft: 6, marginBottom: 2, gap: 1 },
   quoteAuthor: { fontSize: 11, fontWeight: "700", color: COLORS.muted },
   quoteBody: { fontSize: 12, color: COLORS.muted },
+  quoteTextMine: { color: "rgba(255,255,255,0.85)" },
   reactions: { flexDirection: "row", gap: 4, marginTop: 2 },
   reaction: { flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: COLORS.glass, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
   reactionMine: { borderWidth: 1, borderColor: COLORS.teal },

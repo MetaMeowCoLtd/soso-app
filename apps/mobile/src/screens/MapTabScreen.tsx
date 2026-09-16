@@ -1,8 +1,16 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Camera, Map, type MapRef, type StyleSpecification } from "@maplibre/maplibre-react-native";
+import {
+  Camera,
+  Map,
+  useCurrentPosition,
+  type CameraRef,
+  type MapRef,
+  type StyleSpecification,
+} from "@maplibre/maplibre-react-native";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { Bounds, Pin, PostDetail, ReportReason } from "../core";
 import { useGateway } from "../gate/AppGate";
@@ -17,7 +25,9 @@ import ReportForm from "../map/ReportForm";
 import { useCategories } from "../map/useCategories";
 import { useFeed } from "../map/useFeed";
 import type { RootStackParamList } from "../navigation/types";
-import { COLORS } from "../theme/tokens";
+import { Icon, ICONS } from "../theme/Icon";
+import { lookOf } from "../theme/categories";
+import { COLORS, SHADOWS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
 
 /** Layer ids from mapStyle.ts's soso_shops/poi_transit — ported from apps/web/src/web/SosoMap.tsx's POI_LAYERS. */
@@ -38,9 +48,27 @@ const POI_LAYERS = ["soso_shops", "poi_transit"];
 export default function MapTabScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const gateway = useGateway();
-  const { view, setViewport, refresh } = useFeed(gateway, null);
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const { view, setViewport, refresh } = useFeed(gateway, activeFilters.length > 0 ? activeFilters : null);
   const { categories } = useCategories(gateway);
+  // Mirrors web's `placeableCategories` — a category with no location
+  // ("thought") never renders as a map pin, so it has nothing to filter here.
+  const placeableCategories = categories.filter((c) => c.requiresLocation);
   const mapRef = useRef<MapRef>(null);
+  const cameraRef = useRef<CameraRef>(null);
+  // Wherever the map is currently looking — kept as a ref, not state, since
+  // it updates on every pan/zoom and nothing here needs to re-render for
+  // that; only the "drop a pin here" FAB reads it, at the moment it's
+  // pressed. Mirrors web's `mapCenter` ref (page.tsx's `beginPinAtCurrentView`).
+  const mapCenterRef = useRef<Coordinates>({ latitude: DEFAULT_CENTER[1], longitude: DEFAULT_CENTER[0] });
+  const currentPosition = useCurrentPosition();
+  // The map itself stays edge-to-edge (by design — see this file's module
+  // comment), but the floating filter chips are real controls, not part of
+  // the map image, and a flat `top:16` put them right under the notch/
+  // Dynamic Island on anything that has one. `mapRail`/the bottom controls
+  // don't need this: this is a tab screen, so React Navigation's own tab
+  // bar already keeps the bottom of this view clear of the home indicator.
+  const insets = useSafeAreaInsets();
 
   const [style, setStyle] = useState<StyleSpecification | null>(null);
   const [styleError, setStyleError] = useState<string | null>(null);
@@ -114,6 +142,30 @@ export default function MapTabScreen() {
     await gateway.resolvePost(postId);
   }
 
+  // Mirrors web's `locateMe` — the camera flies to whatever position is
+  // already in state from the map's own location tracking (MyLocationMarker
+  // and this both read the same `useCurrentPosition()`), so there's no
+  // separate one-shot GPS request to wait on.
+  function locateMe() {
+    if (!currentPosition) return;
+    const { latitude, longitude } = currentPosition.coords;
+    cameraRef.current?.flyTo({ center: [longitude, latitude], zoom: DEFAULT_ZOOM, duration: 600 });
+  }
+
+  // Mirrors web's `beginPinAtCurrentView` — "drop a pin here" means wherever
+  // the map is currently centred, not the device's GPS position (those two
+  // are usually the same point, but not always, e.g. after panning around).
+  function beginPinAtCurrentView() {
+    if (placing) return;
+    setSelectedPin(null);
+    setSelectedPoi(null);
+    setPlacing(mapCenterRef.current);
+  }
+
+  function toggleFilter(key: string) {
+    setActiveFilters((current) => (current.includes(key) ? current.filter((k) => k !== key) : [...current, key]));
+  }
+
   if (styleError) {
     return (
       <View style={styles.centered}>
@@ -139,11 +191,12 @@ export default function MapTabScreen() {
         onRegionDidChange={(event) => {
           const [west, south, east, north] = event.nativeEvent.bounds;
           const bounds: Bounds = { west, south, east, north };
+          mapCenterRef.current = { latitude: (south + north) / 2, longitude: (west + east) / 2 };
           setViewport(bounds, event.nativeEvent.zoom);
         }}
         onPress={(event) => void handleMapPress(event.nativeEvent.point, event.nativeEvent.lngLat)}
       >
-        <Camera initialViewState={{ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM }} />
+        <Camera ref={cameraRef} initialViewState={{ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM }} />
         <MyLocationMarker />
         {view.mode === "counts" && view.counts.map((count) => <CountBadgeMarker key={count.cellId} count={count} />)}
         {view.mode === "pins" &&
@@ -163,14 +216,68 @@ export default function MapTabScreen() {
             ))}
       </Map>
 
-      {view.mode === "idle" && !placing && !selectedPin && !selectedPoi && (
-        <View style={styles.idleHint} pointerEvents="none">
-          <AppText style={styles.idleHintText}>Zoom in to see reports</AppText>
+      {!placing && !selectedPin && !selectedPoi && (
+        <View style={[styles.topOverlay, { top: insets.top + 12 }]} pointerEvents="box-none">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+            style={styles.filterScroll}
+          >
+            <Pressable
+              style={[styles.chip, activeFilters.length === 0 && styles.chipActive]}
+              onPress={() => setActiveFilters([])}
+              accessibilityLabel="All categories"
+              accessibilityState={{ selected: activeFilters.length === 0 }}
+            >
+              <AppText style={[styles.chipText, activeFilters.length === 0 && styles.chipTextActive]}>All</AppText>
+            </Pressable>
+            {placeableCategories.map((c) => {
+              const active = activeFilters.includes(c.key);
+              const look = lookOf(c.key);
+              return (
+                <Pressable
+                  key={c.key}
+                  style={[styles.chip, active && { backgroundColor: look.color }]}
+                  onPress={() => toggleFilter(c.key)}
+                  accessibilityLabel={`Filter by ${c.labelEn}`}
+                  accessibilityState={{ selected: active }}
+                >
+                  <View style={[styles.chipDot, { backgroundColor: active ? "#ffffff" : look.color }]} />
+                  <AppText style={[styles.chipText, active && styles.chipTextActive]}>{c.labelEn}</AppText>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          {view.mode === "idle" && (
+            <View style={styles.idleHint} pointerEvents="none">
+              <AppText style={styles.idleHintText}>Zoom in to see reports</AppText>
+            </View>
+          )}
+        </View>
+      )}
+
+      {!placing && (
+        <View style={styles.mapRail}>
+          <Pressable style={styles.railButton} onPress={locateMe} accessibilityLabel="Jump to current location">
+            <Icon src={ICONS.locate} size={21} color={COLORS.ink} />
+          </Pressable>
+          <Pressable style={styles.fab} onPress={beginPinAtCurrentView} accessibilityLabel="Drop a pin here">
+            <Icon src={ICONS.plus} size={26} color="#ffffff" />
+          </Pressable>
         </View>
       )}
 
       {placing && (
-        <View style={styles.overlay}>
+        // This card is `position:absolute`, not part of the normal flex
+        // flow — "padding"/"height" (which grow a view's own box) don't
+        // apply to it, so it needs "position" specifically: the one
+        // KeyboardAvoidingView behavior that shifts its child by an
+        // absolute offset instead. Android already gets this for free
+        // (the window itself resizes above the keyboard), so this is
+        // iOS-only, same split as everywhere else in this file.
+        <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === "ios" ? "position" : undefined}>
           <ReportForm
             gateway={gateway}
             categories={categories}
@@ -183,7 +290,7 @@ export default function MapTabScreen() {
               return pin;
             }}
           />
-        </View>
+        </KeyboardAvoidingView>
       )}
 
       {!placing && selectedPoi && (
@@ -242,11 +349,13 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.screenBackground },
   errorText: { color: COLORS.hot, padding: 24, textAlign: "center" },
-  idleHint: {
+  topOverlay: {
     position: "absolute",
-    top: 16,
-    left: 16,
-    right: 16,
+    left: 0,
+    right: 0,
+    gap: 10,
+  },
+  idleHint: {
     alignItems: "center",
   },
   idleHintText: {
@@ -256,6 +365,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 20,
     fontSize: 13,
+  },
+  filterScroll: { flexGrow: 0 },
+  filterRow: { paddingHorizontal: 16, gap: 8 },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#ffffff",
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    ...SHADOWS.e1,
+  },
+  chipActive: { backgroundColor: COLORS.deep },
+  chipDot: { width: 8, height: 8, borderRadius: 4 },
+  chipText: { fontSize: 13, fontWeight: "600", color: COLORS.ink },
+  chipTextActive: { color: "#ffffff" },
+  mapRail: {
+    position: "absolute",
+    right: 16,
+    bottom: 24,
+    alignItems: "center",
+    gap: 12,
+  },
+  railButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    ...SHADOWS.e2,
+  },
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.teal,
+    alignItems: "center",
+    justifyContent: "center",
+    ...SHADOWS.e2,
   },
   overlay: {
     position: "absolute",

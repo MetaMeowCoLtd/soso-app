@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, View } from "react-native";
 
 import { ERROR_MESSAGES_EN, type NewPost, type PostAudience, type PostDetail, type SosoGateway } from "../core";
 import { COLORS } from "../theme/tokens";
@@ -64,7 +64,11 @@ export default function ThoughtComposer({ gateway, onCancel, onPosted }: Thought
   }
 
   return (
-    <View style={styles.backdrop}>
+    // `behavior="padding"` grows this view's own bottom padding by exactly
+    // the keyboard's height, which is all that's needed here since the
+    // sheet below is already anchored to the bottom via `justifyContent:
+    // "flex-end"` — no manual offset, no measuring anything by hand.
+    <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <View style={styles.sheet}>
         <View style={styles.head}>
           <Button label="Cancel" variant="secondary" onPress={onCancel} disabled={busy} style={styles.headButton} />
@@ -101,7 +105,7 @@ export default function ThoughtComposer({ gateway, onCancel, onPosted }: Thought
 
         {error && <AppText style={styles.error}>{error}</AppText>}
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

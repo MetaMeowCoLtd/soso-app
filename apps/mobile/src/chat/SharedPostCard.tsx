@@ -66,7 +66,12 @@ export default function SharedPostCard({ post, categories, onOpen }: SharedPostC
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: 12, backgroundColor: "rgba(255,255,255,0.5)", padding: 10, gap: 4, minWidth: 160 },
+  // Solid white, matching web's `.shared-post { background:#fff }` — this
+  // card is meant to break cleanly out of the bubble's own colour (teal on
+  // a "mine" message) rather than tint with it, so it stays legible and
+  // consistent regardless of who sent it. A translucent white here let the
+  // teal bleed through on "mine" messages instead.
+  card: { borderRadius: 12, backgroundColor: "#ffffff", padding: 10, gap: 4, minWidth: 160 },
   head: { flexDirection: "row", alignItems: "center", gap: 6 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   label: { fontSize: 12, fontWeight: "700" },

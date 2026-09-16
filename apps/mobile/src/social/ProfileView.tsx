@@ -56,11 +56,12 @@ export default function ProfileView({
   onEditProfile,
 }: ProfileViewProps) {
   const isTab = variant === "tab";
-  // Only the tab variant needs this: the overlay variant is a pushed
-  // native-stack screen with a visible header, which already lays its
-  // content out clear of the status bar. The tab variant sits under
-  // TabNavigator's `headerShown: false` (Map wants edge-to-edge; this
-  // doesn't), so nothing else accounts for the top inset here.
+  // The cover photo bleeds edge-to-edge under the status bar in BOTH
+  // variants, matching web's `.profile-view-cover` (no top inset of its
+  // own) — only the overlay variant's floating back button needs its own
+  // safe-area clearance (web: `.profile-view-back { top:max(12px,
+  // env(safe-area-inset-top)) }`), since RootNavigator renders this screen
+  // with `headerShown: false` and nothing else accounts for the top inset.
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -142,9 +143,13 @@ export default function ProfileView({
   }
 
   return (
-    <View style={[styles.flex1, isTab && { paddingTop: insets.top }]}>
+    <View style={styles.flex1}>
       {!isTab && onClose && (
-        <Pressable style={styles.backButton} onPress={onClose} accessibilityLabel="Back">
+        <Pressable
+          style={[styles.backButton, { top: Math.max(16, insets.top) }]}
+          onPress={onClose}
+          accessibilityLabel="Back"
+        >
           <Icon src={ICONS.chevronLeft} size={22} color="#ffffff" />
         </Pressable>
       )}
@@ -175,7 +180,7 @@ export default function ProfileView({
               <View style={styles.stats}>
                 <View style={styles.stat}>
                   <AppText style={styles.statNumber}>{profile.pins}</AppText>
-                  <AppText style={styles.statLabel}>pins</AppText>
+                  <AppText style={styles.statLabel}>📍 pins</AppText>
                 </View>
                 <Pressable style={styles.stat} onPress={() => onOpenConnections(profile, "followers")}>
                   <AppText style={styles.statNumber}>{profile.followers}</AppText>
