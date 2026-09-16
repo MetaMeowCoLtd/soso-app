@@ -177,7 +177,15 @@ export default function DmThreadViewScreen() {
   }
 
   return (
-    <Screen edges={["top"]}>
+    // Unlike the tab screens, this is a full-screen stack push with no tab
+    // bar underneath to absorb the bottom safe area — web's `.dm-thread`
+    // handles this with its own `padding-bottom: env(safe-area-inset-bottom)`
+    // equivalent. Insetting only "top" here (as the tab screens correctly
+    // do, since their tab bar already covers it) left the composer's send
+    // button flush against the physical bottom edge, unreachable behind
+    // Android's 3-button nav bar or otherwise cramped on phones with no
+    // notch/home-indicator inset to fall back on.
+    <Screen edges={["top", "bottom"]}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} accessibilityLabel="Back" style={styles.headerButton}>
           <Icon src={ICONS.chevronLeft} size={17} color={COLORS.ink} />

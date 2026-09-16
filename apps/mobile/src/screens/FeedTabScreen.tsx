@@ -52,6 +52,10 @@ export default function FeedTabScreen() {
 
   return (
     <Screen edges={["top"]}>
+      <View style={styles.header}>
+        <AppText style={styles.screenTitle}>Posts</AppText>
+      </View>
+
       {hasNewPosts && (
         <Pressable style={styles.newBanner} onPress={refresh}>
           <Icon src={ICONS.arrowUp} size={13} color="#ffffff" />
@@ -114,7 +118,8 @@ export default function FeedTabScreen() {
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1, backgroundColor: COLORS.screenBackground },
+  header: { paddingHorizontal: 16, paddingVertical: 12 },
+  screenTitle: { fontSize: 20, fontWeight: "700" },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
   status: { color: COLORS.muted },
   retry: { color: COLORS.teal, fontWeight: "600" },

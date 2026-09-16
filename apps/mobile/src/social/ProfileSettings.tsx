@@ -245,7 +245,7 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1, backgroundColor: COLORS.screenBackground },
+  flex1: { flex: 1, backgroundColor: COLORS.surface },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 },
   headerButton: { paddingHorizontal: 12, paddingVertical: 6 },
   headerTitle: { fontWeight: "700", fontSize: 15 },
@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: COLORS.screenBackground,
+    borderColor: COLORS.surface,
   },
   field: { marginBottom: 20 },
   label: { fontSize: 13, fontWeight: "600", marginBottom: 6 },

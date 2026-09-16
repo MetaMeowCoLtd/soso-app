@@ -22,9 +22,12 @@ interface ScreenProps {
  * is that replacement, factored into one place so nothing else needs to
  * pick the library directly.
  *
- * Background colour matches globals.css's `html`/`body` rule
- * (`--screenBackground`, `#bcd9d2`) — the colour visible outside the map on
- * web before anything else has painted.
+ * Background is plain white, matching every non-map page's own
+ * `background:#fff` rule in globals.css (`.feed-tab`, `.chat-tab`,
+ * `.people-tab`, `.dm-thread`). `--screenBackground`'s mint green is the
+ * *map's* backdrop only (`MapTabScreen`, which doesn't use this wrapper) —
+ * it was mistakenly the default here too until every non-map screen using
+ * `Screen` turned out to be showing the map's colour behind it.
  */
 export function Screen({ children, edges }: ScreenProps) {
   return (
@@ -35,5 +38,5 @@ export function Screen({ children, edges }: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1, backgroundColor: COLORS.screenBackground },
+  flex1: { flex: 1, backgroundColor: COLORS.surface },
 });

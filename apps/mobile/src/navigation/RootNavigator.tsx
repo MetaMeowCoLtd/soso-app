@@ -33,12 +33,19 @@ export function RootNavigator() {
       <Stack.Screen name="Tabs" component={TabNavigator} options={{ headerShown: false }} />
       <Stack.Screen name="BoardCanvas" component={BoardCanvasScreen} options={{ title: "Board" }} />
       <Stack.Screen name="ThoughtThread" component={ThoughtThreadScreen} />
-      <Stack.Screen name="ProfileView" component={ProfileViewScreen} options={{ title: "Profile" }} />
-      <Stack.Screen name="ConnectionsView" component={ConnectionsViewScreen} options={{ title: "Connections" }} />
-      <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} options={{ title: "Edit profile" }} />
+      {/* These five already render their own header (back/close button,
+          title, and — for ProfileSettings/NewGroupSheet — a Save/Create
+          action) to match the web app's own modal-style headers. Without
+          `headerShown: false`, native-stack's default header rendered on
+          top of that, so every one of these screens showed two header bars
+          stacked, with the real title/action buttons squeezed or hidden
+          beneath the plain native one. */}
+      <Stack.Screen name="ProfileView" component={ProfileViewScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ConnectionsView" component={ConnectionsViewScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} options={{ headerShown: false }} />
       <Stack.Screen name="SharePinSheet" component={SharePinSheetScreen} options={{ title: "Share", presentation: "modal" }} />
-      <Stack.Screen name="NewGroupSheet" component={NewGroupSheetScreen} options={{ title: "New group", presentation: "modal" }} />
-      <Stack.Screen name="DmThreadView" component={DmThreadViewScreen} options={{ title: "Conversation" }} />
+      <Stack.Screen name="NewGroupSheet" component={NewGroupSheetScreen} options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="DmThreadView" component={DmThreadViewScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

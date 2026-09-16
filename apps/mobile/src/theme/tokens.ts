@@ -24,8 +24,17 @@ export const COLORS = {
   line: "rgba(20,50,43,0.13)",
   glass: "rgba(255,255,255,0.87)",
   hairline: "rgba(20,50,43,0.09)",
-  /** Screen/body background outside the map, from globals.css's `html`/`body` rule. */
+  /**
+   * Screen/body background outside the map, from globals.css's `html`/`body`
+   * rule. Only `MapTabScreen` should ever use this directly — it's the
+   * colour visible in the gaps around the map before tiles paint, not a
+   * general screen background. Every other screen on web sets its own
+   * `background:#fff` (`.feed-tab`, `.chat-tab`, `.people-tab`,
+   * `.dm-thread`, `.auth-screen`, ...), which is what `surface` below is for.
+   */
   screenBackground: "#bcd9d2",
+  /** Plain white, from every non-map page's own `background:#fff` rule in globals.css. */
+  surface: "#ffffff",
 } as const;
 
 /**

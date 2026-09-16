@@ -256,7 +256,7 @@ export default function ProfileView({
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1, backgroundColor: COLORS.screenBackground },
+  flex1: { flex: 1, backgroundColor: COLORS.surface },
   centered: { alignItems: "center", justifyContent: "center" },
   status: { color: COLORS.muted },
   backButton: { position: "absolute", top: 16, left: 16, zIndex: 1, padding: 8, backgroundColor: "rgba(0,0,0,0.3)", borderRadius: 20 },

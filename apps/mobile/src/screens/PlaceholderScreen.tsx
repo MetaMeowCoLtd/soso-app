@@ -30,7 +30,7 @@ export function PlaceholderScreen({ title, checkpoint, children }: PlaceholderSc
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1, backgroundColor: COLORS.screenBackground },
+  flex1: { flex: 1, backgroundColor: COLORS.surface },
   content: { padding: 24, alignItems: "flex-start" },
   title: { fontSize: 22, fontWeight: "700", marginBottom: 4 },
   note: { fontSize: 13, color: COLORS.muted, marginBottom: 20 },

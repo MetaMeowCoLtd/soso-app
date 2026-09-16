@@ -294,7 +294,7 @@ function ConnectionRow({
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1, backgroundColor: COLORS.screenBackground },
+  flex1: { flex: 1, backgroundColor: COLORS.surface },
   head: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
   backButton: { padding: 4 },
   headTitle: { fontWeight: "700", fontSize: 15 },

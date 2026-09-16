@@ -305,7 +305,7 @@ export default function GroupDetailsSheet({ thread, gateway, friends, myId, myAv
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, backgroundColor: COLORS.screenBackground },
+  sheet: { flex: 1, backgroundColor: COLORS.surface },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 },
   headTitle: { fontSize: 16, fontWeight: "700" },
   headAction: { color: COLORS.teal, fontWeight: "700" },

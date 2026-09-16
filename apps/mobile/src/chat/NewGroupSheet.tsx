@@ -210,7 +210,7 @@ export default function NewGroupSheet({ gateway, friends, onCreated, onOpenDirec
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, backgroundColor: COLORS.screenBackground },
+  sheet: { flex: 1, backgroundColor: COLORS.surface },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 },
   headTitle: { fontSize: 16, fontWeight: "700" },
   headAction: { color: COLORS.teal, fontWeight: "700" },
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: COLORS.screenBackground,
+    borderColor: COLORS.surface,
   },
   photoHint: { fontSize: 12, color: COLORS.muted },
   nameField: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },

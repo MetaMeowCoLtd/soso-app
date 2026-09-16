@@ -367,7 +367,7 @@ function HandleStep({ onDone }: { onDone: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: COLORS.screenBackground },
+  screen: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: COLORS.surface },
   card: { width: "100%", maxWidth: 400, backgroundColor: COLORS.glass, borderRadius: 20, padding: 24 },
   kicker: { color: COLORS.muted, fontSize: 14 },
   title: { fontSize: 32, fontWeight: "800", color: COLORS.teal, marginBottom: 12 },

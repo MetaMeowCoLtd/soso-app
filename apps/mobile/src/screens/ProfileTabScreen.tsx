@@ -54,7 +54,7 @@ export default function ProfileTabScreen() {
 
   if (!handle) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.screenBackground }}>
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surface }}>
         <ActivityIndicator />
       </View>
     );
