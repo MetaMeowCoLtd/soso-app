@@ -1,8 +1,11 @@
 import * as Clipboard from "expo-clipboard";
 import { useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, TextInput, View } from "react-native";
 
-import { ERROR_MESSAGES_EN, extractMentionedIds, type CategoryConfig, type Mention, type SosoGateway } from "../core";
+import { ERROR_MESSAGES_EN, extractMentionedIds, type CategoryConfig, type Mention, type MessageMedia, type SosoGateway } from "../core";
+import { MessageMediaLightbox, MessageMediaView } from "../media/MessageMediaView";
+import { saveMessageMedia } from "../media/saveMedia";
+import { useMediaAttachment } from "../media/useMediaAttachment";
 import { Icon, ICONS, type IconName } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
@@ -88,7 +91,9 @@ export interface ConversationViewProps {
   nowSeconds: number;
   maxLength: number;
   composerPlaceholder: string;
-  onSend: (body: string, replyToId: string | null, mentionedUserIds: string[]) => Promise<void>;
+  /** Which pipeline an attachment upload runs through — see useMediaAttachment.ts's identical scope. */
+  mediaScope: { kind: "room" } | { kind: "dm"; threadId: string };
+  onSend: (body: string, replyToId: string | null, mentionedUserIds: string[], media: MessageMedia | null) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onReact: (id: string, emoji: string) => Promise<void>;
   onOpenMention: (target: Mention) => void;
@@ -114,6 +119,7 @@ export function ConversationView({
   nowSeconds,
   maxLength,
   composerPlaceholder,
+  mediaScope,
   onSend,
   onDelete,
   onReact,
@@ -130,8 +136,11 @@ export function ConversationView({
   const [replyingTo, setReplyingTo] = useState<NormalizedRow | null>(null);
   const [menuRow, setMenuRow] = useState<NormalizedRow | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
+  const [lightboxRow, setLightboxRow] = useState<NormalizedRow | null>(null);
+  const [savingMedia, setSavingMedia] = useState(false);
   const listRef = useRef<FlatList<NormalizedRow>>(null);
   const inputRef = useRef<TextInput>(null);
+  const attachment = useMediaAttachment(gateway, mediaScope);
 
   const { jumpTo, onScroll } = useChatScroll(listRef, rows, firstUnreadId, resetKey);
 
@@ -156,15 +165,16 @@ export function ConversationView({
 
   async function send() {
     const body = input.trim();
-    if (!body || sending) return;
+    if ((!body && !attachment.media) || sending || attachment.busy) return;
     setSending(true);
     setError(null);
     const replyToId = replyingTo?.id ?? null;
     try {
       const mentionedUserIds = extractMentionedIds(body, mentionMembers, { allowAll: allowAllMention });
-      await onSend(body, replyToId, mentionedUserIds);
+      await onSend(body, replyToId, mentionedUserIds, attachment.media);
       setInput("");
       setReplyingTo(null);
+      attachment.clear();
     } catch (err) {
       const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
       setError(code && code in ERROR_MESSAGES_EN ? ERROR_MESSAGES_EN[code] : ERROR_MESSAGES_EN["soso/unknown"]);
@@ -196,6 +206,19 @@ export function ConversationView({
       await Clipboard.setStringAsync(row.body);
     } catch {
       // Nothing to recover from — the text is still on screen to select.
+    }
+  }
+
+  async function saveMedia(row: NormalizedRow) {
+    if (!row.media || savingMedia) return;
+    setMenuRow(null);
+    setSavingMedia(true);
+    try {
+      await saveMessageMedia(gateway, row.media);
+    } catch {
+      setError("Couldn't save that.");
+    } finally {
+      setSavingMedia(false);
     }
   }
 
@@ -242,6 +265,7 @@ export function ConversationView({
                   nowSeconds={nowSeconds}
                   flash={row.id === flashId}
                   onJumpToReply={row.replyTo ? () => jumpToReply(row.replyTo!.id) : null}
+                  onOpenMedia={() => setLightboxRow(row)}
                 />
               </>
             );
@@ -279,7 +303,29 @@ export function ConversationView({
         </View>
       )}
 
+      {/* `busy` is in the condition deliberately — see ChatPanel's identical
+          reasoning: a video's poster doesn't exist until the compress step
+          finishes, so keying this on `previewUri` alone would render nothing
+          for the whole encode while send stayed disabled. */}
+      {(attachment.previewUri || attachment.error || attachment.busy) && (
+        <View style={styles.attachmentBar}>
+          {attachment.previewUri && (
+            <View style={styles.attachmentThumb}>
+              <ThumbPreview uri={attachment.previewUri} />
+              {attachment.busy && <ActivityIndicator size="small" style={styles.attachmentSpinner} />}
+            </View>
+          )}
+          <AppText style={styles.attachmentText}>{attachment.error ?? attachment.statusText}</AppText>
+          <Pressable onPress={attachment.clear} accessibilityLabel="Remove attachment" style={styles.attachmentRemove}>
+            <Icon src={ICONS.close} size={11} color={COLORS.muted} />
+          </Pressable>
+        </View>
+      )}
+
       <View style={styles.composer}>
+        <Pressable style={styles.attachButton} onPress={attachment.pick} disabled={sending || attachment.busy} accessibilityLabel="Add a photo">
+          <Icon src={ICONS.image} size={18} color={COLORS.ink} />
+        </Pressable>
         <ChatTextarea
           ref={inputRef}
           value={input}
@@ -289,14 +335,17 @@ export function ConversationView({
           }}
           onSelectionChange={(s) => setSelection(s.start)}
           forcedSelection={forcedSelection}
-          placeholder={replyingTo ? "Reply…" : composerPlaceholder}
+          placeholder={attachment.previewUri ? "Add a caption…" : replyingTo ? "Reply…" : composerPlaceholder}
           maxLength={maxLength}
           ariaLabel="Message"
         />
         <Pressable
-          style={[styles.sendButton, (sending || input.trim().length === 0) && styles.sendButtonDisabled]}
+          style={[
+            styles.sendButton,
+            (sending || attachment.busy || (input.trim().length === 0 && !attachment.media)) && styles.sendButtonDisabled,
+          ]}
           onPress={() => void send()}
-          disabled={sending || input.trim().length === 0}
+          disabled={sending || attachment.busy || (input.trim().length === 0 && !attachment.media)}
           accessibilityLabel="Send"
         >
           <Icon src={ICONS.send} size={16} color="#ffffff" />
@@ -307,12 +356,14 @@ export function ConversationView({
         visible={menuRow !== null}
         mine={menuRow?.mine ?? false}
         bodyText={menuRow?.body ?? ""}
+        media={menuRow?.media ? <MessageMediaView gateway={gateway} image={menuRow.media} /> : undefined}
         quotedText={menuRow?.replyTo ? { authorLabel: menuRow.replyTo.authorLabel, text: menuRow.replyTo.body } : null}
         activeReaction={menuRow?.reactions.find((r) => r.mine)?.emoji ?? null}
         onClose={() => setMenuRow(null)}
         onReact={(emoji) => menuRow && void handleReact(menuRow, emoji)}
         onReply={() => menuRow && startReply(menuRow)}
         onCopy={() => menuRow && void copy(menuRow)}
+        onSave={menuRow?.media ? () => void saveMedia(menuRow) : undefined}
         primaryAction={(() => {
           if (!menuRow) return undefined;
           const resolved =
@@ -324,8 +375,16 @@ export function ConversationView({
           return resolved ? { ...resolved, onClick: () => { setMenuRow(null); resolved.onClick(); } } : undefined;
         })()}
       />
+
+      {lightboxRow?.media && (
+        <MessageMediaLightbox visible media={lightboxRow.media} gateway={gateway} onClose={() => setLightboxRow(null)} />
+      )}
     </View>
   );
+}
+
+function ThumbPreview({ uri }: { uri: string }) {
+  return <Image source={{ uri }} style={styles.attachmentThumbImage} />;
 }
 
 const styles = StyleSheet.create({
@@ -359,6 +418,22 @@ const styles = StyleSheet.create({
   mentionName: { fontWeight: "700", fontSize: 13 },
   mentionHandle: { fontSize: 12, color: COLORS.muted },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 8 },
+  attachButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   sendButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.teal, alignItems: "center", justifyContent: "center" },
   sendButtonDisabled: { opacity: 0.4 },
+  attachmentBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 8,
+    backgroundColor: "rgba(20,50,43,0.05)",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  attachmentThumb: { width: 40, height: 40 },
+  attachmentThumbImage: { width: 40, height: 40, borderRadius: 8 },
+  attachmentSpinner: { position: "absolute", top: 10, left: 10 },
+  attachmentText: { flex: 1, fontSize: 12, color: COLORS.muted },
+  attachmentRemove: { padding: 6 },
 });

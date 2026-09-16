@@ -7,6 +7,7 @@ import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
 import { Avatar } from "../ui/Avatar";
+import { MessageMediaView } from "../media/MessageMediaView";
 import { useMessageGestures } from "./useMessageGestures";
 import MessageReceipt, { type MessageReceiptState } from "./MessageReceipt";
 import SharedPostCard from "./SharedPostCard";
@@ -35,6 +36,8 @@ interface MessageBubbleProps {
   nowSeconds: number;
   flash: boolean;
   onJumpToReply: (() => void) | null;
+  /** Opens the full-screen viewer for this row's attachment — omitted entirely when the row has none. */
+  onOpenMedia: () => void;
 }
 
 export function MessageBubble({
@@ -53,6 +56,7 @@ export function MessageBubble({
   nowSeconds,
   flash,
   onJumpToReply,
+  onOpenMedia,
 }: MessageBubbleProps) {
   if (row.kind === "event") {
     return row.eventText ? <AppText style={styles.event}>{row.eventText}</AppText> : null;
@@ -91,12 +95,7 @@ export function MessageBubble({
                   </Pressable>
                 )}
 
-                {row.media && (
-                  <View style={styles.mediaChip}>
-                    <Icon src={row.media.kind === "video" ? ICONS.play : ICONS.image} size={14} color={COLORS.muted} />
-                    <AppText style={styles.mediaChipText}>{attachmentWord(row.media)}</AppText>
-                  </View>
-                )}
+                {row.media && <MessageMediaView gateway={gateway} image={row.media} onOpen={onOpenMedia} />}
 
                 {row.sharedPost && <SharedPostCard post={row.sharedPost} categories={categories} onOpen={onOpenPost} />}
 
@@ -181,8 +180,6 @@ const styles = StyleSheet.create({
   quote: { borderLeftWidth: 2, borderLeftColor: COLORS.muted, paddingLeft: 6, marginBottom: 2, gap: 1 },
   quoteAuthor: { fontSize: 11, fontWeight: "700", color: COLORS.muted },
   quoteBody: { fontSize: 12, color: COLORS.muted },
-  mediaChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.4)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6 },
-  mediaChipText: { fontSize: 12, color: COLORS.muted },
   reactions: { flexDirection: "row", gap: 4, marginTop: 2 },
   reaction: { flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: COLORS.glass, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
   reactionMine: { borderWidth: 1, borderColor: COLORS.teal },

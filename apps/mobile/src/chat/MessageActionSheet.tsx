@@ -21,10 +21,11 @@ import { QUICK_REACTIONS } from "./quickReactions";
  * see that function's own doc comment). RN has no `:active` CSS pseudo-
  * class doing anything analogous, so there's no skewed rect to correct
  * for, and this renders as a standard bottom sheet instead of a menu
- * grown out of the bubble's own screen position. `onSave` is dropped
- * outright rather than ported disabled: media viewing/saving is C10 work
- * (see the project's own checkpoint plan), and there's nothing to save
- * yet.
+ * grown out of the bubble's own screen position.
+ *
+ * `onSave` is back as of C10 — offered only for a message that actually
+ * carries media, same as web, so saving doesn't require opening the
+ * viewer first.
  */
 export interface MessageActionSheetPrimaryAction {
   label: string;
@@ -42,6 +43,8 @@ export interface MessageActionSheetProps {
   onReact: (emoji: string) => void;
   onReply: () => void;
   onCopy: () => void;
+  /** Offered only for a message that carries media — omitted entirely on a text-only one. */
+  onSave?: () => void;
   primaryAction?: MessageActionSheetPrimaryAction;
   onClose: () => void;
 }
@@ -56,6 +59,7 @@ export function MessageActionSheet({
   onReact,
   onReply,
   onCopy,
+  onSave,
   primaryAction,
   onClose,
 }: MessageActionSheetProps) {
@@ -98,6 +102,12 @@ export function MessageActionSheet({
               <AppText style={styles.rowLabel}>Copy</AppText>
               <Icon src={ICONS.copy} size={17} color={COLORS.ink} />
             </Pressable>
+            {onSave && (
+              <Pressable style={styles.row} onPress={onSave}>
+                <AppText style={styles.rowLabel}>Save photo</AppText>
+                <Icon src={ICONS.download} size={17} color={COLORS.ink} />
+              </Pressable>
+            )}
             {primaryAction && (
               <Pressable style={styles.row} onPress={primaryAction.onClick}>
                 <AppText style={[styles.rowLabel, styles.destructive]}>{primaryAction.label}</AppText>

@@ -153,8 +153,9 @@ export default function ChatTabScreen() {
           nowSeconds={nowSeconds}
           maxLength={500}
           composerPlaceholder={demoMode ? "Nobody else will see this" : "Message…"}
-          onSend={async (body, replyToId, mentionedUserIds) => {
-            const message = await gateway.sendChatMessage(body, replyToId, null, null, mentionedUserIds);
+          mediaScope={{ kind: "room" }}
+          onSend={async (body, replyToId, mentionedUserIds, media) => {
+            const message = await gateway.sendChatMessage(body, replyToId, media, null, mentionedUserIds);
             setMessages((prev) => [...prev, message]);
           }}
           onDelete={async (id) => {

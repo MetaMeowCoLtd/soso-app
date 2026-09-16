@@ -1,28 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
 
 import { bioRemaining, BIO_MAX, DISPLAY_NAME_MAX, ERROR_MESSAGES_EN, validateBio, validateDisplayName, type MyProfile, type SosoGateway } from "../core";
+import AvatarCropper from "../media/AvatarCropper";
+import CoverCropper from "../media/CoverCropper";
+import { useAvatarPhoto } from "../media/useAvatarPhoto";
+import { useCoverPhoto } from "../media/useCoverPhoto";
+import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
 
 /**
- * Ported from apps/web/src/web/ProfileSettings.tsx — name, bio, and the
- * presence toggle. Two things the web version does are deliberately NOT
- * here yet:
+ * Ported from apps/web/src/web/ProfileSettings.tsx — name, bio, the
+ * presence toggle, and, as of C10, the avatar/cover pickers themselves
+ * (`useAvatarPhoto`/`useCoverPhoto`, `AvatarCropper`/`CoverCropper`).
  *
- *   - Changing your avatar/cover photo (`AvatarCropper`/`CoverCropper`,
- *     `decodeAvatarFile`/`renderAvatarCrop`) — the whole image pipeline is
- *     C10's job. The tile below shows the CURRENT photo read-only; there's
- *     no picker, so nothing here can leave an uploaded-but-unsaved photo
- *     behind the way the web version is careful to avoid.
- *   - The push-notification toggle — native push is C12's job, and showing
- *     a toggle that can't actually subscribe to anything yet would be
- *     worse than not showing one.
+ * STILL NOT HERE: the push-notification toggle — native push is C12's
+ * job, and showing a toggle that can't actually subscribe to anything yet
+ * would be worse than not showing one.
  *
- * NOTHING IS STORED UNTIL SAVE, same as web: name/bio edits are local
- * state until `updateProfile` runs.
+ * NOTHING IS STORED UNTIL SAVE, same as web: name/bio edits, and a picked
+ * photo, are local state until `updateProfile` runs — a photo is uploaded
+ * the moment its crop is confirmed (uploading is the slow part; no reason
+ * to make Save wait on it too), but the PROFILE ROW doesn't change until
+ * this screen's own Save button does the rest.
  */
 interface ProfileSettingsProps {
   gateway: SosoGateway;
@@ -39,9 +42,12 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [avatarPath, setAvatarPath] = useState<string | null>(null);
-  const [saved, setSaved] = useState<{ name: string; bio: string } | null>(null);
+  const [coverPath, setCoverPath] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ name: string; bio: string; avatarPath: string | null; coverPath: string | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const avatarPhoto = useAvatarPhoto(gateway);
+  const coverPhoto = useCoverPhoto(gateway);
 
   useEffect(() => {
     let alive = true;
@@ -56,7 +62,8 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
         setName(profile.displayName);
         setBio(profile.bio);
         setAvatarPath(profile.avatarPath);
-        setSaved({ name: profile.displayName, bio: profile.bio });
+        setCoverPath(profile.coverPath);
+        setSaved({ name: profile.displayName, bio: profile.bio, avatarPath: profile.avatarPath, coverPath: profile.coverPath });
       } catch {
         if (alive) setError(ERROR_MESSAGES_EN["soso/unknown"]);
       } finally {
@@ -68,11 +75,33 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
     };
   }, [gateway]);
 
+  // Uploaded the moment a crop is confirmed — the slow part is the upload,
+  // not this screen's own Save, so there's no reason to make Save wait on
+  // it too. The PROFILE ROW only changes once Save actually runs; until
+  // then this is exactly like editing the name field, just for a photo.
+  useEffect(() => {
+    if (!avatarPhoto.pendingUri) return;
+    void avatarPhoto.upload().then((path) => {
+      if (path) setAvatarPath(path);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avatarPhoto.pendingUri]);
+
+  useEffect(() => {
+    if (!coverPhoto.pendingUri) return;
+    void coverPhoto.upload().then((path) => {
+      if (path) setCoverPath(path);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coverPhoto.pendingUri]);
+
   const nameCheck = useMemo(() => validateDisplayName(name), [name]);
   const bioCheck = useMemo(() => validateBio(bio), [bio]);
   const remaining = bioRemaining(bio);
 
-  const dirty = saved !== null && (name.trim() !== saved.name.trim() || bio.trim() !== saved.bio.trim());
+  const dirty =
+    saved !== null &&
+    (name.trim() !== saved.name.trim() || bio.trim() !== saved.bio.trim() || avatarPath !== saved.avatarPath || coverPath !== saved.coverPath);
   const canSave = loaded && dirty && nameCheck.ok && bioCheck.ok && !saving;
 
   async function save() {
@@ -84,7 +113,7 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
         displayName: nameCheck.value,
         bio: bioCheck.value,
         avatarPath,
-        coverPath: null,
+        coverPath,
       });
       onSaved(updated);
       onClose();
@@ -110,9 +139,25 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
         <AppText style={styles.loading}>Loading…</AppText>
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+          <Pressable onPress={coverPhoto.pick} disabled={coverPhoto.rendering} accessibilityLabel="Change your cover photo">
+            {coverPath ? (
+              <Image source={{ uri: gateway.avatarUrl(coverPath) ?? undefined }} style={styles.coverBlock} />
+            ) : (
+              <View style={[styles.coverBlock, styles.coverEmpty]}>
+                <Icon src={ICONS.image} size={20} color={COLORS.muted} />
+              </View>
+            )}
+          </Pressable>
+
           <View style={styles.avatarBlock}>
-            <Avatar name={name || "You"} seed={handle ?? "you"} src={avatarPath ? gateway.avatarUrl(avatarPath) : null} size={92} />
+            <Pressable onPress={avatarPhoto.pick} disabled={avatarPhoto.rendering} accessibilityLabel="Change your profile photo">
+              <Avatar name={name || "You"} seed={handle ?? "you"} src={avatarPath ? gateway.avatarUrl(avatarPath) : null} size={92} />
+              <View style={styles.photoBadge}>
+                <Icon src={ICONS.image} size={12} color="#ffffff" />
+              </View>
+            </Pressable>
           </View>
+          {(avatarPhoto.error || coverPhoto.error) && <AppText style={styles.error}>{avatarPhoto.error ?? coverPhoto.error}</AppText>}
 
           <View style={styles.field}>
             <AppText style={styles.label}>Display name</AppText>
@@ -164,6 +209,13 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
           {error && <AppText style={styles.error}>{error}</AppText>}
         </ScrollView>
       )}
+
+      {avatarPhoto.cropping && (
+        <AvatarCropper image={avatarPhoto.cropping} busy={avatarPhoto.rendering} onConfirm={avatarPhoto.applyCrop} onCancel={avatarPhoto.closeCropper} />
+      )}
+      {coverPhoto.cropping && (
+        <CoverCropper image={coverPhoto.cropping} busy={coverPhoto.rendering} onConfirm={coverPhoto.applyCrop} onCancel={coverPhoto.closeCropper} />
+      )}
     </View>
   );
 }
@@ -176,7 +228,22 @@ const styles = StyleSheet.create({
   loading: { textAlign: "center", marginTop: 40, color: COLORS.muted },
   scroll: { flex: 1 },
   scrollContent: { padding: 16 },
+  coverBlock: { width: "100%", height: 120, borderRadius: 12, marginBottom: -46 },
+  coverEmpty: { backgroundColor: "rgba(20,50,43,0.06)", alignItems: "center", justifyContent: "center" },
   avatarBlock: { alignItems: "center", marginBottom: 24 },
+  photoBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: COLORS.teal,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: COLORS.screenBackground,
+  },
   field: { marginBottom: 20 },
   label: { fontSize: 13, fontWeight: "600", marginBottom: 6 },
   input: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12, fontSize: 15, color: COLORS.ink },

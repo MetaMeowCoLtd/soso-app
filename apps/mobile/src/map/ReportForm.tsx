@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 
 import {
   ERROR_MESSAGES_EN,
@@ -9,7 +9,9 @@ import {
   type NewPost,
   type Pin,
   type PostAudience,
+  type SosoGateway,
 } from "../core";
+import { useMediaAttachment } from "../media/useMediaAttachment";
 import { lookOf } from "../theme/categories";
 import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
@@ -20,9 +22,9 @@ import { toLngLat, type Coordinates } from "./region";
 /**
  * Ported from apps/web/src/web/ReportForm.tsx. Same two-step design: pick a
  * category (submits immediately if it has nothing else to add), then an
- * optional details step. The web version's photo/video attach control is
- * not ported here — the whole media pipeline is C10's job; a category that
- * `allowsMedia` still posts fine here, just without an attachment.
+ * optional details step. As of C10, a category that `allowsMedia` offers
+ * the same attach control the chat composer does, via the same
+ * `useMediaAttachment` hook (scope `{kind: "post"}`).
  *
  * THE PROXIMITY GATE
  * -----------------------------------------------------------------------
@@ -66,6 +68,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 interface ReportFormProps {
+  gateway: SosoGateway;
   categories: CategoryConfig[];
   location: Coordinates;
   onCancel: () => void;
@@ -78,11 +81,12 @@ const AUDIENCE_OPTIONS: { key: PostAudience; label: string; hint: string }[] = [
   { key: "close_friends", label: "Close friends", hint: "Friends you marked close" },
 ];
 
-export default function ReportForm({ categories, location, onCancel, onSubmit }: ReportFormProps) {
+export default function ReportForm({ gateway, categories, location, onCancel, onSubmit }: ReportFormProps) {
   const [step, setStep] = useState<Step>("category");
   const [categoryKey, setCategoryKey] = useState<string | null>(null);
   const [subtypeKey, setSubtypeKey] = useState<string | null>(null);
   const [description, setDescription] = useState("");
+  const attachment = useMediaAttachment(gateway, { kind: "post" });
   // Defaults to public. A private default would be a surprising place to
   // put a safety decision: someone reporting a hazard expects it to be seen.
   const [audience, setAudience] = useState<PostAudience>("public");
@@ -164,11 +168,11 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
   // succeeds where the first one was still warming up.
   const canRetryLocation = geoState === "denied" || geoState === "timeout" || geoState === "unavailable";
 
-  const canSubmit = Boolean(category && !blockedReason && !busy);
+  const canSubmit = Boolean(category && !blockedReason && !busy && !attachment.busy);
 
   /** A category with nothing optional to add has no reason to show a second step at all. */
   function hasOptionalDetails(c: CategoryConfig): boolean {
-    return c.subtypes.length > 0 || c.allowsBody;
+    return c.subtypes.length > 0 || c.allowsBody || c.allowsMedia;
   }
 
   async function submit(chosenCategory: CategoryConfig, chosenSubtype: string | null, body: string) {
@@ -182,7 +186,16 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
         at: toLngLat(location),
         device: device ? toLngLat(device) : null,
         audience,
-        media: null,
+        media: attachment.media
+          ? {
+              kind: attachment.media.kind,
+              objectKey: attachment.media.path,
+              width: attachment.media.width,
+              height: attachment.media.height,
+              posterKey: attachment.media.posterPath,
+              durationMs: attachment.media.durationMs,
+            }
+          : null,
       });
     } catch (err) {
       const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
@@ -291,6 +304,28 @@ export default function ReportForm({ categories, location, onCancel, onSubmit }:
             </View>
           )}
 
+          {category.allowsMedia && (
+            <View style={styles.field}>
+              <AppText style={styles.fieldLabel}>Photo or video (optional)</AppText>
+              {attachment.previewUri ? (
+                <View style={styles.attachmentPreview}>
+                  <Image source={{ uri: attachment.previewUri }} style={styles.attachmentThumb} />
+                  {attachment.busy && <ActivityIndicator size="small" style={styles.attachmentSpinner} />}
+                  <AppText style={styles.attachmentStatus}>{attachment.error ?? attachment.statusText}</AppText>
+                  <Pressable onPress={attachment.clear} accessibilityLabel="Remove attachment" style={styles.attachmentRemove}>
+                    <Icon src={ICONS.close} size={11} color={COLORS.muted} />
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable style={styles.attachButton} onPress={attachment.pick} disabled={busy}>
+                  <Icon src={ICONS.image} size={16} color={COLORS.ink} />
+                  <AppText style={styles.attachButtonText}>Add a photo</AppText>
+                </Pressable>
+              )}
+              {attachment.error && !attachment.previewUri && <AppText style={styles.errorText}>{attachment.error}</AppText>}
+            </View>
+          )}
+
           <View style={styles.audiencePicker}>
             <AppText style={styles.fieldLabel}>Visible to</AppText>
             <View style={styles.audienceOptions}>
@@ -373,6 +408,23 @@ const styles = StyleSheet.create({
     minHeight: 60,
     textAlignVertical: "top",
   },
+  attachButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignSelf: "flex-start",
+  },
+  attachButtonText: { fontSize: 13, fontWeight: "600" },
+  attachmentPreview: { flexDirection: "row", alignItems: "center", gap: 8 },
+  attachmentThumb: { width: 44, height: 44, borderRadius: 8 },
+  attachmentSpinner: { position: "absolute", top: 12, left: 12 },
+  attachmentStatus: { flex: 1, fontSize: 12, color: COLORS.muted },
+  attachmentRemove: { padding: 6 },
   audiencePicker: { marginBottom: 12 },
   audienceOptions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   audienceOption: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.line },

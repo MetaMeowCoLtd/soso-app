@@ -34,7 +34,21 @@
         {
           "locationWhenInUsePermission": "Soso uses your location to show your position on the map and to confirm you're near what you're reporting."
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Soso needs access to your photos to attach one to a message, post, or profile."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Soso needs access to your photos to save one you've received.",
+          "savePhotosPermission": "Soso saves photos and videos you choose to keep to your library."
+        }
+      ],
+      "react-native-compressor"
     ]
   }
 }

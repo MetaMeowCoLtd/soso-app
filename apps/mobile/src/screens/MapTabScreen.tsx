@@ -172,6 +172,7 @@ export default function MapTabScreen() {
       {placing && (
         <View style={styles.overlay}>
           <ReportForm
+            gateway={gateway}
             categories={categories}
             location={placing}
             onCancel={() => setPlacing(null)}
@@ -201,6 +202,7 @@ export default function MapTabScreen() {
       {!placing && selectedPin && (
         <View style={styles.overlay}>
           <PinPreview
+            gateway={gateway}
             pin={selectedPin}
             detail={selectedDetail}
             categories={categories}

@@ -9,7 +9,9 @@ import {
   type Pin,
   type PostDetail,
   type ReportReason,
+  type SosoGateway,
 } from "../core";
+import PostMediaView from "../media/PostMediaView";
 import { lookOf } from "../theme/categories";
 import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
@@ -27,13 +29,13 @@ import { Button } from "../ui/Button";
  * (`vote_post` rejects self-votes) independent of what this shows — this
  * never pre-checks anything the server doesn't already gate.
  *
- * The attached-media section (`PostMediaView` on web) is deliberately not
- * ported here — the whole media pipeline (presigned URLs, the on-device
- * cache, image/video rendering) is C10's job. A pin with media still shows
- * everything else correctly; the media itself is invisible until then.
+ * The attached-media section, deferred through C9, renders via
+ * `PostMediaView` as of C10 — same component FeedCard uses, for the same
+ * reason web shares one between its own feed and this preview.
  */
 
 interface PinPreviewProps {
+  gateway: SosoGateway;
   pin: Pin;
   detail: PostDetail | null;
   categories: CategoryConfig[];
@@ -54,6 +56,7 @@ const REPORT_REASONS: { label: string; value: ReportReason }[] = [
 ];
 
 export default function PinPreview({
+  gateway,
   pin,
   detail,
   categories,
@@ -145,6 +148,12 @@ export default function PinPreview({
 
       {detail?.body && <AppText style={styles.snippet}>{detail.body}</AppText>}
 
+      {detail?.media[0] && (
+        <View style={styles.mediaWrap}>
+          <PostMediaView gateway={gateway} media={detail.media[0]} maxHeight={220} />
+        </View>
+      )}
+
       <View style={styles.metaRow}>
         <AppText style={styles.countdown}>Disappears in {formatCountdown(pin.expiresAt, nowSeconds)}</AppText>
 
@@ -227,6 +236,7 @@ const styles = StyleSheet.create({
   addressRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   address: { fontSize: 12, color: COLORS.muted },
   snippet: { fontSize: 14, marginBottom: 10 },
+  mediaWrap: { marginBottom: 10 },
   metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   countdown: { fontSize: 12, color: COLORS.muted },
   metaActions: { flexDirection: "row", gap: 8 },

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import { formatAgoShort, type PostDetail, type SosoGateway } from "../core";
+import PostMediaView from "../media/PostMediaView";
 import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
@@ -11,9 +12,8 @@ import { Avatar } from "../ui/Avatar";
  * Ported from apps/web/src/web/FeedTab.tsx's exported `FeedCard` — one post
  * as it appears in the feed AND on a profile's post list, same component
  * both places (see that file's own comment on why: one design to keep in
- * sync, not two). The attached-media section (`PostMediaView` on web) is
- * not ported here, same deferral as PinPreview.tsx and ReportForm.tsx — the
- * whole media pipeline is C10's job.
+ * sync, not two). The attached-media section, deferred through C9, renders
+ * via `PostMediaView` as of C10.
  */
 interface FeedCardProps {
   post: PostDetail;
@@ -86,6 +86,12 @@ export function FeedCard({ post, nowSeconds, gateway, onOpen, onOpenComments, on
 
         {post.body && <AppText style={styles.text}>{post.body}</AppText>}
 
+        {post.media[0] && (
+          <View style={styles.mediaWrap}>
+            <PostMediaView gateway={gateway} media={post.media[0]} maxHeight={260} />
+          </View>
+        )}
+
         <View style={styles.actions}>
           <Pressable
             style={styles.actionButton}
@@ -125,6 +131,7 @@ const styles = StyleSheet.create({
   authorHandle: { fontSize: 12, color: COLORS.muted },
   time: { fontSize: 12, color: COLORS.muted, marginLeft: "auto" },
   text: { fontSize: 14, marginTop: 4, lineHeight: 19 },
+  mediaWrap: { marginTop: 8 },
   actions: { flexDirection: "row", gap: 20, marginTop: 8 },
   actionButton: { flexDirection: "row", alignItems: "center", gap: 4 },
   actionCount: { fontSize: 12, color: COLORS.muted },

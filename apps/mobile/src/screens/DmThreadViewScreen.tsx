@@ -210,8 +210,9 @@ export default function DmThreadViewScreen() {
         nowSeconds={Math.floor(Date.now() / 1000)}
         maxLength={DM_MAX_LENGTH}
         composerPlaceholder="Message…"
-        onSend={async (body, replyToId, mentionedUserIds) => {
-          const sent = await gateway.sendDm(thread.id, body, replyToId, null, null, mentionedUserIds);
+        mediaScope={{ kind: "dm", threadId: thread.id }}
+        onSend={async (body, replyToId, mentionedUserIds, media) => {
+          const sent = await gateway.sendDm(thread.id, body, replyToId, media, null, mentionedUserIds);
           setMessages((prev) => [...prev, sent]);
         }}
         onDelete={deleteMessage}

@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 
 import { ERROR_MESSAGES_EN, GROUP_MAX_MEMBERS, GROUP_MIN_OTHERS, GROUP_TITLE_MAX, groupTitleFromMembers, type DmThread, type DmThreadMember, type Friend, type SosoGateway } from "../core";
+import AvatarCropper from "../media/AvatarCropper";
+import { useAvatarPhoto } from "../media/useAvatarPhoto";
 import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
@@ -10,10 +12,9 @@ import { Avatar } from "../ui/Avatar";
 /**
  * Ported from apps/web/src/web/NewGroupSheet.tsx: pick people, then
  * (optionally) name it, same two steps, same "selecting exactly one person
- * opens the DM instead" precedence. The photo step is left out — see
- * GroupDetailsSheet's identical note; adding a photo at creation time is
- * the same deferred pipeline as changing one afterwards, and both wait for
- * C10 together rather than one arriving early.
+ * opens the DM instead" precedence. The photo step, deferred through C9,
+ * is wired here now via `useAvatarPhoto` — same square pipeline
+ * GroupDetailsSheet uses to change one after creation.
  */
 interface NewGroupSheetProps {
   gateway: SosoGateway;
@@ -30,6 +31,7 @@ export default function NewGroupSheet({ gateway, friends, onCreated, onOpenDirec
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const photo = useAvatarPhoto(gateway);
 
   const byId = useMemo(() => new Map(friends.map((f) => [f.id, f])), [friends]);
 
@@ -80,7 +82,11 @@ export default function NewGroupSheet({ gateway, friends, onCreated, onOpenDirec
     setCreating(true);
     setError(null);
     try {
-      const thread = await gateway.createGroupThread({ title: title.trim() || null, memberIds: selected, photoPath: null });
+      // The photo goes up first — same order and reasoning as web's own
+      // `create()`: if the thread creation then fails, the orphaned object
+      // costs nothing and a retry doesn't compound it.
+      const photoPath = await photo.upload();
+      const thread = await gateway.createGroupThread({ title: title.trim() || null, memberIds: selected, photoPath });
       onCreated(thread);
     } catch (err) {
       const code = (err as { code?: string }).code as keyof typeof ERROR_MESSAGES_EN | undefined;
@@ -157,6 +163,21 @@ export default function NewGroupSheet({ gateway, friends, onCreated, onOpenDirec
         </>
       ) : (
         <ScrollView contentContainerStyle={styles.about}>
+          <Pressable style={styles.photoPick} onPress={photo.pick} disabled={photo.rendering} accessibilityLabel={photo.pendingUri ? "Change the group photo" : "Add a group photo"}>
+            {photo.pendingUri ? (
+              <Image source={{ uri: photo.pendingUri }} style={styles.photoPickImage} />
+            ) : (
+              <Icon src={ICONS.image} size={22} color={COLORS.muted} />
+            )}
+            <View style={styles.photoBadge}>
+              <Icon src={ICONS.plus} size={11} color="#ffffff" />
+            </View>
+          </Pressable>
+          <AppText style={styles.photoHint}>
+            {photo.rendering ? "Opening that photo…" : photo.pendingUri ? "Tap to pick a different one" : "Add a photo — optional"}
+          </AppText>
+          {photo.error && <AppText style={styles.error}>{photo.error}</AppText>}
+
           <TextInput
             style={styles.nameField}
             value={title}
@@ -182,6 +203,8 @@ export default function NewGroupSheet({ gateway, friends, onCreated, onOpenDirec
           {error && <AppText style={styles.error}>{error}</AppText>}
         </ScrollView>
       )}
+
+      {photo.cropping && <AvatarCropper image={photo.cropping} busy={photo.rendering} onConfirm={photo.applyCrop} onCancel={photo.closeCropper} />}
     </View>
   );
 }
@@ -210,7 +233,31 @@ const styles = StyleSheet.create({
   pickerHandle: { fontSize: 12, color: COLORS.muted },
   check: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: COLORS.line, alignItems: "center", justifyContent: "center" },
   checkOn: { backgroundColor: COLORS.teal, borderColor: COLORS.teal },
-  about: { padding: 16, gap: 8 },
+  about: { padding: 16, gap: 8, alignItems: "center" },
+  photoPick: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: "rgba(20,50,43,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  photoPickImage: { width: 88, height: 88 },
+  photoBadge: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: COLORS.teal,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: COLORS.screenBackground,
+  },
+  photoHint: { fontSize: 12, color: COLORS.muted },
   nameField: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   nameHint: { fontSize: 12, color: COLORS.muted },
 });

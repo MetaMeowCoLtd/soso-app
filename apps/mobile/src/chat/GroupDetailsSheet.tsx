@@ -11,6 +11,8 @@ import {
   type Friend,
   type SosoGateway,
 } from "../core";
+import AvatarCropper from "../media/AvatarCropper";
+import { useAvatarPhoto } from "../media/useAvatarPhoto";
 import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
@@ -20,12 +22,11 @@ import { ConversationAvatar } from "./ConversationAvatar";
 
 /**
  * Ported from apps/web/src/web/GroupDetailsSheet.tsx. Rename, add, remove
- * and leave all carry over — none of them touch a file picker. The group
- * PHOTO change is deliberately not ported here: it's the same
- * pick-crop-upload pipeline as an avatar or a cover photo, which the
- * project's own checkpoint plan defers whole to C10 alongside every other
- * image pipeline, rather than half-building one caller of it early. The
- * photo still DISPLAYS via `ConversationAvatar` — only changing it waits.
+ * and leave all carry over unchanged. The photo change, deferred through
+ * C9, is wired here now via `useAvatarPhoto` (a group's photo reuses the
+ * avatar pipeline's square crop and storage — see cover.ts's own note on
+ * why the avatar bucket is shared this way, and `useGroupPhoto.ts`'s
+ * identical reuse on web).
  */
 interface GroupDetailsSheetProps {
   thread: DmThread;
@@ -49,8 +50,33 @@ export default function GroupDetailsSheet({ thread, gateway, friends, myId, myAv
   const [busy, setBusy] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const photo = useAvatarPhoto(gateway);
 
   const isOwner = thread.myRole === "owner";
+
+  // Uploaded the instant a crop is confirmed, matching useGroupPhoto.ts's
+  // own web behaviour — this screen has no separate Save step for anything
+  // else on it, so a photo sitting pending until some other button was
+  // found would be the one control here that silently didn't apply.
+  useEffect(() => {
+    if (!photo.pendingUri) return;
+    void (async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        const path = await photo.upload();
+        if (path) {
+          onChanged(await gateway.setGroupThreadPhoto(thread.id, path));
+          photo.clear();
+        }
+      } catch (err) {
+        report(err);
+      } finally {
+        setBusy(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photo.pendingUri]);
 
   useEffect(() => {
     let alive = true;
@@ -192,7 +218,13 @@ export default function GroupDetailsSheet({ thread, gateway, friends, myId, myAv
 
         <ScrollView>
           <View style={styles.hero}>
-            <ConversationAvatar thread={thread} gateway={gateway} size={88} />
+            <Pressable onPress={photo.pick} disabled={busy || photo.rendering} accessibilityLabel="Change the group photo">
+              <ConversationAvatar thread={thread} gateway={gateway} size={88} />
+              <View style={styles.photoBadge}>
+                <Icon src={ICONS.image} size={12} color="#ffffff" />
+              </View>
+            </Pressable>
+            {photo.error && <AppText style={styles.error}>{photo.error}</AppText>}
 
             {renaming ? (
               <TextInput
@@ -266,6 +298,8 @@ export default function GroupDetailsSheet({ thread, gateway, friends, myId, myAv
           </View>
         </ScrollView>
       </View>
+
+      {photo.cropping && <AvatarCropper image={photo.cropping} busy={photo.rendering || busy} onConfirm={photo.applyCrop} onCancel={photo.closeCropper} />}
     </Modal>
   );
 }
@@ -288,6 +322,19 @@ const styles = StyleSheet.create({
   check: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: COLORS.line, alignItems: "center", justifyContent: "center" },
   checkOn: { backgroundColor: COLORS.teal, borderColor: COLORS.teal },
   hero: { alignItems: "center", padding: 20, gap: 4 },
+  photoBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: COLORS.teal,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: COLORS.glass,
+  },
   heroName: { fontSize: 18, fontWeight: "700", textAlign: "center", marginTop: 10 },
   heroMeta: { fontSize: 12, color: COLORS.muted, textAlign: "center" },
   renameInput: { borderBottomWidth: 1, borderBottomColor: COLORS.line, fontSize: 16, marginTop: 10, minWidth: 160, textAlign: "center" },
