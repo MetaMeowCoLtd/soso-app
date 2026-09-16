@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from "react-native";
 
 import {
   ERROR_MESSAGES_EN,
@@ -82,6 +82,14 @@ const AUDIENCE_OPTIONS: { key: PostAudience; label: string; hint: string }[] = [
 ];
 
 export default function ReportForm({ gateway, categories, location, onCancel, onSubmit }: ReportFormProps) {
+  // A CSS-style percentage `maxHeight` has no definite basis to resolve
+  // against here: this card's parent (MapTabScreen's floating overlay) is
+  // `position:absolute` with only bottom/left/right set, so it has no
+  // explicit height of its own — Yoga collapses a percentage height in
+  // that situation instead of measuring anything close to 70% of the
+  // screen, which is what was cropping the category grid. A real pixel
+  // value computed from the window's own height has no such ambiguity.
+  const { height: windowHeight } = useWindowDimensions();
   const [step, setStep] = useState<Step>("category");
   const [categoryKey, setCategoryKey] = useState<string | null>(null);
   const [subtypeKey, setSubtypeKey] = useState<string | null>(null);
@@ -216,7 +224,7 @@ export default function ReportForm({ gateway, categories, location, onCancel, on
   }
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { maxHeight: windowHeight * 0.7 }]}>
       <Pressable onPress={onCancel} style={styles.closeButton} accessibilityLabel="Close pin composer">
         <Icon src={ICONS.close} size={16} color={COLORS.muted} />
       </Pressable>
@@ -379,7 +387,7 @@ export default function ReportForm({ gateway, categories, location, onCancel, on
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: COLORS.glass, borderRadius: 16, padding: 16, maxHeight: "70%" },
+  card: { backgroundColor: COLORS.glass, borderRadius: 16, padding: 16 },
   closeButton: { alignSelf: "flex-end", padding: 6 },
   kickerRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   kicker: { fontSize: 12, color: COLORS.muted, fontWeight: "600" },

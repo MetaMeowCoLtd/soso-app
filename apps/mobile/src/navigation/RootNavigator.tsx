@@ -32,14 +32,16 @@ export function RootNavigator() {
     <Stack.Navigator>
       <Stack.Screen name="Tabs" component={TabNavigator} options={{ headerShown: false }} />
       <Stack.Screen name="BoardCanvas" component={BoardCanvasScreen} options={{ title: "Board" }} />
-      <Stack.Screen name="ThoughtThread" component={ThoughtThreadScreen} />
-      {/* These five already render their own header (back/close button,
+      {/* These six already render their own header (back/close button,
           title, and — for ProfileSettings/NewGroupSheet — a Save/Create
           action) to match the web app's own modal-style headers. Without
           `headerShown: false`, native-stack's default header rendered on
           top of that, so every one of these screens showed two header bars
           stacked, with the real title/action buttons squeezed or hidden
-          beneath the plain native one. */}
+          beneath the plain native one. ThoughtThread's own header title
+          depends on `params.mode` ("Thread" vs "Comments"), which the
+          native header's static `options.title` has no way to express. */}
+      <Stack.Screen name="ThoughtThread" component={ThoughtThreadScreen} options={{ headerShown: false }} />
       <Stack.Screen name="ProfileView" component={ProfileViewScreen} options={{ headerShown: false }} />
       <Stack.Screen name="ConnectionsView" component={ConnectionsViewScreen} options={{ headerShown: false }} />
       <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} options={{ headerShown: false }} />
