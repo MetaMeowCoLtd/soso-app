@@ -79,6 +79,9 @@ export const SOSO_ERROR_CODES = [
   'soso/invalid_group_title',
   'soso/not_group_thread',
   'soso/owner_only',
+  // Native push tokens (migration 0052).
+  'soso/no_token',
+  'soso/invalid_platform',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -185,5 +188,7 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/invalid_group_title': 'That group name is too long.',
   'soso/not_group_thread': "That's a direct message, not a group.",
   'soso/owner_only': 'Only the person who made the group can remove someone.',
+  'soso/no_token': "This device didn't provide a valid push token. Try again.",
+  'soso/invalid_platform': 'Notifications are not available on this platform.',
   'soso/unknown': 'Something went wrong. Try again.',
 };

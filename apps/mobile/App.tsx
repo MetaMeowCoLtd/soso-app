@@ -8,6 +8,8 @@ import AuthScreens from "./src/auth/AuthScreens";
 import { UnreadCountsProvider } from "./src/chat/UnreadCountsProvider";
 import { AppGateProvider, useAppGate } from "./src/gate/AppGate";
 import { RootNavigator } from "./src/navigation/RootNavigator";
+import { navigationRef } from "./src/push/notificationNavigation";
+import { PushNotificationRouter } from "./src/push/PushNotificationRouter";
 import { PresenceProvider } from "./src/social/PresenceProvider";
 import { COLORS } from "./src/theme/tokens";
 
@@ -62,7 +64,8 @@ function AppContent() {
   return (
     <PresenceProvider>
       <UnreadCountsProvider>
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
+          <PushNotificationRouter />
           <RootNavigator />
         </NavigationContainer>
       </UnreadCountsProvider>

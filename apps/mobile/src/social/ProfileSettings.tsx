@@ -6,6 +6,7 @@ import AvatarCropper from "../media/AvatarCropper";
 import CoverCropper from "../media/CoverCropper";
 import { useAvatarPhoto } from "../media/useAvatarPhoto";
 import { useCoverPhoto } from "../media/useCoverPhoto";
+import { usePushRegistration } from "../push/usePushRegistration";
 import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
@@ -17,15 +18,18 @@ import { Button } from "../ui/Button";
  * presence toggle, and, as of C10, the avatar/cover pickers themselves
  * (`useAvatarPhoto`/`useCoverPhoto`, `AvatarCropper`/`CoverCropper`).
  *
- * STILL NOT HERE: the push-notification toggle — native push is C12's
- * job, and showing a toggle that can't actually subscribe to anything yet
- * would be worse than not showing one.
+ * THE PUSH TOGGLE (C12) IS A NEW CONTROL, NOT A PORT. `gateway.subscribeToPush`
+ * has no caller anywhere in apps/web — the web app built the whole
+ * infrastructure (the RPCs, the Edge Function) and never wired a UI button
+ * to it. There is no existing "on" state or wording to match here; this is
+ * that feature's first real entry point, native-only, via
+ * `usePushRegistration`.
  *
- * NOTHING IS STORED UNTIL SAVE, same as web: name/bio edits, and a picked
- * photo, are local state until `updateProfile` runs — a photo is uploaded
- * the moment its crop is confirmed (uploading is the slow part; no reason
- * to make Save wait on it too), but the PROFILE ROW doesn't change until
- * this screen's own Save button does the rest.
+ * NOTHING IS STORED UNTIL SAVE for name/bio/photos, same as web. The push
+ * toggle is the one control on this whole screen that is NOT staged that
+ * way — flipping it subscribes or unsubscribes immediately, the same as
+ * the presence toggle beside it, because both describe a live subscription
+ * elsewhere rather than a field on this profile row.
  */
 interface ProfileSettingsProps {
   gateway: SosoGateway;
@@ -48,6 +52,7 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
   const [error, setError] = useState<string | null>(null);
   const avatarPhoto = useAvatarPhoto(gateway);
   const coverPhoto = useCoverPhoto(gateway);
+  const push = usePushRegistration(gateway);
 
   useEffect(() => {
     let alive = true;
@@ -204,6 +209,25 @@ export default function ProfileSettings({ gateway, demoMode, presenceSharing, on
               </AppText>
             </View>
             <Switch value={presenceSharing} onValueChange={onTogglePresence} disabled={demoMode} />
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleText}>
+              <AppText style={styles.toggleTitle}>Notify me about nearby reports</AppText>
+              <AppText style={styles.sub}>
+                {demoMode
+                  ? "Notifications need the live backend — demo mode has nothing to notify you about."
+                  : !push.supported
+                    ? "Notifications need a real device — the simulator can't receive them."
+                    : "A push when something new is reported within about 3km, and for replies, DMs and follows."}
+              </AppText>
+              {push.error && <AppText style={[styles.sub, styles.subBad]}>{push.error}</AppText>}
+            </View>
+            <Switch
+              value={push.enabled}
+              onValueChange={(next) => (next ? push.enable() : push.disable())}
+              disabled={demoMode || !push.supported || push.busy}
+            />
           </View>
 
           {error && <AppText style={styles.error}>{error}</AppText>}

@@ -83,7 +83,7 @@ import {
   type PostReply,
   type WirePostReply,
 } from '../domain/types';
-import type { FeedQuery, PushEndpoint, ReportReason, SosoGateway } from './gateway';
+import type { FeedQuery, NativePushToken, PushEndpoint, ReportReason, SosoGateway } from './gateway';
 
 interface WireCategoryRow {
   key: string;
@@ -324,6 +324,20 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
 
     async unsubscribeFromPush(endpoint: string): Promise<void> {
       const { error } = await client.rpc('unsubscribe_from_push', { p_endpoint: endpoint });
+      if (error) throw toSosoError(error);
+    },
+
+    async subscribeToNativePush(token: NativePushToken, cellIds: readonly CellId[]): Promise<void> {
+      const { error } = await client.rpc('subscribe_to_native_push', {
+        p_expo_push_token: token.token,
+        p_platform: token.platform,
+        p_cell_ids: [...cellIds],
+      });
+      if (error) throw toSosoError(error);
+    },
+
+    async unsubscribeFromNativePush(token: string): Promise<void> {
+      const { error } = await client.rpc('unsubscribe_from_native_push', { p_expo_push_token: token });
       if (error) throw toSosoError(error);
     },
 

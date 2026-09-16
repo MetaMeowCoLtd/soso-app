@@ -22,16 +22,29 @@
 // UNVERIFIED — READ THIS FIRST
 // -----------------------------
 // This has never run. Nothing in the sandbox that built this project can
-// deploy a Supabase Edge Function or receive a real push notification, so
-// there is no way to confirm this actually delivers to a real device. What IS
-// checked: the SQL that calls it validates, the TypeScript here is internally
-// consistent, and the `web-push` library's `sendNotification` API is used the
-// way its own documentation describes. The specific thing most likely to be
-// wrong on first real deploy is whether Deno's Node-compatibility layer runs
-// `npm:web-push` cleanly — that combination is real and documented elsewhere,
-// but it was never exercised here. Budget for at least one deploy-and-fix
-// cycle, the same as `npm run db:reset` was flagged as the first real test of
-// the SQL.
+// deploy a Supabase Edge Function, receive a real push notification, or run
+// a native build with a real EAS project, so there is no way to confirm
+// either delivery path below actually reaches a device. What IS checked:
+// the SQL that calls it validates, the TypeScript here is internally
+// consistent, and both the `web-push` library and Expo's push API are used
+// the way their own documentation describes.
+//
+//   - Web Push (unchanged since the original version of this function): the
+//     specific thing most likely to be wrong on first real deploy is
+//     whether Deno's Node-compatibility layer runs `npm:web-push` cleanly —
+//     that combination is real and documented elsewhere, but it was never
+//     exercised here.
+//   - Native (added in migration 0052, via Expo's push relay): a plain
+//     `fetch` to `https://exp.host/--/api/v2/push/send`, no library and no
+//     secret needed on this side — Expo's service is what actually talks to
+//     APNs/FCM. The most likely first-deploy surprise here is a malformed
+//     Expo push token making it into `push_endpoints` at all (the mobile
+//     app's own `subscribeToNativePush` call is what should have rejected
+//     that before it got this far) rather than anything about the request
+//     shape itself, which mirrors Expo's own documented example exactly.
+//
+// Budget for at least one deploy-and-fix cycle either way, the same as
+// `npm run db:reset` was flagged as the first real test of the SQL.
 //
 // WHY THE SHARED SECRET INSTEAD OF SUPABASE'S OWN JWT CHECK
 // ------------------------------------------------------------
@@ -50,6 +63,8 @@
 //   1. supabase secrets set PUSH_TRIGGER_SECRET=<random string>
 //      supabase secrets set VAPID_PUBLIC_KEY=<from the README>
 //      supabase secrets set VAPID_PRIVATE_KEY=<from the README>
+//      (Native/Expo delivery needs NO secret here at all — see sendExpoPush's
+//      own comment. Skip this pair entirely if the web PWA is not deployed.)
 //   2. supabase functions deploy notify-new-pin --no-verify-jwt
 //   3. Create a Database Webhook for INSERTs on public.posts which invokes
 //      this function and has "Add auth header with service key" enabled.
@@ -286,10 +301,6 @@ async function handlePostVote(
     return new Response(JSON.stringify({ sent: 0, reason: "not a like" }), { status: 200 });
   }
 
-  if (!VAPID_CONFIGURED) {
-    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
-  }
-
   const authorId = await loadNotifiablePostAuthor(supabase, payload.post_id, payload.voter_id);
   if (!authorId) {
     return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
@@ -297,7 +308,7 @@ async function handlePostVote(
 
   const { data: endpoints, error: endpointsError } = await supabase
     .from("push_endpoints")
-    .select("endpoint, p256dh, auth")
+    .select("endpoint, p256dh, auth, platform, expo_push_token")
     .eq("user_id", authorId);
 
   if (endpointsError) {
@@ -330,10 +341,6 @@ async function handlePostReply(
     return new Response("Bad request", { status: 400 });
   }
 
-  if (!VAPID_CONFIGURED) {
-    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
-  }
-
   const authorId = await loadNotifiablePostAuthor(supabase, payload.post_id, payload.author_id);
   if (!authorId) {
     return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
@@ -341,7 +348,7 @@ async function handlePostReply(
 
   const { data: endpoints, error: endpointsError } = await supabase
     .from("push_endpoints")
-    .select("endpoint, p256dh, auth")
+    .select("endpoint, p256dh, auth, platform, expo_push_token")
     .eq("user_id", authorId);
 
   if (endpointsError) {
@@ -373,10 +380,6 @@ async function handleDmMessage(
   if (!payload) {
     console.error("[notify-new-pin] unexpected dm_messages payload", rawPayload);
     return new Response("Bad request", { status: 400 });
-  }
-
-  if (!VAPID_CONFIGURED) {
-    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
   }
 
   const { data: thread, error: threadError } = await supabase
@@ -476,7 +479,7 @@ async function handleDmMessage(
     payload.event_target_id
       ? supabase.from("profiles").select("display_name").eq("id", payload.event_target_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase.from("push_endpoints").select("user_id, endpoint, p256dh, auth").in("user_id", recipientIds),
+    supabase.from("push_endpoints").select("user_id, endpoint, p256dh, auth, platform, expo_push_token").in("user_id", recipientIds),
     // Who this message @mentioned, so they get a distinct notification body
     // below rather than the same one as everyone else in the conversation.
     // A system event can never carry a mention (`dm_message_mentions` is
@@ -605,10 +608,6 @@ async function handleNewFollow(
     return new Response("Bad request", { status: 400 });
   }
 
-  if (!VAPID_CONFIGURED) {
-    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
-  }
-
   // Re-checked here, not trusted from the moment of the follow: a block can
   // land between the insert this fired for and this function running, and a
   // "started following you" nudge is exactly the contact a block should stop.
@@ -630,7 +629,7 @@ async function handleNewFollow(
 
   const [{ data: follower }, { data: endpoints, error: endpointsError }] = await Promise.all([
     supabase.from("profiles").select("handle, display_name").eq("id", payload.follower_id).maybeSingle(),
-    supabase.from("push_endpoints").select("endpoint, p256dh, auth").eq("user_id", payload.followee_id),
+    supabase.from("push_endpoints").select("endpoint, p256dh, auth, platform, expo_push_token").eq("user_id", payload.followee_id),
   ]);
 
   if (endpointsError) {
@@ -802,10 +801,6 @@ async function handleChatMessage(
     return new Response("Bad request", { status: 400 });
   }
 
-  if (!VAPID_CONFIGURED) {
-    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
-  }
-
   const now = Date.now();
 
   // Resolved first, because this is the one recipient exempt from the burst
@@ -912,7 +907,7 @@ async function handleChatMessage(
     supabase.from("profiles").select("handle, display_name").eq("id", payload.author_id).maybeSingle(),
     // `user_id` on every row, same reason the DM handler asks for it: it is
     // what splits this audience into "was @mentioned" and "was not" below.
-    supabase.from("push_endpoints").select("user_id, endpoint, p256dh, auth").in("user_id", ids),
+    supabase.from("push_endpoints").select("user_id, endpoint, p256dh, auth, platform, expo_push_token").in("user_id", ids),
   ]);
   if (endpointsError) {
     console.error("[notify-new-pin] push_endpoints query failed:", endpointsError);
@@ -1042,42 +1037,141 @@ async function geocodePostAddress(
   }
 }
 
+/** One row from push_endpoints — either shape migration 0052 allows, discriminated by `platform`. */
+interface PushEndpointRow {
+  platform: string;
+  endpoint: string | null;
+  p256dh: string | null;
+  auth: string | null;
+  expo_push_token: string | null;
+}
+
+const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
+
+/** Expo caps a single request at 100 messages; chunked so a large fan-out (the room, a busy cell) is still one call per 100 rather than one per row. */
+const EXPO_PUSH_CHUNK_SIZE = 100;
+
 /**
- * Sends one push payload to every given endpoint, cleaning up any the push
- * service reports as permanently gone (404/410).
+ * Sends to every native (iOS/Android) row in one batch, via Expo's own push
+ * relay — see this file's own header for why this replaced the raw-APNs/FCM
+ * plan: one HTTP call here does what the web half of this function needs a
+ * whole VAPID/`web-push` setup for. `data` carries the same deep-link
+ * taxonomy sw.js's notificationclick handler already reads (`postId` /
+ * `dmSenderId` / `dmThreadId` / `profileHandle` / `chat`) — the mobile app's
+ * own notification-response handler is what plays sw.js's role there.
+ *
+ * Returns the tokens Expo reported as permanently gone (`DeviceNotRegistered`
+ * — an uninstalled app, a token that rotated) so the caller can clean them up
+ * the same way a stale Web Push 404/410 already is.
+ */
+async function sendExpoPush(
+  rows: PushEndpointRow[],
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+): Promise<{ sent: number; staleTokens: string[] }> {
+  let sent = 0;
+  const staleTokens: string[] = [];
+
+  for (let i = 0; i < rows.length; i += EXPO_PUSH_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + EXPO_PUSH_CHUNK_SIZE);
+    // Non-null assertion: migration 0052's own check constraint guarantees
+    // every 'ios'/'android' row carries a token — nativeRows is already
+    // filtered to just those platforms by the caller.
+    const messages = chunk.map((row) => ({ to: row.expo_push_token!, title, body, data }));
+
+    try {
+      const res = await fetch(EXPO_PUSH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(messages),
+      });
+      if (!res.ok) {
+        console.error("[notify-new-pin] Expo push request failed:", res.status, await res.text());
+        continue;
+      }
+      const json = (await res.json()) as { data?: { status: string; details?: { error?: string } }[] };
+      const tickets = json.data ?? [];
+      tickets.forEach((ticket, idx) => {
+        if (ticket.status === "ok") {
+          sent += 1;
+        } else if (ticket.details?.error === "DeviceNotRegistered") {
+          staleTokens.push(chunk[idx]!.expo_push_token!);
+        } else {
+          console.error("[notify-new-pin] Expo push ticket error:", ticket);
+        }
+      });
+    } catch (err) {
+      console.error("[notify-new-pin] Expo push request threw:", err);
+    }
+  }
+
+  return { sent, staleTokens };
+}
+
+/**
+ * Sends one push payload to every given endpoint — Web Push rows through
+ * `web-push`, native rows through Expo's push relay (`sendExpoPush`) — and
+ * cleans up whichever the respective service reports as permanently gone.
+ *
+ * `notificationBody` stays a pre-built JSON STRING for the Web Push branch
+ * (sw.js's own `event.data.json()` expects exactly that), and is parsed
+ * once here to feed the native branch's structured `{title, body, data}` —
+ * one shared payload for both, rather than every caller building two.
  */
 async function sendPushToEndpoints(
   supabase: ReturnType<typeof createClient>,
-  endpoints: { endpoint: string; p256dh: string; auth: string }[],
+  endpoints: PushEndpointRow[],
   notificationBody: string,
 ): Promise<{ sent: number; stale: number }> {
+  const webRows = endpoints.filter((r) => r.platform === "web");
+  const nativeRows = endpoints.filter((r) => r.platform === "ios" || r.platform === "android");
+
   let sent = 0;
   const staleEndpoints: string[] = [];
 
-  await Promise.all(
-    endpoints.map(async (row) => {
-      try {
-        await webpush.sendNotification(
-          { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } },
-          notificationBody,
-        );
-        sent += 1;
-      } catch (err) {
-        const status = (err as { statusCode?: number }).statusCode;
-        if (status === 404 || status === 410) {
-          staleEndpoints.push(row.endpoint);
-        } else {
-          console.error("[notify-new-pin] push failed:", status, err);
+  if (webRows.length > 0 && VAPID_CONFIGURED) {
+    await Promise.all(
+      webRows.map(async (row) => {
+        try {
+          await webpush.sendNotification(
+            { endpoint: row.endpoint!, keys: { p256dh: row.p256dh!, auth: row.auth! } },
+            notificationBody,
+          );
+          sent += 1;
+        } catch (err) {
+          const status = (err as { statusCode?: number }).statusCode;
+          if (status === 404 || status === 410) {
+            staleEndpoints.push(row.endpoint!);
+          } else {
+            console.error("[notify-new-pin] push failed:", status, err);
+          }
         }
-      }
-    }),
-  );
-
-  if (staleEndpoints.length > 0) {
-    await supabase.from("push_endpoints").delete().in("endpoint", staleEndpoints);
+      }),
+    );
+  } else if (webRows.length > 0) {
+    console.log("[notify-new-pin] skipping", webRows.length, "web endpoint(s) — VAPID keys not configured");
   }
 
-  return { sent, stale: staleEndpoints.length };
+  let staleTokens: string[] = [];
+  if (nativeRows.length > 0) {
+    const parsed = JSON.parse(notificationBody) as { title: string; body: string } & Record<string, unknown>;
+    const { title, body, ...data } = parsed;
+    const result = await sendExpoPush(nativeRows, title, body, data);
+    sent += result.sent;
+    staleTokens = result.staleTokens;
+  }
+
+  await Promise.all([
+    staleEndpoints.length > 0
+      ? supabase.from("push_endpoints").delete().in("endpoint", staleEndpoints)
+      : Promise.resolve(),
+    staleTokens.length > 0
+      ? supabase.from("push_endpoints").delete().in("expo_push_token", staleTokens)
+      : Promise.resolve(),
+  ]);
+
+  return { sent, stale: staleEndpoints.length + staleTokens.length };
 }
 
 function isAuthorized(req: Request): boolean {
@@ -1153,10 +1247,6 @@ Deno.serve(async (req: Request) => {
   // this post's address should be looked up at all.
   await geocodePostAddress(supabase, payload.post_id);
 
-  if (!VAPID_CONFIGURED) {
-    return new Response(JSON.stringify({ sent: 0, reason: "vapid keys not configured" }), { status: 200 });
-  }
-
   // Two queries rather than one embedded join: cell_subscriptions and
   // push_endpoints only share a user_id, not a direct foreign key to each
   // other, so PostgREST's automatic embedding has nothing to key off between
@@ -1212,7 +1302,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: endpoints, error: endpointsError } = await supabase
     .from("push_endpoints")
-    .select("endpoint, p256dh, auth")
+    .select("endpoint, p256dh, auth, platform, expo_push_token")
     .in("user_id", userIds);
 
   if (endpointsError) {

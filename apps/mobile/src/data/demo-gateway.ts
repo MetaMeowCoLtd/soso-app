@@ -1161,6 +1161,14 @@ export function createDemoGateway(): SosoGateway {
       // Nothing to unsubscribe from, since subscribing never succeeded here.
     },
 
+    async subscribeToNativePush(): Promise<void> {
+      throw new Error("Push notifications need the real backend — not available in demo mode.");
+    },
+
+    async unsubscribeFromNativePush(): Promise<void> {
+      // Nothing to unsubscribe from, since subscribing never succeeded here.
+    },
+
     // --- Social graph and presence -------------------------------------
 
     async myProfile() {

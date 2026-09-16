@@ -78,6 +78,19 @@ export interface PushEndpoint {
   auth: string;
 }
 
+/**
+ * A native device's push token, migration 0052 — the RN counterpart of
+ * `PushEndpoint`. Deliberately a single opaque `token` rather than
+ * `PushEndpoint`'s two encryption keys: an Expo push token already
+ * encodes everything the delivery side (`exp.host/--/api/v2/push/send`)
+ * needs, since Expo's own push service is what turns this into a real
+ * APNs/FCM delivery rather than the client talking to either directly.
+ */
+export interface NativePushToken {
+  token: string;
+  platform: 'ios' | 'android';
+}
+
 export interface SosoGateway {
   /** Boot-time category configuration. Cache it; it changes rarely. */
   loadCategories(): Promise<CategoryConfig[]>;
@@ -137,6 +150,12 @@ export interface SosoGateway {
 
   /** Removes a previously registered subscription by its endpoint URL. */
   unsubscribeFromPush(endpoint: string): Promise<void>;
+
+  /** The native (iOS/Android) counterpart of `subscribeToPush` — same shape, keyed on an Expo push token instead of a Web Push endpoint. */
+  subscribeToNativePush(token: NativePushToken, cellIds: readonly CellId[]): Promise<void>;
+
+  /** Removes a previously registered native push token. */
+  unsubscribeFromNativePush(token: string): Promise<void>;
 
   // --- Social graph and presence ---------------------------------------
   //

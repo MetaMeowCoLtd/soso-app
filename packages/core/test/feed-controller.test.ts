@@ -147,6 +147,8 @@ class FakeGateway implements SosoGateway {
   }
   async subscribeToPush() {}
   async unsubscribeFromPush() {}
+  async subscribeToNativePush() {}
+  async unsubscribeFromNativePush() {}
   subscribePostsChanged() {
     return () => {};
   }

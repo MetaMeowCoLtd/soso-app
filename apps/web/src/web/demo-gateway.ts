@@ -1267,6 +1267,18 @@ export function createDemoGateway(): SosoGateway {
       // Nothing to unsubscribe from, since subscribing never succeeded here.
     },
 
+    // The native (iOS/Android) counterpart, added for the mobile app in
+    // C12 — reachable here only because `SosoGateway` is one shared
+    // interface. The web PWA never calls these; same reasoning as
+    // subscribeToPush above either way.
+    async subscribeToNativePush(): Promise<void> {
+      throw new Error("Push notifications need the real backend — not available in demo mode.");
+    },
+
+    async unsubscribeFromNativePush(): Promise<void> {
+      // Nothing to unsubscribe from, since subscribing never succeeded here.
+    },
+
     // --- Social graph and presence -------------------------------------
     //
     // Demo mode is a single browser talking to its own localStorage. There
