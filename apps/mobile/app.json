@@ -59,7 +59,10 @@
           "savePhotosPermission": "Soso saves photos and videos you choose to keep to your library."
         }
       ],
-      "react-native-compressor"
+      "react-native-compressor",
+      "./withDisableScriptSandboxing.js",
+      "./withSceneLifecycle.js",
+      "./withoutPushEntitlement.js"
     ],
     "extra": {
       "eas": {
