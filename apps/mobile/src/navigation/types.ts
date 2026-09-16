@@ -1,5 +1,7 @@
 import type { NavigatorScreenParams } from "@react-navigation/native";
 
+import type { DmThread } from "../core";
+
 /**
  * The five bottom tabs, matching apps/web's `activeTab` union
  * (app/page.tsx:204: `"map" | "feed" | "chat" | "people" | "profile"`).
@@ -47,7 +49,17 @@ export type RootStackParamList = {
   ProfileSettings: undefined;
   SharePinSheet: { postId: string };
   NewGroupSheet: undefined;
-  DmThreadView: { threadId: string };
+  /**
+   * Carries the resolved `DmThread` object itself, not just an id — there
+   * is no `getDmThread(id)` on `SosoGateway` (only `listDmThreads()`, plus
+   * the mutators that happen to return one), so whoever navigates here has
+   * always already gotten hold of the thread some other way: a row tapped
+   * in DmInbox, or `gateway.openDmThread(userId)` resolved right before
+   * navigating (see ProfileViewScreen/PeopleTabScreen/NewGroupSheet's
+   * "Message" paths). Mirrors ConnectionsView's identical choice just
+   * above, for the identical reason.
+   */
+  DmThreadView: { thread: DmThread };
 };
 
 declare global {

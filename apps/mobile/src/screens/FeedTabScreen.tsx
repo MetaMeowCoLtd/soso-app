@@ -12,6 +12,7 @@ import { useFeedPosts } from "../social/useFeedPosts";
 import { Icon, ICONS } from "../theme/Icon";
 import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
+import { Screen } from "../ui/Screen";
 
 /**
  * Ported from apps/web/src/web/FeedTab.tsx. The web version's
@@ -50,7 +51,7 @@ export default function FeedTabScreen() {
   }
 
   return (
-    <View style={styles.flex1}>
+    <Screen edges={["top"]}>
       {hasNewPosts && (
         <Pressable style={styles.newBanner} onPress={refresh}>
           <Icon src={ICONS.arrowUp} size={13} color="#ffffff" />
@@ -108,7 +109,7 @@ export default function FeedTabScreen() {
           }}
         />
       )}
-    </View>
+    </Screen>
   );
 }
 

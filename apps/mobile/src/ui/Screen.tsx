@@ -1,11 +1,18 @@
 import type { ReactNode } from "react";
 import { StyleSheet } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
 import { COLORS } from "../theme/tokens";
 
 interface ScreenProps {
   children: ReactNode;
+  /**
+   * Which edges get inset padding. Defaults to all four. A tab screen that
+   * sits above the bottom tab bar (which already lays itself out clear of
+   * the home indicator) should usually pass `["top"]` — insetting the
+   * bottom edge too would add a second, redundant gap above the tab bar.
+   */
+  edges?: readonly Edge[];
 }
 
 /**
@@ -19,8 +26,12 @@ interface ScreenProps {
  * (`--screenBackground`, `#bcd9d2`) — the colour visible outside the map on
  * web before anything else has painted.
  */
-export function Screen({ children }: ScreenProps) {
-  return <SafeAreaView style={styles.flex1}>{children}</SafeAreaView>;
+export function Screen({ children, edges }: ScreenProps) {
+  return (
+    <SafeAreaView style={styles.flex1} edges={edges}>
+      {children}
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({

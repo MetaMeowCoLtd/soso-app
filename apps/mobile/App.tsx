@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import AuthScreens from "./src/auth/AuthScreens";
+import { UnreadCountsProvider } from "./src/chat/UnreadCountsProvider";
 import { AppGateProvider, useAppGate } from "./src/gate/AppGate";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 import { PresenceProvider } from "./src/social/PresenceProvider";
@@ -60,9 +61,11 @@ function AppContent() {
 
   return (
     <PresenceProvider>
-      <NavigationContainer>
-        <RootNavigator />
-      </NavigationContainer>
+      <UnreadCountsProvider>
+        <NavigationContainer>
+          <RootNavigator />
+        </NavigationContainer>
+      </UnreadCountsProvider>
     </PresenceProvider>
   );
 }

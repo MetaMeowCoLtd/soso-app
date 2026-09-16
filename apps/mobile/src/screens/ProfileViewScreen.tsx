@@ -30,7 +30,9 @@ export default function ProfileViewScreen() {
         })
       }
       onOpenProfile={(handle) => navigation.push("ProfileView", { handle })}
-      onMessage={(userId) => navigation.navigate("DmThreadView", { threadId: userId })}
+      onMessage={(userId) => {
+        void gateway.openDmThread(userId).then((thread) => navigation.navigate("DmThreadView", { thread }));
+      }}
     />
   );
 }

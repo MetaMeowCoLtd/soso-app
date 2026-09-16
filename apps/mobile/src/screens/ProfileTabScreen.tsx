@@ -80,7 +80,13 @@ export default function ProfileTabScreen() {
         })
       }
       onOpenProfile={(otherHandle) => navigation.navigate("ProfileView", { handle: otherHandle })}
-      onMessage={(userId) => navigation.navigate("DmThreadView", { threadId: userId })}
+      onMessage={(userId) => {
+        // No `getDmThread(id)` on SosoGateway — `openDmThread` is a
+        // get-or-create, and its return is what DmThreadView needs. See
+        // navigation/types.ts's own note on why the route takes a thread,
+        // not an id.
+        void gateway.openDmThread(userId).then((thread) => navigation.navigate("DmThreadView", { thread }));
+      }}
     />
   );
 }

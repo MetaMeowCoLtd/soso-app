@@ -13,6 +13,7 @@ import { COLORS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
+import { Screen } from "../ui/Screen";
 
 /**
  * Ported from apps/web/src/web/PeopleTab.tsx. Identity + privacy first,
@@ -125,7 +126,7 @@ export default function PeopleTabScreen() {
   }
 
   return (
-    <View style={styles.flex1}>
+    <Screen edges={["top"]}>
       <FlatList
         data={demoMode ? [] : visible}
         keyExtractor={(friend) => friend.id}
@@ -263,7 +264,11 @@ export default function PeopleTabScreen() {
                 <AppText style={styles.friendHandle}>@{friend.handle}</AppText>
                 {status && <AppText style={[styles.friendStatus, friend.isOnline && styles.friendStatusOnline]}>{status}</AppText>}
               </View>
-              <Pressable style={styles.iconButton} onPress={() => navigation.navigate("DmThreadView", { threadId: friend.id })} accessibilityLabel={`Message ${friend.displayName}`}>
+              <Pressable
+                style={styles.iconButton}
+                onPress={() => void gateway.openDmThread(friend.id).then((thread) => navigation.navigate("DmThreadView", { thread }))}
+                accessibilityLabel={`Message ${friend.displayName}`}
+              >
                 <Icon src={ICONS.send} size={15} color={COLORS.ink} />
               </Pressable>
               <Pressable
@@ -335,7 +340,7 @@ export default function PeopleTabScreen() {
           </View>
         </Pressable>
       </Modal>
-    </View>
+    </Screen>
   );
 }
 

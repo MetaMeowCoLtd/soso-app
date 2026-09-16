@@ -1,6 +1,7 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import { FlatList, Image, Pressable, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { PostDetail, SosoGateway, UserProfile } from "../core";
 import { Icon, ICONS } from "../theme/Icon";
@@ -55,6 +56,12 @@ export default function ProfileView({
   onEditProfile,
 }: ProfileViewProps) {
   const isTab = variant === "tab";
+  // Only the tab variant needs this: the overlay variant is a pushed
+  // native-stack screen with a visible header, which already lays its
+  // content out clear of the status bar. The tab variant sits under
+  // TabNavigator's `headerShown: false` (Map wants edge-to-edge; this
+  // doesn't), so nothing else accounts for the top inset here.
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<PostDetail[]>([]);
@@ -135,7 +142,7 @@ export default function ProfileView({
   }
 
   return (
-    <View style={styles.flex1}>
+    <View style={[styles.flex1, isTab && { paddingTop: insets.top }]}>
       {!isTab && onClose && (
         <Pressable style={styles.backButton} onPress={onClose} accessibilityLabel="Back">
           <Icon src={ICONS.chevronLeft} size={22} color="#ffffff" />
