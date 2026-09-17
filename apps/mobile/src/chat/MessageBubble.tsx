@@ -68,7 +68,18 @@ export function MessageBubble({
 
   return (
     <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, endsRun && styles.rowEndsRun, flash && styles.flash]}>
-      {!mine && (showAvatar ? <Avatar name={row.authorName} seed={row.authorHandle} src={avatarSrc} size={26} /> : <View style={styles.avatarSpacer} />)}
+      {!mine &&
+        (showAvatar ? (
+          <Pressable
+            onPress={row.authorHandle ? () => onOpenMention({ id: row.authorId, handle: row.authorHandle, name: row.authorName }) : undefined}
+            disabled={!row.authorHandle}
+            accessibilityLabel={`Open ${row.authorName}'s profile`}
+          >
+            <Avatar name={row.authorName} seed={row.authorHandle} src={avatarSrc} size={26} />
+          </Pressable>
+        ) : (
+          <View style={styles.avatarSpacer} />
+        ))}
 
       <View style={styles.stack}>
         {showSenderName && <AppText style={styles.author}>{row.authorName}</AppText>}

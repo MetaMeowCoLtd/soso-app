@@ -190,13 +190,23 @@ export default function DmThreadViewScreen() {
         <Pressable onPress={() => navigation.goBack()} accessibilityLabel="Back" style={styles.headerButton}>
           <Icon src={ICONS.chevronLeft} size={17} color={COLORS.ink} />
         </Pressable>
-        <Pressable style={styles.identity} onPress={isGroup ? () => setDetailsOpen(true) : undefined} disabled={!isGroup}>
+        <Pressable
+          style={styles.identity}
+          onPress={
+            isGroup
+              ? () => setDetailsOpen(true)
+              : thread.otherHandle
+                ? () => navigation.navigate("ProfileView", { handle: thread.otherHandle! })
+                : undefined
+          }
+          disabled={isGroup ? false : !thread.otherHandle}
+        >
           <ConversationAvatar thread={thread} gateway={gateway} size={32} />
           <View style={styles.headerWho}>
             <AppText style={styles.headerTitle}>{conversationTitle(thread)}</AppText>
             {conversationSubtitle(thread) && <AppText style={styles.headerSubtitle}>{conversationSubtitle(thread)}</AppText>}
           </View>
-          {isGroup && <Icon src={ICONS.chevronLeft} size={13} color={COLORS.muted} />}
+          {(isGroup || thread.otherHandle) && <Icon src={ICONS.chevronLeft} size={13} color={COLORS.muted} />}
         </Pressable>
       </View>
 

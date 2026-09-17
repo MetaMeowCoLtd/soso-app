@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from "react";
-import type { FlatList, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import { Keyboard, Platform, type FlatList, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 
 /**
  * Full rewrite of apps/web/src/web/useChatScroll.ts (247 lines of
@@ -57,6 +57,25 @@ export function useChatScroll<T extends { id: string }>(
       }
     }
   }, [messages, firstUnreadId, listRef]);
+
+  // `KeyboardAvoidingView`'s `padding` behavior only shrinks the list's own
+  // viewport height to make room for the keyboard — it has no idea the list
+  // exists, so it never re-scrolls it. Without this, a list already
+  // scrolled to its old bottom keeps that same offset against a now-shorter
+  // viewport, and the last few messages end up sitting below the visible
+  // area, hidden behind the keyboard/composer. Re-running the same
+  // near-bottom check the "new message arrived" effect above already uses
+  // keeps this consistent with that policy: pinned readers follow the
+  // keyboard down to the latest message, but anyone scrolled up into
+  // history isn't yanked back down just for opening the keyboard.
+  useEffect(() => {
+    const event = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const subscription = Keyboard.addListener(event, () => {
+      const list = listRef.current;
+      if (list && nearBottomRef.current) requestAnimationFrame(() => list.scrollToEnd({ animated: true }));
+    });
+    return () => subscription.remove();
+  }, [listRef]);
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
