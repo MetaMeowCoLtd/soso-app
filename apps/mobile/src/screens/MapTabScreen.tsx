@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Bounds, Pin, PostDetail, ReportReason } from "../core";
 import { useGateway } from "../gate/AppGate";
 import { CountBadgeMarker } from "../map/CountBadge";
+import DraftPinMarker from "../map/DraftPinMarker";
 import { loadCuteMapStyle } from "../map/mapStyle";
 import { MyLocationMarker } from "../map/MyLocationMarker";
 import PinPreview from "../map/PinPreview";
@@ -214,6 +215,7 @@ export default function MapTabScreen() {
                 }}
               />
             ))}
+        {placing && <DraftPinMarker at={placing} />}
       </Map>
 
       {!placing && !selectedPin && !selectedPoi && (

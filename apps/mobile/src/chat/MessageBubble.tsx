@@ -67,7 +67,7 @@ export function MessageBubble({
   const mine = row.mine;
 
   return (
-    <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, flash && styles.flash]}>
+    <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, endsRun && styles.rowEndsRun, flash && styles.flash]}>
       {!mine && (showAvatar ? <Avatar name={row.authorName} seed={row.authorHandle} src={avatarSrc} size={26} /> : <View style={styles.avatarSpacer} />)}
 
       <View style={styles.stack}>
@@ -79,8 +79,14 @@ export function MessageBubble({
           </Animated.View>
 
           <GestureDetector gesture={gesture}>
-            <Animated.View style={bubbleStyle}>
-              <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
+            <Animated.View style={[styles.bubbleWrap, bubbleStyle]}>
+              <View
+                style={[
+                  styles.bubble,
+                  mine ? styles.bubbleMine : styles.bubbleTheirs,
+                  endsRun && (mine ? styles.bubbleMineEnd : styles.bubbleTheirsEnd),
+                ]}
+              >
                 {row.replyTo && (
                   <Pressable
                     style={styles.quote}
@@ -107,7 +113,9 @@ export function MessageBubble({
                           @{segment.mention.handle}
                         </AppText>
                       ) : (
-                        <AppText key={i}>{segment.text}</AppText>
+                        <AppText key={i} style={mine && styles.bodyTextMine}>
+                          {segment.text}
+                        </AppText>
                       ),
                     )}
                   </AppText>
@@ -163,18 +171,28 @@ function splitByMentions(body: string, mentions: Mention[]): ({ kind: "text"; te
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", gap: 8, marginBottom: 2, paddingHorizontal: 12 },
+  row: { flexDirection: "row", gap: 8, marginTop: 2, paddingHorizontal: 12 },
   rowMine: { justifyContent: "flex-end" },
   rowTheirs: { justifyContent: "flex-start" },
+  rowEndsRun: { marginBottom: 9 },
   flash: { backgroundColor: "rgba(0,167,143,0.08)" },
   avatarSpacer: { width: 26 },
-  stack: { maxWidth: "78%", gap: 2 },
-  author: { fontSize: 11, fontWeight: "700", color: COLORS.muted, marginLeft: 4 },
+  stack: { maxWidth: "78%", flexShrink: 1, gap: 2 },
+  author: { fontSize: 11, fontWeight: "700", color: COLORS.muted, marginLeft: 4, marginTop: 6 },
   bubbleLine: { flexDirection: "row", alignItems: "center", gap: 4 },
   indicator: { width: 20, alignItems: "center" },
-  bubble: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, gap: 4 },
+  // RN's default flexShrink is 0 (web's flex items default to 1), so
+  // without this the Text inside never gets forced to wrap — it reports
+  // its unwrapped one-line width as "intrinsic" and spills past the
+  // screen edge instead of shrinking to `stack`'s maxWidth.
+  bubbleWrap: { flexShrink: 1, minWidth: 0 },
+  bubble: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8, gap: 4 },
   bubbleMine: { backgroundColor: COLORS.teal },
   bubbleTheirs: { backgroundColor: "rgba(20,50,43,0.06)" },
+  // Matches web's `.chat-row.X.run-end .chat-bubble` tail corner — the one
+  // flattened corner that reads as a "tail" on the last bubble of a run.
+  bubbleTheirsEnd: { borderBottomLeftRadius: 7 },
+  bubbleMineEnd: { borderBottomRightRadius: 7 },
   // Matches web's `.chat-row.mine .chat-bubble { color:#fff }` — a "mine"
   // bubble's background is COLORS.teal (below), and CSS's `color:inherit`
   // is what carries that white down into the body text, mentions, and
