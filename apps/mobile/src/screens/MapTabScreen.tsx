@@ -28,7 +28,7 @@ import { useFeed } from "../map/useFeed";
 import type { RootStackParamList } from "../navigation/types";
 import { Icon, ICONS } from "../theme/Icon";
 import { lookOf } from "../theme/categories";
-import { COLORS, SHADOWS } from "../theme/tokens";
+import { COLORS, IOS_TAB_BAR_CLEARANCE, SHADOWS } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
 
 /** Layer ids from mapStyle.ts's soso_shops/poi_transit — ported from apps/web/src/web/SosoMap.tsx's POI_LAYERS. */
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
   mapRail: {
     position: "absolute",
     right: 16,
-    bottom: 24,
+    bottom: 24 + IOS_TAB_BAR_CLEARANCE,
     alignItems: "center",
     gap: 12,
   },
@@ -411,7 +411,7 @@ const styles = StyleSheet.create({
   },
   overlay: {
     position: "absolute",
-    bottom: 24,
+    bottom: 24 + IOS_TAB_BAR_CLEARANCE,
     left: 16,
     right: 16,
   },

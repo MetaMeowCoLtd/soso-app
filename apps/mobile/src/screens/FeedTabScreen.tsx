@@ -10,7 +10,7 @@ import { FeedCard } from "../social/FeedCard";
 import ThoughtComposer from "../social/ThoughtComposer";
 import { useFeedPosts } from "../social/useFeedPosts";
 import { Icon, ICONS } from "../theme/Icon";
-import { COLORS } from "../theme/tokens";
+import { COLORS, IOS_TAB_BAR_CLEARANCE } from "../theme/tokens";
 import { AppText } from "../ui/AppText";
 import { Screen } from "../ui/Screen";
 
@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
   fab: {
     position: "absolute",
     right: 20,
-    bottom: 24,
+    bottom: 24 + IOS_TAB_BAR_CLEARANCE,
     width: 56,
     height: 56,
     borderRadius: 28,

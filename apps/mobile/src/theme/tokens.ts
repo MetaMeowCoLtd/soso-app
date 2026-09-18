@@ -72,3 +72,24 @@ export const SHADOWS = {
   e2: elevation([4, 12, 0.08], 4),
   e3: elevation([10, 24, 0.12], 8),
 } as const;
+
+/**
+ * Extra bottom clearance for an absolutely-positioned floating control (a
+ * FAB, the map's locate/drop-pin rail) on a tab screen, needed only on iOS.
+ *
+ * TabNavigator.tsx's `IOSGlassTabNavigator` renders a real
+ * `UITabBarController`, which — per Apple's Liquid Glass tab bar design —
+ * FLOATS above content instead of reserving space for it the way the JS
+ * tab bar (Android, and iOS before that change) does. A tab screen's own
+ * view now extends the full height of the display, so a control
+ * positioned with a plain `bottom: 24` sits BEHIND the floating bar
+ * instead of above it, unreachable.
+ *
+ * Approximates the pill's rendered height plus its own margin off the
+ * home indicator; there is no public API to measure it exactly — the
+ * classic `useBottomTabBarHeight` hook is backed by a context this native
+ * tab bar implementation doesn't populate (confirmed: it isn't even
+ * exported from `@react-navigation/bottom-tabs/unstable`). Tune this
+ * against a real device if the pill's rendered size changes.
+ */
+export const IOS_TAB_BAR_CLEARANCE = Platform.OS === "ios" ? 68 : 0;

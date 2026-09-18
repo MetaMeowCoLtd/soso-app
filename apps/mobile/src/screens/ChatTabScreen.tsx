@@ -1,7 +1,7 @@
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 
 import { ConversationView } from "../chat/ConversationView";
 import DmInbox from "../chat/DmInbox";
@@ -71,6 +71,27 @@ export default function ChatTabScreen() {
   }, [gateway, reload]);
 
   useForegroundRefetch(reload);
+
+  // Hides the iOS floating tab bar while the room's composer is open, and
+  // restores it in the inbox list — the same treatment a DM thread gets
+  // for free by having no tab bar at all. That pill floats above content
+  // rather than reserving space for it (see theme/tokens.ts's
+  // `IOS_TAB_BAR_CLEARANCE`), and there's no good way to keep a chat
+  // composer clear of a bar that can be typed into from underneath.
+  // Android's JS tab bar already reserves its own space and was never
+  // affected, so this only runs on iOS.
+  //
+  // `navigation` is typed for the root stack (so `.navigate()` below
+  // type-checks against sibling routes), but at runtime it's whichever
+  // navigator actually rendered this screen as a tab — native on iOS,
+  // JS on Android (TabNavigator.tsx renders the same component under
+  // both). `setOptions` here targets THIS screen's own entry in that
+  // tab navigator, which has no `tabBarStyle` field in the root stack's
+  // type, hence the cast.
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    navigation.setOptions({ tabBarStyle: { display: view === "room" ? "none" : "flex" } } as never);
+  }, [navigation, view]);
 
   const [roomAnchorAt] = useState(() => roomSeenAt());
   const firstUnreadId = useMemo(() => {
