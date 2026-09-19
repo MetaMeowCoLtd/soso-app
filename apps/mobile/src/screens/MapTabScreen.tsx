@@ -116,7 +116,6 @@ export default function MapTabScreen() {
   }, [gateway, selectedPin]);
 
   async function handleMapPress(point: [number, number], lngLat: [number, number]) {
-    if (placing) return; // Composer already open — matches web's `{!placing && <ClickHandler/>}`.
     const map = mapRef.current;
     const features = map ? await map.queryRenderedFeatures(point, { layers: POI_LAYERS }).catch(() => []) : [];
     const feature = features[0];
@@ -124,6 +123,12 @@ export default function MapTabScreen() {
       const name = poiDisplayName(feature.properties ?? {});
       setSelectedPin(null);
       setSelectedPoi({ name: name || "Unnamed place", at: { latitude: lngLat[1], longitude: lngLat[0] } });
+      if (placing) setPlacing(null); // Tapping a POI cancels the draft placement
+      return;
+    }
+    if (placing) {
+      // Tapping empty map space while placing cancels the draft pin
+      setPlacing(null);
       return;
     }
     setSelectedPin(null);

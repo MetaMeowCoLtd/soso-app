@@ -69,7 +69,7 @@ export default function DraftPinMarker({ at }: { at: Coordinates }) {
 
   return (
     <Marker lngLat={[at.longitude, at.latitude]} anchor="bottom">
-      <Animated.View style={[styles.shell, dropStyle]}>
+      <Animated.View style={[styles.shell, dropStyle]} pointerEvents="box-none">
         <Animated.View style={[styles.ring, ringStyle]} />
         <View style={styles.pin}>
           <Icon src={ICONS.plus} size={16} color={COLORS.teal} />
