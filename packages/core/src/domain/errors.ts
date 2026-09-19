@@ -82,6 +82,9 @@ export const SOSO_ERROR_CODES = [
   // Native push tokens (migration 0052).
   'soso/no_token',
   'soso/invalid_platform',
+  // Sticker packs (migration 0053).
+  'soso/not_found',
+  'soso/sticker_upload_failed',
 ] as const;
 
 export type SosoErrorCode = (typeof SOSO_ERROR_CODES)[number];
@@ -190,5 +193,7 @@ export const ERROR_MESSAGES_EN: Record<SosoErrorCode | 'soso/unknown', string> =
   'soso/owner_only': 'Only the person who made the group can remove someone.',
   'soso/no_token': "This device didn't provide a valid push token. Try again.",
   'soso/invalid_platform': 'Notifications are not available on this platform.',
+  'soso/not_found': "That doesn't exist, or isn't visible to you.",
+  'soso/sticker_upload_failed': "Couldn't upload that sticker. Check your connection and try again.",
   'soso/unknown': 'Something went wrong. Try again.',
 };

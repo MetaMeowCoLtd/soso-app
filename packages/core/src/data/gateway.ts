@@ -47,6 +47,7 @@ import type {
   PostDetail,
   PostReply,
   SignedBoardTileUrl,
+  StickerPack,
   UserProfile,
 } from '../domain/types';
 
@@ -476,6 +477,13 @@ export interface SosoGateway {
    * to check the way a group does) and silently drops anything else.
    * `extractMentionedIds` (core) is how a caller should build this from the
    * composed text.
+   *
+   * `stickerId` sends a sticker instead of anything else — migration 0053's
+   * `chat_messages_sticker_solo` makes a sticker message mutually exclusive
+   * with `body`/`media`/`sharedPostId` a database fact, not just a calling
+   * convention, so passing more than one of these together fails server-side
+   * regardless of what a caller does here. Must be a sticker from an
+   * INSTALLED pack — see `installStickerPack`.
    */
   sendChatMessage(
     body: string,
@@ -483,6 +491,7 @@ export interface SosoGateway {
     media?: MessageMedia | null,
     sharedPostId?: string | null,
     mentionedUserIds?: readonly string[],
+    stickerId?: string | null,
   ): Promise<ChatMessage>;
 
   /** Most recent messages, oldest first. Pass a prior page's oldest `createdAt` to page further back. */
@@ -624,6 +633,8 @@ export interface SosoGateway {
    * passing a stale or fabricated id here costs nothing worse than a
    * mention that does not land. `extractMentionedIds` (core) is how a
    * caller should build this from the composed text.
+   *
+   * `stickerId` — see `sendChatMessage`'s identical note.
    */
   sendDm(
     threadId: string,
@@ -632,6 +643,7 @@ export interface SosoGateway {
     media?: MessageMedia | null,
     sharedPostId?: string | null,
     mentionedUserIds?: readonly string[],
+    stickerId?: string | null,
   ): Promise<DmMessage>;
 
   /** Moves your read cursor to now, clearing the thread's unread count. */
@@ -764,4 +776,72 @@ export interface SosoGateway {
    * rule.
    */
   subscribeBoardStrokes(boardId: string, onStroke: (stroke: BoardStrokeBatch) => void): () => void;
+
+  // --- Stickers ----------------------------------------------------------
+  // Phase A of the plan: schema, gateway, send/receive. A sticker is sent
+  // via `sendChatMessage`/`sendDm`'s `stickerId` parameter above, not a
+  // method here — everything below is about the PACK a sticker comes from:
+  // making one, adding to it, publishing it, and installing someone else's.
+  // See migration `20260918000053_sticker_packs.sql`'s header for why a
+  // sticker is a reference to an already-uploaded asset rather than
+  // something uploaded fresh per message the way `uploadMessageMedia` is.
+
+  /**
+   * Turns a stored sticker's `path` into something an `<Image>` can load, or
+   * null for no path. Synchronous and unsigned, exactly like `avatarUrl` —
+   * the 'sticker-assets' bucket is public for the identical reason the
+   * 'avatars' one is (see the migration's header): no per-viewer audience
+   * check to make, and rendered a dozen at a time in a picker tray.
+   */
+  stickerAssetUrl(path: string): string | null;
+
+  /**
+   * Uploads one sticker's bytes to the creator's own pack folder and
+   * returns the resulting path. Deliberately does NOT add it to the pack —
+   * uploading and attaching are two steps, same reasoning as
+   * `uploadMessageMedia`, so a picked image that is then abandoned (a bad
+   * crop, a change of mind) leaves no sticker behind. Pass the returned
+   * path to `addStickerToPack`.
+   *
+   * The blob is expected to already be downscaled to fit
+   * `STICKER_MAX_DIMENSION` with its alpha channel intact (WebP or PNG) —
+   * see `sticker-image.ts` (Phase B). Nothing here resizes or flattens
+   * anything.
+   */
+  uploadStickerAsset(packId: string, image: Blob): Promise<string>;
+
+  /** Starts a new, empty draft pack owned by the caller. */
+  createStickerPack(title: string): Promise<StickerPack>;
+
+  /** Appends one sticker (from `uploadStickerAsset`) to a draft pack the caller owns and returns the pack's new state. Fails once the pack is published. */
+  addStickerToPack(packId: string, path: string, width: number, height: number): Promise<StickerPack>;
+
+  /** Sets the display order of every sticker in a draft pack the caller owns. `orderedIds` must list every sticker in the pack exactly once. */
+  reorderStickers(packId: string, orderedIds: readonly string[]): Promise<StickerPack>;
+
+  /** Removes one sticker from a draft pack the caller owns. Fails once the pack is published — there is no re-open/versioning path in this phase. */
+  deleteSticker(stickerId: string): Promise<void>;
+
+  /**
+   * Publishes a pack, freezing its contents and making it visible to anyone
+   * (previously visible only to its creator). Also installs it for its own
+   * creator, so publishing and "adding my own pack to my tray" are the same
+   * action rather than two.
+   */
+  publishStickerPack(packId: string): Promise<StickerPack>;
+
+  /** One pack by id — the read path a share link resolves through. Null if it does not exist, or is an unpublished draft belonging to someone else. */
+  getStickerPack(packId: string): Promise<StickerPack | null>;
+
+  /** Adds a published pack to the caller's own tray, so they may send from it. */
+  installStickerPack(packId: string): Promise<void>;
+
+  /** Removes a pack from the caller's tray. Does not delete the pack itself, even if the caller is its creator. */
+  uninstallStickerPack(packId: string): Promise<void>;
+
+  /** Every pack the caller has installed, newest install first — what a picker tray's tabs and "My Stickers" both list from. */
+  listMyStickerPacks(): Promise<StickerPack[]>;
+
+  /** Flags a pack for moderator review. Matches `reportChatMessage`'s shape — a report, not a takedown; there is no review queue UI yet. */
+  reportStickerPack(packId: string, reason: string): Promise<void>;
 }

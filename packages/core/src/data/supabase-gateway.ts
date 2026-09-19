@@ -11,6 +11,7 @@ import { FunctionsHttpError, type RealtimeChannel, type SupabaseClient } from '@
 import { MAX_CELLS_PER_QUERY, type AreaCellId, type CellId } from '../domain/grid';
 import { SosoError, toSosoError } from '../domain/errors';
 import { AVATAR_OUTPUT_MIME, avatarObjectPath, randomAvatarToken } from '../domain/avatar';
+import { stickerAssetExtensionFor, stickerAssetObjectPath } from '../domain/sticker';
 import {
   decodeZone,
   decodeFeedDelta,
@@ -82,6 +83,9 @@ import {
   type WireUserProfile,
   type PostReply,
   type WirePostReply,
+  decodeStickerPack,
+  type StickerPack,
+  type WireStickerPack,
 } from '../domain/types';
 import type { FeedQuery, NativePushToken, PushEndpoint, ReportReason, SosoGateway } from './gateway';
 
@@ -203,6 +207,9 @@ function decodeCategory(row: WireCategoryRow): CategoryConfig {
  * having been edited too.
  */
 const AVATAR_BUCKET = 'avatars';
+
+/** The public bucket created by migration 0053, same reasoning as `AVATAR_BUCKET` above. */
+const STICKER_BUCKET = 'sticker-assets';
 
 export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
   return {
@@ -724,6 +731,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       media?: MessageMedia | null,
       sharedPostId?: string | null,
       mentionedUserIds?: readonly string[],
+      stickerId?: string | null,
     ): Promise<ChatMessage> {
       const { data, error } = await client.rpc('send_chat_message', {
         p_body: body,
@@ -735,6 +743,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_media_kind: media?.kind ?? null,
         p_poster_path: media?.posterPath ?? null,
         p_duration_ms: media?.durationMs ?? null,
+        p_sticker_id: stickerId ?? null,
         p_mentioned_user_ids: mentionedUserIds ? [...mentionedUserIds] : [],
       });
       if (error) throw toSosoError(error);
@@ -877,6 +886,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
       media?: MessageMedia | null,
       sharedPostId?: string | null,
       mentionedUserIds?: readonly string[],
+      stickerId?: string | null,
     ): Promise<DmMessage> {
       const { data, error } = await client.rpc('send_dm', {
         p_thread_id: threadId,
@@ -889,6 +899,7 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         p_media_kind: media?.kind ?? null,
         p_poster_path: media?.posterPath ?? null,
         p_duration_ms: media?.durationMs ?? null,
+        p_sticker_id: stickerId ?? null,
         p_mentioned_user_ids: mentionedUserIds ? [...mentionedUserIds] : [],
       });
       if (error) throw toSosoError(error);
@@ -1084,6 +1095,95 @@ export function createSupabaseGateway(client: SupabaseClient): SosoGateway {
         boardChannels.delete(boardId);
         void client.removeChannel(channel);
       };
+    },
+
+    stickerAssetUrl(path: string): string | null {
+      if (!path) return null;
+      return client.storage.from(STICKER_BUCKET).getPublicUrl(path).data.publicUrl;
+    },
+
+    async uploadStickerAsset(packId: string, image: Blob): Promise<string> {
+      // Same `getSession()`-not-`getUser()` reasoning as `uploadAvatar` —
+      // see that method's own comment for why.
+      const { data: sessionData } = await client.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) throw new SosoError('soso/unauthenticated');
+
+      const extension = stickerAssetExtensionFor(image.type);
+      const path = stickerAssetObjectPath(userId, packId, randomAvatarToken(), extension);
+
+      const { error } = await client.storage.from(STICKER_BUCKET).upload(path, image, {
+        contentType: image.type || 'image/webp',
+        upsert: false,
+        cacheControl: '31536000',
+      });
+      if (error) throw new SosoError('soso/sticker_upload_failed', error);
+
+      return path;
+    },
+
+    async createStickerPack(title: string): Promise<StickerPack> {
+      const { data, error } = await client.rpc('create_sticker_pack', { p_title: title });
+      if (error) throw toSosoError(error);
+      return decodeStickerPack(data as WireStickerPack);
+    },
+
+    async addStickerToPack(packId: string, path: string, width: number, height: number): Promise<StickerPack> {
+      const { data, error } = await client.rpc('add_sticker_to_pack', {
+        p_pack_id: packId,
+        p_path: path,
+        p_width: width,
+        p_height: height,
+      });
+      if (error) throw toSosoError(error);
+      return decodeStickerPack(data as WireStickerPack);
+    },
+
+    async reorderStickers(packId: string, orderedIds: readonly string[]): Promise<StickerPack> {
+      const { data, error } = await client.rpc('reorder_stickers', {
+        p_pack_id: packId,
+        p_ordered_ids: [...orderedIds],
+      });
+      if (error) throw toSosoError(error);
+      return decodeStickerPack(data as WireStickerPack);
+    },
+
+    async deleteSticker(stickerId: string): Promise<void> {
+      const { error } = await client.rpc('delete_sticker', { p_sticker_id: stickerId });
+      if (error) throw toSosoError(error);
+    },
+
+    async publishStickerPack(packId: string): Promise<StickerPack> {
+      const { data, error } = await client.rpc('publish_sticker_pack', { p_pack_id: packId });
+      if (error) throw toSosoError(error);
+      return decodeStickerPack(data as WireStickerPack);
+    },
+
+    async getStickerPack(packId: string): Promise<StickerPack | null> {
+      const { data, error } = await client.rpc('get_sticker_pack', { p_pack_id: packId });
+      if (error) throw toSosoError(error);
+      return data ? decodeStickerPack(data as WireStickerPack) : null;
+    },
+
+    async installStickerPack(packId: string): Promise<void> {
+      const { error } = await client.rpc('install_sticker_pack', { p_pack_id: packId });
+      if (error) throw toSosoError(error);
+    },
+
+    async uninstallStickerPack(packId: string): Promise<void> {
+      const { error } = await client.rpc('uninstall_sticker_pack', { p_pack_id: packId });
+      if (error) throw toSosoError(error);
+    },
+
+    async listMyStickerPacks(): Promise<StickerPack[]> {
+      const { data, error } = await client.rpc('list_my_sticker_packs');
+      if (error) throw toSosoError(error);
+      return ((data ?? []) as WireStickerPack[]).map(decodeStickerPack);
+    },
+
+    async reportStickerPack(packId: string, reason: string): Promise<void> {
+      const { error } = await client.rpc('report_sticker_pack', { p_pack_id: packId, p_reason: reason });
+      if (error) throw toSosoError(error);
     },
   };
 }

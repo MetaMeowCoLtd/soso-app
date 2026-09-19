@@ -844,6 +844,75 @@ export function decodeMessageMedia(w: WireMessageMedia): MessageMedia | null {
 }
 
 /**
+ * A sticker sent by reference — an already-uploaded, reusable asset from an
+ * installed pack, not something uploaded fresh for this message the way
+ * `MessageMedia` is. Deliberately its own type rather than a third
+ * `MediaKind`: `MessageMedia.path` is always an R2 key this app owns, minted
+ * for one message; a sticker's `path` is a public Supabase Storage key
+ * someone else's pack owns, uploaded once and sent many times. Folding the
+ * two together would make `media`/`image_path` sometimes mean one thing and
+ * sometimes the other — see migration 0053's header for the full argument.
+ */
+export interface Sticker {
+  id: string;
+  path: string;
+  width: number;
+  height: number;
+}
+
+export interface WireSticker {
+  id: string;
+  path: string;
+  width: number | string;
+  height: number | string;
+}
+
+export function decodeSticker(w: WireSticker | null | undefined): Sticker | null {
+  if (!w || !w.id) return null;
+  return { id: w.id, path: w.path, width: Number(w.width) || 0, height: Number(w.height) || 0 };
+}
+
+/**
+ * A user-authored collection of stickers. `kind` only ever arrives as
+ * 'static' today — 'animated' is reserved for a later phase (see migration
+ * 0053's header) and nothing on this client can produce or play one yet.
+ */
+export type StickerPackStatus = 'draft' | 'published';
+export type StickerPackKind = 'static' | 'animated';
+
+export interface StickerPack {
+  id: string;
+  creatorId: string;
+  title: string;
+  kind: StickerPackKind;
+  status: StickerPackStatus;
+  coverPath: string | null;
+  stickers: Sticker[];
+}
+
+export interface WireStickerPack {
+  id: string;
+  creator_id: string;
+  title: string;
+  kind?: string | null;
+  status?: string | null;
+  cover_path?: string | null;
+  stickers?: WireSticker[] | null;
+}
+
+export function decodeStickerPack(w: WireStickerPack): StickerPack {
+  return {
+    id: w.id,
+    creatorId: w.creator_id,
+    title: w.title,
+    kind: w.kind === 'animated' ? 'animated' : 'static',
+    status: w.status === 'published' ? 'published' : 'draft',
+    coverPath: w.cover_path ?? null,
+    stickers: (w.stickers ?? []).map((s) => decodeSticker(s)).filter((s): s is Sticker => s !== null),
+  };
+}
+
+/**
  * A post shared into a conversation, as the READER may see it.
  *
  * The server decides what this contains, per reader, on every read - see
@@ -916,6 +985,8 @@ export interface ChatReplyPreview {
   media: MessageMedia | null;
   /** The quoted message shared a pin. A flag, not a card — the card itself is a few bubbles up. */
   hasPost: boolean;
+  /** Non-null when the quoted message was a sticker; such a quote is otherwise blank. */
+  sticker: Sticker | null;
 }
 
 export interface ChatMessage {
@@ -941,6 +1012,14 @@ export interface ChatMessage {
   /** Null unless a post was shared. `body` may be empty when this is set. */
   sharedPost: SharedPost | null;
   /**
+   * Null for anything but a sticker message. Mutually exclusive with
+   * `media`/`sharedPost`/a non-empty `body` — migration 0053's
+   * `chat_messages_sticker_solo` makes this a database fact, not just a
+   * convention (see `Sticker`'s own comment on why this is a separate
+   * field from `media` at all).
+   */
+  sticker: Sticker | null;
+  /**
    * How many OTHER people have read this far in the room.
    *
    * A count rather than a list of readers, and that is a property of the
@@ -963,7 +1042,7 @@ export interface WireChatMessage {
   author_avatar?: string | null;
   mine: boolean;
   reply_to?:
-    | ({ id: string; body: string; author_name: string; has_post?: boolean | null } & WireMessageMedia)
+    | ({ id: string; body: string; author_name: string; has_post?: boolean | null; sticker?: WireSticker | null } & WireMessageMedia)
     | null;
   reactions?: { emoji: string; count: number; mine: boolean }[] | null;
   mentions?: WireMention[] | null;
@@ -971,6 +1050,7 @@ export interface WireChatMessage {
   image_width?: number | string | null;
   image_height?: number | string | null;
   shared_post?: WireSharedPost | null;
+  sticker?: WireSticker | null;
   seen_by?: number | string | null;
 }
 
@@ -991,12 +1071,14 @@ export function decodeChatMessage(w: WireChatMessage): ChatMessage {
           authorName: w.reply_to.author_name,
           media: decodeMessageMedia(w.reply_to),
           hasPost: Boolean(w.reply_to.has_post),
+          sticker: decodeSticker(w.reply_to.sticker),
         }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({ emoji: r.emoji, count: r.count, mine: r.mine })),
     mentions: (w.mentions ?? []).map(decodeMention),
     media: decodeMessageMedia(w),
     sharedPost: decodeSharedPost(w.shared_post),
+    sticker: decodeSticker(w.sticker),
     // `count(*)` arrives as a string from PostgREST for bigint, and is
     // absent entirely from a server that has not run migration 0045 — both
     // of which mean "nobody, as far as we can tell" rather than an error.
@@ -1488,6 +1570,8 @@ export interface DmReplyPreview {
   media: MessageMedia | null;
   /** The quoted message shared a pin. A flag, not a card — the card itself is a few bubbles up. */
   hasPost: boolean;
+  /** Non-null when the quoted message was a sticker; such a quote is otherwise blank. */
+  sticker: Sticker | null;
 }
 
 /**
@@ -1567,6 +1651,12 @@ export interface DmMessage {
   /** Null unless a post was shared. `body` may be empty when this is set. */
   sharedPost: SharedPost | null;
   /**
+   * Null for anything but a sticker message. Mutually exclusive with
+   * `media`/`sharedPost`/a non-empty `body` — migration 0053's
+   * `dm_messages_sticker_solo` makes this a database fact.
+   */
+  sticker: Sticker | null;
+  /**
    * Non-null when this is not a message at all but a record of something that
    * happened to the conversation — somebody added, removed, leaving, a rename.
    * `body` is empty on these, and `senderId` is the person who DID it.
@@ -1606,6 +1696,7 @@ export interface WireDmMessage {
         sender_id: string;
         sender_name?: string | null;
         has_post?: boolean | null;
+        sticker?: WireSticker | null;
       } & WireMessageMedia)
     | null;
   reactions?: { emoji: string; count: number | string; mine: boolean }[] | null;
@@ -1614,6 +1705,7 @@ export interface WireDmMessage {
   image_width?: number | string | null;
   image_height?: number | string | null;
   shared_post?: WireSharedPost | null;
+  sticker?: WireSticker | null;
   event_kind?: string | null;
   event_target_id?: string | null;
   event_target_name?: string | null;
@@ -1643,6 +1735,7 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
           senderName: w.reply_to.sender_name ?? '',
           media: decodeMessageMedia(w.reply_to),
           hasPost: Boolean(w.reply_to.has_post),
+          sticker: decodeSticker(w.reply_to.sticker),
         }
       : null,
     reactions: (w.reactions ?? []).map((r) => ({
@@ -1653,6 +1746,7 @@ export function decodeDmMessage(w: WireDmMessage): DmMessage {
     mentions: (w.mentions ?? []).map(decodeMention),
     media: decodeMessageMedia(w),
     sharedPost: decodeSharedPost(w.shared_post),
+    sticker: decodeSticker(w.sticker),
     eventKind: decodeEventKind(w.event_kind),
     eventTargetId: w.event_target_id ?? null,
     eventTargetName: w.event_target_name ?? null,

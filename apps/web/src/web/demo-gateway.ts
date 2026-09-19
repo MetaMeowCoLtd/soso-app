@@ -81,6 +81,8 @@ import type {
   SharedPost,
   SignedBoardTileUrl,
   SosoGateway,
+  Sticker,
+  StickerPack,
 } from "soso-core";
 
 // ---------------------------------------------------------------------------
@@ -802,6 +804,7 @@ interface DemoChatMessage {
   mediaKind?: "image" | "video" | null;
   posterPath?: string | null;
   durationMs?: number | null;
+  stickerId?: string | null;
 }
 
 function loadChatMessages(): DemoChatMessage[] {
@@ -838,6 +841,7 @@ function chatReplyPreview(id: string | null, me: string): ChatReplyPreview | nul
     authorName: target.authorId === me ? "You" : "A neighbour",
     media: demoMessageImage(target),
     hasPost: Boolean(target.sharedPostId),
+    sticker: findDemoSticker(target.stickerId),
   };
 }
 
@@ -1009,6 +1013,83 @@ export async function demoStoreBoardTileBlob(uploadUrl: string, blob: Blob): Pro
     reader.readAsDataURL(blob);
   });
   demoTileBlobs.set(objectKey, dataUrl);
+}
+
+// ---------------------------------------------------------------------------
+// Sticker packs
+// ---------------------------------------------------------------------------
+// In-memory only, unlike the localStorage-backed content elsewhere in this
+// file (CHAT_KEY, POSTS_KEY, ...) — Phase A's job is proving a sticker can
+// be sent and rendered, not giving demo mode a durable pack library. A
+// later pass can persist this the same way if that turns out to matter.
+//
+// The two seed stickers are small solid, semi-transparent PNGs generated
+// once rather than fetched — this file already avoids any network
+// dependency (every `avatarPath` above is null, not a URL), and a fetched
+// image would be the one exception. `path` doubles as the URL in this
+// gateway (see `stickerAssetUrl` below); the real one keeps them distinct
+// because a bucket key is not renderable on its own.
+const DEMO_STICKER_TEAL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAn0lEQVR42u3RMQ0AAAgEsfe/IANn6EAGCelwBq5J1+gwEwAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAAAATAAAQAAACAEAAAAgAAAEAIAAABACAAAAQAAACAEAAAAgAAAEAIAAfWv6B9GaFV4x3AAAAAElFTkSuQmCC";
+const DEMO_STICKER_CORAL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAn0lEQVR42u3RMQ0AAAjAMKyiANfYABkkpMcMrDGVrbvCBAAABACAAAAQAAACAEAAAAgAAAEAIAAABACAAAAQAAACAEAAAAgAAAEAIAAABACAAAAQAAACAEAAAAgAAAEAIAAABACAAAAQAAACAEAAAAgAAAEAAMAEAAAEAIAAABAAAAIAQAAACAAAAQAgAAAEAIAAABAAAAIAQAAACMCHFt5YebCZSqk8AAAAAElFTkSuQmCC";
+
+interface DemoSticker {
+  id: string;
+  path: string;
+  width: number;
+  height: number;
+}
+
+interface DemoStickerPack {
+  id: string;
+  creatorId: string;
+  title: string;
+  kind: "static";
+  status: "draft" | "published";
+  coverPath: string | null;
+  stickers: DemoSticker[];
+}
+
+let demoStickerPacks: DemoStickerPack[] = [
+  {
+    id: "demo-pack-neighbourhood",
+    creatorId: "seed",
+    title: "Neighbourhood Notices",
+    kind: "static",
+    status: "published",
+    coverPath: DEMO_STICKER_TEAL,
+    stickers: [
+      { id: "demo-sticker-teal", path: DEMO_STICKER_TEAL, width: 96, height: 96 },
+      { id: "demo-sticker-coral", path: DEMO_STICKER_CORAL, width: 96, height: 96 },
+    ],
+  },
+];
+
+// Pre-installed for the signed-in demo account, matching how `publish_
+// sticker_pack` auto-installs a pack for its own creator server-side.
+const demoInstalledPackIds = new Set<string>(["demo-pack-neighbourhood"]);
+
+function toStickerPack(pack: DemoStickerPack): StickerPack {
+  return {
+    id: pack.id,
+    creatorId: pack.creatorId,
+    title: pack.title,
+    kind: pack.kind,
+    status: pack.status,
+    coverPath: pack.coverPath,
+    stickers: pack.stickers.map((s) => ({ ...s })),
+  };
+}
+
+/** Every pack is searched, not just installed ones — a reply quoting a sticker should still show it even if the reader later uninstalled that pack. */
+function findDemoSticker(stickerId: string | null | undefined): Sticker | null {
+  if (!stickerId) return null;
+  for (const pack of demoStickerPacks) {
+    const sticker = pack.stickers.find((s) => s.id === stickerId);
+    if (sticker) return { ...sticker };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1761,11 +1842,22 @@ export function createDemoGateway(): SosoGateway {
       // demo mode has nobody else to @mention any more than it has anybody
       // else to talk to, so there is nothing here for a mention to do.
       _mentionedUserIds?: readonly string[],
+      stickerId?: string | null,
     ): Promise<ChatMessage> {
       const trimmed = body.trim();
-      // Empty is allowed with an image or a shared post, matching
-      // send_chat_message's own relaxed check in migrations 0040 and 0044.
-      if (trimmed.length === 0 && !media && !sharedPostId) {
+      // A sticker message is solo — see migration 0053's chat_messages_
+      // sticker_solo — checked here for the same clean-error reason the
+      // real RPC checks it before its own DB constraint would.
+      if (stickerId && (trimmed.length > 0 || media || sharedPostId)) {
+        throw new SosoError("soso/bad_request");
+      }
+      if (stickerId && !findDemoSticker(stickerId)) {
+        throw new SosoError("soso/forbidden");
+      }
+      // Empty is allowed with an image, a shared post, or a sticker,
+      // matching send_chat_message's own relaxed check in migrations 0040,
+      // 0044, and 0053.
+      if (trimmed.length === 0 && !media && !sharedPostId && !stickerId) {
         throw new SosoError("soso/empty_message");
       }
       if (trimmed.length > 500) throw new SosoError("soso/message_too_long");
@@ -1796,6 +1888,7 @@ export function createDemoGateway(): SosoGateway {
         mediaKind: media?.kind ?? null,
         posterPath: media?.posterPath ?? null,
         durationMs: media?.durationMs ?? null,
+        stickerId: stickerId ?? null,
       };
       saveChatMessages([...loadChatMessages(), message]);
 
@@ -1814,6 +1907,7 @@ export function createDemoGateway(): SosoGateway {
         mentions: [],
         media: demoMessageImage(message),
         sharedPost: demoSharedPost(message.sharedPostId),
+        sticker: findDemoSticker(message.stickerId),
         // Nobody has read a message that was sent a millisecond ago.
         seenBy: 0,
       };
@@ -1869,6 +1963,7 @@ export function createDemoGateway(): SosoGateway {
           mentions: [],
           media: demoMessageImage(m),
           sharedPost: demoSharedPost(m.sharedPostId),
+          sticker: findDemoSticker(m.stickerId),
           // Counts readers OTHER than the author, matching the real
           // function's own exclusion: "you have read this" is not news.
           seenBy: Object.entries(reads).filter(
@@ -2100,5 +2195,92 @@ export function createDemoGateway(): SosoGateway {
     subscribeBoardStrokes(): () => void {
       return () => {};
     },
+
+    stickerAssetUrl(path: string): string | null {
+      // `path` doubles as the URL in this gateway — see this file's own
+      // "Sticker packs" section header for why, unlike `avatarUrl`, there
+      // is no separate mirror map to look up.
+      return path || null;
+    },
+
+    async uploadStickerAsset(_packId: string, image: Blob): Promise<string> {
+      return blobToDataUrl(image);
+    },
+
+    async createStickerPack(title: string): Promise<StickerPack> {
+      const trimmed = title.trim();
+      if (trimmed.length === 0 || trimmed.length > 60) throw new SosoError("soso/bad_request");
+      const pack: DemoStickerPack = {
+        id: `demo-pack-${crypto.randomUUID()}`,
+        creatorId: getMe(),
+        title: trimmed,
+        kind: "static",
+        status: "draft",
+        coverPath: null,
+        stickers: [],
+      };
+      demoStickerPacks = [...demoStickerPacks, pack];
+      return toStickerPack(pack);
+    },
+
+    async addStickerToPack(packId: string, path: string, width: number, height: number): Promise<StickerPack> {
+      const pack = demoStickerPacks.find((p) => p.id === packId);
+      if (!pack || pack.status !== "draft") throw new SosoError("soso/forbidden");
+      if (pack.stickers.length >= 40) throw new SosoError("soso/rate_limited");
+      pack.stickers.push({ id: `demo-sticker-${crypto.randomUUID()}`, path, width, height });
+      return toStickerPack(pack);
+    },
+
+    async reorderStickers(packId: string, orderedIds: readonly string[]): Promise<StickerPack> {
+      const pack = demoStickerPacks.find((p) => p.id === packId);
+      if (!pack) throw new SosoError("soso/forbidden");
+      const byId = new Map(pack.stickers.map((s) => [s.id, s]));
+      if (orderedIds.length !== pack.stickers.length) throw new SosoError("soso/bad_request");
+      const reordered = orderedIds.map((id) => byId.get(id)).filter((s): s is DemoSticker => Boolean(s));
+      if (reordered.length !== pack.stickers.length) throw new SosoError("soso/bad_request");
+      pack.stickers = reordered;
+      return toStickerPack(pack);
+    },
+
+    async deleteSticker(stickerId: string): Promise<void> {
+      for (const pack of demoStickerPacks) {
+        if (pack.status !== "draft") continue;
+        pack.stickers = pack.stickers.filter((s) => s.id !== stickerId);
+      }
+    },
+
+    async publishStickerPack(packId: string): Promise<StickerPack> {
+      const pack = demoStickerPacks.find((p) => p.id === packId);
+      if (!pack) throw new SosoError("soso/forbidden");
+      if (pack.status !== "published") {
+        if (pack.stickers.length === 0) throw new SosoError("soso/bad_request");
+        pack.status = "published";
+        pack.coverPath ??= pack.stickers[0]?.path ?? null;
+      }
+      demoInstalledPackIds.add(packId);
+      return toStickerPack(pack);
+    },
+
+    async getStickerPack(packId: string): Promise<StickerPack | null> {
+      const pack = demoStickerPacks.find((p) => p.id === packId);
+      return pack ? toStickerPack(pack) : null;
+    },
+
+    async installStickerPack(packId: string): Promise<void> {
+      if (!demoStickerPacks.some((p) => p.id === packId && p.status === "published")) {
+        throw new SosoError("soso/forbidden");
+      }
+      demoInstalledPackIds.add(packId);
+    },
+
+    async uninstallStickerPack(packId: string): Promise<void> {
+      demoInstalledPackIds.delete(packId);
+    },
+
+    async listMyStickerPacks(): Promise<StickerPack[]> {
+      return demoStickerPacks.filter((p) => demoInstalledPackIds.has(p.id)).map(toStickerPack);
+    },
+
+    async reportStickerPack(): Promise<void> {},
   };
 }

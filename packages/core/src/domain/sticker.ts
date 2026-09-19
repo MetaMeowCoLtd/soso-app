@@ -46,3 +46,19 @@ export function parseStickerPackIdFromUrl(url: string): string | null {
     return null;
   }
 }
+
+/**
+ * The 'sticker-assets' object key shape, matching migration 0053's
+ * `soso.owns_sticker_asset` exactly (`<creator_id>/<pack_id>/<token>.<ext>`)
+ * — one segment more than `avatarObjectPath`'s `<user_id>/<token>.<ext>`,
+ * because a sticker's ownership check has to say "this pack belongs to
+ * this creator" too, not just "this folder belongs to this uploader."
+ */
+export function stickerAssetObjectPath(userId: string, packId: string, token: string, extension: string): string {
+  return `${userId}/${packId}/${token}.${extension}`;
+}
+
+/** The bucket only accepts these two — see the migration's `allowed_mime_types`. Anything else is treated as the webp default rather than rejected here; the bucket itself is the real gate. */
+export function stickerAssetExtensionFor(mimeType: string): string {
+  return mimeType === 'image/png' ? 'png' : 'webp';
+}

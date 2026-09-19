@@ -16,3 +16,4 @@ export * from './connections';
 export * from './message-image';
 export * from './share';
 export * from './message-video';
+export * from './sticker';
