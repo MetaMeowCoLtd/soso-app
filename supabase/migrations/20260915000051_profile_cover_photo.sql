@@ -84,8 +84,7 @@ as $$
     'name',    p.display_name,
     'bio',     p.bio,
     'avatar',  p.avatar_path,
-    'cover',   p.cover_path,
-    'coins',   p.coin_balance
+    'cover',   p.cover_path
   )
   from public.profiles p
   where p.id = auth.uid();
@@ -172,8 +171,7 @@ begin
       'name',   p.display_name,
       'bio',    p.bio,
       'avatar', p.avatar_path,
-      'cover',  p.cover_path,
-      'coins',  p.coin_balance
+      'cover',  p.cover_path
     )
     from public.profiles p
     where p.id = v_uid

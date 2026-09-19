@@ -652,7 +652,11 @@ alter table public.chat_messages
 alter table public.dm_messages
   drop constraint dm_messages_not_empty,
   add constraint dm_messages_not_empty check (
-    length(trim(body)) > 0 or image_path is not null or shared_post_id is not null or sticker_id is not null
+    event_kind is not null
+    or length(trim(body)) > 0
+    or image_path is not null
+    or shared_post_id is not null
+    or sticker_id is not null
   ),
   add constraint dm_messages_sticker_solo check (
     sticker_id is null or (trim(body) = '' and image_path is null and shared_post_id is null)
