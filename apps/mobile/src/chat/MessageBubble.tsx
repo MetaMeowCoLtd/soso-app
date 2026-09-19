@@ -65,6 +65,7 @@ export function MessageBubble({
   const avatarSrc = gateway.avatarUrl(row.authorAvatarPath);
   const { gesture, bubbleStyle, indicatorStyle } = useMessageGestures({ onLongPress: onOpenMenu, onSwipeReply });
   const mine = row.mine;
+  const imageOnly = !!row.media && !row.body;
 
   return (
     <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, endsRun && styles.rowEndsRun, flash && styles.flash]}>
@@ -93,9 +94,9 @@ export function MessageBubble({
             <Animated.View style={[styles.bubbleWrap, bubbleStyle]}>
               <View
                 style={[
-                  styles.bubble,
-                  mine ? styles.bubbleMine : styles.bubbleTheirs,
-                  endsRun && (mine ? styles.bubbleMineEnd : styles.bubbleTheirsEnd),
+                  !imageOnly && styles.bubble,
+                  !imageOnly && (mine ? styles.bubbleMine : styles.bubbleTheirs),
+                  !imageOnly && endsRun && (mine ? styles.bubbleMineEnd : styles.bubbleTheirsEnd),
                 ]}
               >
                 {row.replyTo && (
